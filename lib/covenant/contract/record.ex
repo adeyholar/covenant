@@ -13,6 +13,13 @@ defmodule Covenant.Contract.Condition do
   | `file`   | `path`                     | the path exists (relative to the project root)    |
   | `otp`    | `version`                  | the running OTP release matches the requirement   |
   | `elixir` | `version`                  | the running Elixir version matches the requirement|
+  | `value`  | `call`, `equals`, optional `path` | `call` (`"Module.fun/0"`, arity 0 only) returns `equals`, at `path` when given |
+
+  A `value` check runs in the running project's VM: `call` is evaluated, `path` (a list
+  of keys, the atom form tried before the string form) walks into the result, and the
+  value found must equal `equals` (atoms compare as their string, numbers by value). A
+  module that is not compiled in this VM leaves the condition unchecked; a call that
+  raises, a missing key or a different value is suspect.
   """
 
   @type t :: %__MODULE__{text: String.t(), check: map() | nil}

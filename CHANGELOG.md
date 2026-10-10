@@ -2,6 +2,24 @@
 
 ## Unreleased (2026-10-10)
 
+- Condition kind `value`: `check: {kind: value, call: "Module.fun/0", path: [key], equals: v}`
+  calls a function of the running project and compares what it returns (at `path`) with the
+  record, so the record that decides a value verifies it. Atoms compare as strings, lists
+  element by element, numbers by value. A different value, a missing key or a raising call
+  is suspect; a module that is not compiled in the VM is `{:unchecked, reason}`, counted by
+  `mix covenant.conditions` (`--verbose` says why), never a failure. Any `call` that is not
+  `Module.fun/0` is an incomplete check. Obligation `covenant.conditions.I6`.
+- `Covenant.Conditions.outcome` has a fourth shape, `{:unchecked, reason}`; the bare
+  `:unchecked` stays for a condition without a `check`.
+- `otp`, `elixir` and `dep` requirements: a comparison may leave out the minor and patch
+  numbers (`>= 28.0` is `>= 28.0.0`; `~>` is left as written), a four-number OTP version
+  (`27.3.4.1`) is compared as `27.3.4`, and a version that is not numeric is a suspect
+  "cannot be compared" instead of an exception. Records that wrote `>= 28.0` were reported
+  suspect without the premise ever being evaluated.
+- A `kind: module` scope ceiling whose counter raises, throws or exits is unchecked:
+  `Covenant.Contract.Ceiling.count/2` returns `{:unchecked, reason}` and `Check.run/3`
+  adds a `scope ceiling ... unchecked` entry to `Report.warnings` instead of crashing
+  before `coverage.json` is written.
 - `mix covenant.check --static` checks a Contract without compiling or
   running its tests (`Covenant.Static`); static coverage goes to
   `contracts/coverage.static.json`.

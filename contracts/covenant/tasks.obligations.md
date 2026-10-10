@@ -10,7 +10,7 @@ step can rely on: what they print and their exit status.
 
 ### covenant.tasks.I1 — covenant.check runs the suite and reports
 - **scope:** `mix covenant.check`
-- **must:** run the configured contract test paths as a `mix test` subprocess with `Covenant.Formatter`, print the coverage table and a warning for the components that declare no modules (`covenant.check: warning: N component(s) declare no modules: ...`, covenant.check.I11), write `<contracts dir>/coverage.json`, and exit 0 when the Contract holds
+- **must:** run the configured contract test paths as a `mix test` subprocess with `Covenant.Formatter`, print the coverage table and a warning for the components that declare no modules (`covenant.check: warning: N component(s) declare no modules: ...`, covenant.check.I11), write `<contracts dir>/coverage.json`, and exit 0 when the Contract holds; a `module` ceiling whose counter raises is a `covenant.check: warning: scope ceiling ... unchecked` line, not a failure, and does not stop `coverage.json` being written
 - **kind:** functional
 - **record:** suite-runs-as-subprocess
 - **status:** active
@@ -29,7 +29,7 @@ step can rely on: what they print and their exit status.
 
 ### covenant.tasks.I4 — covenant.conditions lists suspects and exits accordingly
 - **scope:** `mix covenant.conditions`
-- **must:** exit 0 when every machine-checkable premise holds, printing the counts (and every outcome with `--verbose`); exit 1 naming each suspect record at its line with the failing premise and reason
+- **must:** exit 0 when every machine-checkable premise holds, printing the counts (and every outcome with `--verbose`); exit 1 naming each suspect record at its line with the failing premise and reason. A condition that cannot be checked in this VM (a `value` check whose module is not compiled) is not counted as checked, does not fail the run, is counted on a `N condition(s) not checked in this VM` line and is listed with its reason by `--verbose`; a `value` check sees the modules of the project the task runs in
 - **kind:** functional
 - **status:** active
 

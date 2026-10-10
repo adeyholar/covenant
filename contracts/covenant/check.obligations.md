@@ -35,7 +35,7 @@ Contract and a test run it returns every problem and the coverage table.
 
 ### covenant.check.I5 — Scope ceilings are counted and enforced
 - **scope:** `Covenant.Check.run/3`, `Covenant.Contract.Ceiling.count/2`
-- **must:** count a `glob` ceiling as the files matching its pattern under the root and a `module` ceiling by calling `module.function/0`; report a count above the ceiling and a counter that cannot be called; a count at the ceiling passes
+- **must:** count a `glob` ceiling as the files matching its pattern under the root and a `module` ceiling by calling `module.function/0`; report a count above the ceiling and a counter that cannot be called (module not loaded, function not exported, a return that is not a non-negative integer); a count at the ceiling passes. A `module` counter that raises, throws or exits leaves its ceiling unchecked: a `scope ceiling `<name>` unchecked: <exception module>` warning in `Report.warnings`, never a problem, and the check still completes and writes `coverage.json`
 - **kind:** functional
 - **status:** active
 

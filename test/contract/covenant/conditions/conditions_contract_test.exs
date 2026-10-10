@@ -106,9 +106,79 @@ defmodule Covenant.ConditionsContractTest do
              Conditions.evaluate(premise(%{"kind" => "elixir", "version" => "~> 1.20"}), ctx)
   end
 
+  @tag obligation: "covenant.conditions.I1"
+  test "a requirement may leave out the minor and patch numbers after a comparison operator", %{
+    ctx: ctx
+  } do
+    otp = fn req, version ->
+      Conditions.evaluate(premise(%{"kind" => "otp", "version" => req}), %{
+        ctx
+        | otp_version: version
+      })
+    end
+
+    assert {:ok, "OTP 28.5 matches `>= 28.0`"} = otp.(">= 28.0", "28.5")
+    assert {:ok, "OTP 28 matches `>= 28`"} = otp.(">= 28", "28")
+    assert {:ok, _} = otp.(">=28.0", "28.5")
+    assert {:ok, _} = otp.(">= 28.5", "28.5")
+    assert {:suspect, "OTP is 28.5, which does not match `>= 28.6`"} = otp.(">= 28.6", "28.5")
+    assert {:suspect, "OTP is 28.5, which does not match `> 28.5`"} = otp.("> 28.5", "28.5")
+    assert {:ok, _} = otp.("> 28.4", "28.5")
+    assert {:ok, _} = otp.("<= 28.5", "28.5")
+    assert {:suspect, _} = otp.("< 28.5", "28.5")
+    assert {:ok, _} = otp.("== 28.5", "28.5")
+    assert {:ok, _} = otp.(">= 28.0 and < 29", "28.5")
+    assert {:suspect, _} = otp.(">= 28.0 and < 28.5", "28.5")
+    assert {:ok, _} = otp.("< 28 or >= 28.5", "28.5")
+
+    # complete versions are left as they are, a pre-release stays a pre-release
+    assert {:ok, _} = otp.(">= 28.0.0", "28.5")
+    assert {:suspect, _} = otp.(">= 28.0.1", "28.0.0")
+    assert {:ok, _} = otp.(">= 1.0.0-rc.1", "1.0.0")
+    assert {:ok, _} = otp.("== 1.0.0-rc.1", "1.0.0-rc.1")
+
+    # `~>` keeps the parts it was written with: `~> 28.0` is below 29, `~> 28.0.0` is below 28.1
+    assert {:ok, _} = otp.("~> 28.0", "28.5")
+    assert {:suspect, _} = otp.("~> 28.0.0", "28.5")
+
+    # a fourth number (OTP patch releases) is dropped, short versions are padded
+    assert {:ok, "OTP 27.3.4.1 matches `>= 27.3`"} = otp.(">= 27.3", "27.3.4.1")
+    assert {:suspect, _} = otp.(">= 27.4", "27.3.4.1")
+    assert {:ok, _} = otp.(">= 27.3.4", "27.3.4.1")
+    assert {:suspect, _} = otp.(">= 27.3.5", "27.3.4.1")
+    assert {:ok, _} = otp.(">= 28.0.1", "28.0.1")
+    assert {:suspect, _} = otp.(">= 28.0.2", "28.0.1")
+    assert {:ok, _} = otp.(">= 28.0.0", "28")
+    assert {:suspect, _} = otp.(">= 28.0.1", "28")
+  end
+
+  @tag obligation: "covenant.conditions.I2"
+  test "a requirement that cannot be parsed and a version that cannot be compared are suspect", %{
+    ctx: ctx
+  } do
+    otp = fn req, version ->
+      Conditions.evaluate(premise(%{"kind" => "otp", "version" => req}), %{
+        ctx
+        | otp_version: version
+      })
+    end
+
+    for req <- ["banana", ">=", ">= x", "~> 28", "28.0", "", ">= 28.0 &&"] do
+      assert {:suspect, "`" <> _ = reason} = otp.(req, "28.5"), "requirement #{inspect(req)}"
+      assert reason == "`#{req}` is not a valid version requirement"
+    end
+
+    assert {:suspect, "OTP version `28.0-rc2` cannot be compared with `>= 28.0`"} =
+             otp.(">= 28.0", "28.0-rc2")
+
+    assert {:suspect, "OTP version `x` cannot be compared with `>= 28.0`"} =
+             otp.(">= 28.0", "x")
+  end
+
   @tag obligation: "covenant.conditions.I2"
   test "unknown or incomplete checks are suspect, never silently ok", %{ctx: ctx} do
-    assert {:suspect, "unknown check kind `weather` (expected dep, env, file, otp or elixir)"} =
+    assert {:suspect,
+            "unknown check kind `weather` (expected dep, env, file, otp, elixir or value)"} =
              Conditions.evaluate(premise(%{"kind" => "weather"}), ctx)
 
     assert {:suspect, "check `env` is incomplete: " <> _} =
@@ -126,13 +196,187 @@ defmodule Covenant.ConditionsContractTest do
           {"env", "name"},
           {"file", "path"},
           {"otp", "version"},
-          {"elixir", "version"}
+          {"elixir", "version"},
+          {"value", "call"}
         ] do
       check = foreign |> Map.delete(own) |> Map.put("kind", kind)
 
       assert {:suspect, reason} = Conditions.evaluate(premise(check), ctx)
       assert String.starts_with?(reason, "check `#{kind}` is incomplete: "), reason
     end
+  end
+
+  @limits "Covenant.ExampleLimits.limits/0"
+
+  defp value(call, equals, path \\ nil) do
+    check = %{"kind" => "value", "call" => call, "equals" => equals}
+    premise(if path, do: Map.put(check, "path", path), else: check)
+  end
+
+  @tag obligation: "covenant.conditions.I6"
+  test "value: a value that equals the record holds, and the outcome says what was found", %{
+    ctx: ctx
+  } do
+    assert {:ok, "Covenant.ExampleLimits.limits/0 [claim_batch] is 20"} =
+             Conditions.evaluate(value(@limits, 20, ["claim_batch"]), ctx)
+
+    assert {:ok, "Covenant.ExampleLimits.answer/0 is 42"} =
+             Conditions.evaluate(value("Covenant.ExampleLimits.answer/0", 42), ctx)
+
+    assert {:ok, _} = Conditions.evaluate(value("Covenant.ExampleLimits.ready?/0", true), ctx)
+
+    # YAML says `chat` where the code returns :chat; a list compares element by element,
+    # nil and booleans are themselves, and a number compares by value
+    for {path, equals} <- [
+          {["mode"], "fast"},
+          {["backoff_s"], [60, 300]},
+          {["enabled"], true},
+          {["disabled"], false},
+          {["nothing"], nil},
+          {["ratio"], 0.5},
+          {["claim_batch"], 20.0},
+          {["name"], "wake"}
+        ] do
+      assert {:ok, _} = Conditions.evaluate(value(@limits, equals, path), ctx),
+             "path #{inspect(path)} equals #{inspect(equals)}"
+    end
+
+    assert {:ok, "Covenant.ExampleLimits.limits/0 [nested, deep, depth] is 3"} =
+             Conditions.evaluate(value(@limits, 3, ["nested", "deep", "depth"]), ctx)
+
+    # path keys: atoms work too, the atom key is tried before the string key, a string key is found
+    assert {:ok, _} = Conditions.evaluate(value(@limits, 20, [:claim_batch]), ctx)
+    assert {:ok, _} = Conditions.evaluate(value(@limits, 1, [:dup]), ctx)
+    assert {:ok, _} = Conditions.evaluate(value(@limits, 1, ["dup"]), ctx)
+    assert {:suspect, _} = Conditions.evaluate(value(@limits, 2, ["dup"]), ctx)
+    assert {:ok, _} = Conditions.evaluate(value(@limits, 7, ["stringy"]), ctx)
+    assert {:ok, _} = Conditions.evaluate(value(@limits, 7, [:stringy]), ctx)
+
+    # an empty path is no path
+    assert {:ok, "Covenant.ExampleLimits.answer/0 is 42"} =
+             Conditions.evaluate(value("Covenant.ExampleLimits.answer/0", 42, []), ctx)
+  end
+
+  @tag obligation: "covenant.conditions.I6"
+  test "value: a different value, a missing key or a non-map is suspect, naming what was found",
+       %{ctx: ctx} do
+    assert {:suspect, "Covenant.ExampleLimits.limits/0 [claim_batch] is 20, the record says 21"} =
+             Conditions.evaluate(value(@limits, 21, ["claim_batch"]), ctx)
+
+    assert {:suspect, "Covenant.ExampleLimits.answer/0 is 42, the record says 43"} =
+             Conditions.evaluate(value("Covenant.ExampleLimits.answer/0", 43), ctx)
+
+    assert {:suspect,
+            "Covenant.ExampleLimits.limits/0 [backoff_s] is [60, 300], the record says [60, 301]"} =
+             Conditions.evaluate(value(@limits, [60, 301], ["backoff_s"]), ctx)
+
+    assert {:suspect,
+            "Covenant.ExampleLimits.limits/0 [nested, deep, depth] is 3, the record says 4"} =
+             Conditions.evaluate(value(@limits, 4, ["nested", "deep", "depth"]), ctx)
+
+    assert {:suspect, "Covenant.ExampleLimits.limits/0 [mode] is :fast, the record says \"slow\""} =
+             Conditions.evaluate(value(@limits, "slow", ["mode"]), ctx)
+
+    # a boolean is not its string, a number is not its string, and the list order matters
+    for {path, equals} <- [
+          {["enabled"], "true"},
+          {["enabled"], false},
+          {["enabled"], nil},
+          {["disabled"], true},
+          {["disabled"], nil},
+          {["nothing"], false},
+          {["nothing"], "nil"},
+          {["claim_batch"], "20"},
+          {["backoff_s"], [300, 60]}
+        ] do
+      assert {:suspect, _} = Conditions.evaluate(value(@limits, equals, path), ctx),
+             "path #{inspect(path)} equals #{inspect(equals)}"
+    end
+
+    assert {:suspect, "Covenant.ExampleLimits.limits/0 [nope] has no key `nope`"} =
+             Conditions.evaluate(value(@limits, 1, ["nope"]), ctx)
+
+    assert {:suspect, "Covenant.ExampleLimits.limits/0 [nested, nope, depth] has no key `nope`"} =
+             Conditions.evaluate(value(@limits, 1, ["nested", "nope", "depth"]), ctx)
+
+    # the path walks into a number: nothing to find there
+    assert {:suspect, "Covenant.ExampleLimits.limits/0 [claim_batch, x] has no key `x`"} =
+             Conditions.evaluate(value(@limits, 1, ["claim_batch", "x"]), ctx)
+
+    # a result that is not a map has no key either
+    assert {:suspect, "Covenant.ExampleLimits.answer/0 [x] has no key `x`"} =
+             Conditions.evaluate(value("Covenant.ExampleLimits.answer/0", 1, ["x"]), ctx)
+  end
+
+  @tag obligation: "covenant.conditions.I6"
+  test "value: a call that raises, throws or does not exist is suspect with what happened", %{
+    ctx: ctx
+  } do
+    assert {:suspect, "Covenant.ExampleLimits.boom/0 raised ArgumentError: no limits today"} =
+             Conditions.evaluate(value("Covenant.ExampleLimits.boom/0", 1), ctx)
+
+    assert {:suspect, "Covenant.ExampleLimits.thrower/0 raised throw :nope"} =
+             Conditions.evaluate(value("Covenant.ExampleLimits.thrower/0", 1), ctx)
+
+    assert {:suspect, "Covenant.ExampleLimits.gone/0 raised UndefinedFunctionError: " <> _} =
+             Conditions.evaluate(value("Covenant.ExampleLimits.gone/0", 1), ctx)
+  end
+
+  @tag obligation: "covenant.conditions.I6"
+  test "value: a module that is not compiled in this VM is unchecked with a reason, not suspect",
+       %{ctx: ctx} do
+    assert {:unchecked, "module not compiled in this VM: Covenant.NoSuchLimits.Deeper"} =
+             Conditions.evaluate(value("Covenant.NoSuchLimits.Deeper.limits/0", 20, ["x"]), ctx)
+
+    # a check that is also incomplete is incomplete first: nothing is silently unchecked
+    assert {:suspect, "check `value` is incomplete: " <> _} =
+             Conditions.evaluate(value("Covenant.NoSuchLimits.limits/1", 20), ctx)
+  end
+
+  @tag obligation: "covenant.conditions.I2"
+  test "value: only Module.fun/0 with equals and a path of keys is a complete check", %{ctx: ctx} do
+    for call <- [
+          "Covenant.ExampleLimits.limits/1",
+          "Covenant.ExampleLimits.limits/00",
+          "Covenant.ExampleLimits.limits/",
+          "Covenant.ExampleLimits.limits",
+          "Covenant.ExampleLimits/0",
+          "covenant.limits/0",
+          "limits/0",
+          "Covenant.ExampleLimits.Limits/0",
+          "Covenant.ExampleLimits.limits/0 now",
+          "now Covenant.ExampleLimits.limits/0",
+          "Covenant.ExampleLimits.limits/0\n",
+          "",
+          123,
+          nil
+        ] do
+      assert {:suspect, "check `value` is incomplete: " <> _} =
+               Conditions.evaluate(value(call, 20, ["claim_batch"]), ctx),
+             "call #{inspect(call)}"
+    end
+
+    for path <- ["claim_batch", 1, [1], [["claim_batch"]], [%{}], %{"a" => 1}] do
+      assert {:suspect, "check `value` is incomplete: " <> _} =
+               Conditions.evaluate(value(@limits, 20, path), ctx),
+             "path #{inspect(path)}"
+    end
+
+    no_equals = %{"kind" => "value", "call" => @limits, "path" => ["claim_batch"]}
+
+    assert {:suspect, "check `value` is incomplete: " <> _} =
+             Conditions.evaluate(premise(no_equals), ctx)
+
+    # the other kinds' fields never rescue a value check
+    foreign = %{
+      "kind" => "value",
+      "name" => "DATABASE_URL",
+      "path" => ["claim_batch"],
+      "version" => "1"
+    }
+
+    assert {:suspect, "check `value` is incomplete: " <> _} =
+             Conditions.evaluate(premise(foreign), ctx)
   end
 
   @tag obligation: "covenant.conditions.I3"

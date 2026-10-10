@@ -47,4 +47,23 @@ defmodule Covenant.CeilingContractTest do
     assert {:error, "counter Example.Scope.not_a_count/0 returned :nope"} =
              Ceiling.count(bad_return, [])
   end
+
+  @tag obligation: "covenant.check.I5"
+  test "a module counter that raises, throws or exits is unchecked, naming what happened" do
+    ceiling = %Ceiling{
+      name: "x",
+      ceiling: 1,
+      counter: {:module, Example.Scope, :unimplemented},
+      file: @path,
+      line: 1
+    }
+
+    assert Ceiling.count(ceiling, []) == {:unchecked, "ArgumentError"}
+
+    assert Ceiling.count(%Ceiling{ceiling | counter: {:module, Example.Scope, :thrower}}, []) ==
+             {:unchecked, "throw :stub"}
+
+    assert Ceiling.count(%Ceiling{ceiling | counter: {:module, Example.Scope, :exiter}}, []) ==
+             {:unchecked, "exit :stub"}
+  end
 end

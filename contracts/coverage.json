@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 73,
+      "active": 74,
       "coverage": 1.0,
-      "covered": 73
+      "covered": 74
     },
     "system": {
       "active": 0,
@@ -160,10 +160,12 @@
         "covenant.check.I5": {
           "failing": 0,
           "kind": "functional",
-          "passing": 3,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a module counter that raises leaves its ceiling unchecked, a warning and never a problem",
+            "test a module counter that raises, throws or exits is unchecked, naming what happened",
             "test a scope ceiling exceeded fails, one at the limit passes, an uncountable one fails",
             "test calls a module counter and reports an unusable one",
             "test counts files matching a glob under the root"
@@ -217,19 +219,20 @@
       }
     },
     "covenant.conditions": {
-      "active": 5,
+      "active": 6,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 5,
+      "covered": 6,
       "form": "light",
       "obligations": {
         "covenant.conditions.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 4,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a requirement may leave out the minor and patch numbers after a comparison operator",
             "test dep: present, present with a matching or failing requirement, missing, unversioned",
             "test env: set or not",
             "test file: exists or not, relative to the root",
@@ -239,12 +242,14 @@
         "covenant.conditions.I2": {
           "failing": 0,
           "kind": "functional",
-          "passing": 2,
+          "passing": 4,
           "status": "active",
           "testable": true,
           "tests": [
             "test a condition without a check is unchecked",
-            "test unknown or incomplete checks are suspect, never silently ok"
+            "test a requirement that cannot be parsed and a version that cannot be compared are suspect",
+            "test unknown or incomplete checks are suspect, never silently ok",
+            "test value: only Module.fun/0 with equals and a path of keys is a complete check"
           ]
         },
         "covenant.conditions.I3": {
@@ -276,6 +281,19 @@
           "testable": true,
           "tests": [
             "test context/1 reads the running system and the project's lock"
+          ]
+        },
+        "covenant.conditions.I6": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test value: a call that raises, throws or does not exist is suspect with what happened",
+            "test value: a different value, a missing key or a non-map is suspect, naming what was found",
+            "test value: a module that is not compiled in this VM is unchecked with a reason, not suspect",
+            "test value: a value that equals the record holds, and the outcome says what was found"
           ]
         }
       }
@@ -884,11 +902,12 @@
         "covenant.tasks.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 1,
+          "passing": 2,
           "status": "active",
           "testable": true,
           "tests": [
-            "test mix covenant.check runs the contract suite, prints coverage, writes coverage.json and exits 0"
+            "test mix covenant.check runs the contract suite, prints coverage, writes coverage.json and exits 0",
+            "test mix covenant.check warns about a ceiling whose counter raises, writes coverage.json and exits 0"
           ]
         },
         "covenant.tasks.I2": {
@@ -914,12 +933,13 @@
         "covenant.tasks.I4": {
           "failing": 0,
           "kind": "functional",
-          "passing": 2,
+          "passing": 3,
           "status": "active",
           "testable": true,
           "tests": [
             "test mix covenant.conditions fails on a suspect record",
-            "test mix covenant.conditions passes on the fixture and lists the checked premises"
+            "test mix covenant.conditions passes on the fixture and lists the checked premises",
+            "test mix covenant.conditions runs a value check in the project's VM and leaves a missing module unchecked"
           ]
         },
         "covenant.tasks.I5": {
@@ -992,8 +1012,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 73,
+    "active": 74,
     "coverage": 1.0,
-    "covered": 73
+    "covered": 74
   }
 }

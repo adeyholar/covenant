@@ -16,7 +16,8 @@ defmodule Covenant.Check do
 
   `Report.warnings` holds what is worth saying but never fails the check: the components that
   declare no modules (no `#### Modules` paragraph in the Public surface and no `modules:` front
-  matter), whose pack `mix covenant.regen` can only guess the ownership of.
+  matter), whose pack `mix covenant.regen` can only guess the ownership of, and the `module`
+  ceilings whose counter raised, which are left unchecked.
 
   With `mode: :static` (`mix covenant.check --static`, where the code under
   test is not compiled) the checks that need compiled code are skipped and
@@ -69,7 +70,7 @@ defmodule Covenant.Check do
     by_obligation = Results.by_obligation(results)
 
     {exceptions, skipped_exceptions} = stale_exceptions(contract, root, static?)
-    {ceilings, skipped_ceilings} = ceilings(contract, root, static?)
+    {ceilings, skipped_ceilings, unchecked_ceilings} = ceilings(contract, root, static?)
 
     problems =
       Validate.dangling(contract) ++
@@ -86,7 +87,7 @@ defmodule Covenant.Check do
       problems: Error.sort(problems),
       coverage: coverage,
       skipped: Enum.sort(skipped_exceptions ++ skipped_ceilings),
-      warnings: undeclared_modules(contract)
+      warnings: undeclared_modules(contract) ++ unchecked_ceilings
     }
   end
 
@@ -175,31 +176,41 @@ defmodule Covenant.Check do
     {skipped, counted} =
       Enum.split_with(contract.ceilings, &(static? and match?({:module, _, _}, &1.counter)))
 
-    problems = Enum.flat_map(counted, &ceiling(&1, root))
-    {problems, Enum.map(skipped, &{:ceiling, &1.name})}
+    results = Enum.flat_map(counted, &ceiling(&1, root))
+
+    {for({:problem, p} <- results, do: p), Enum.map(skipped, &{:ceiling, &1.name}),
+     for({:unchecked, w} <- results, do: w)}
   end
 
   defp ceiling(%Ceiling{} = ceiling, root) do
     case Ceiling.count(ceiling, root: root) do
       {:ok, count} when count > ceiling.ceiling ->
         [
-          Error.new(
-            ceiling.file,
-            ceiling.line,
-            "scope ceiling `#{ceiling.name}` exceeded: #{count} > #{ceiling.ceiling} (#{Ceiling.describe(ceiling)})"
-          )
+          {:problem,
+           Error.new(
+             ceiling.file,
+             ceiling.line,
+             "scope ceiling `#{ceiling.name}` exceeded: #{count} > #{ceiling.ceiling} (#{Ceiling.describe(ceiling)})"
+           )}
         ]
 
       {:ok, _} ->
         []
 
+      {:unchecked, what} ->
+        [
+          {:unchecked,
+           "scope ceiling `#{ceiling.name}` unchecked: #{Ceiling.describe(ceiling)} raised #{what}"}
+        ]
+
       {:error, reason} ->
         [
-          Error.new(
-            ceiling.file,
-            ceiling.line,
-            "scope ceiling `#{ceiling.name}` cannot be counted: #{reason}"
-          )
+          {:problem,
+           Error.new(
+             ceiling.file,
+             ceiling.line,
+             "scope ceiling `#{ceiling.name}` cannot be counted: #{reason}"
+           )}
         ]
     end
   end

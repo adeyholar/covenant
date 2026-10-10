@@ -12,6 +12,11 @@ defmodule Mix.Tasks.Covenant.Conditions do
   Exits with status 1 when any record is suspect, so a scheduled job or a CI
   step can flag records to re-examine. See `Covenant.Contract.Condition` for
   the check kinds.
+
+  A `value` check calls a function of the running project, so the project is
+  compiled and its modules loaded first. A module that is not compiled in this
+  VM leaves its condition unchecked (a count is printed, `--verbose` says why);
+  it never fails the run.
   """
 
   use Mix.Task
@@ -36,7 +41,13 @@ defmodule Mix.Tasks.Covenant.Conditions do
     all = Conditions.check_all(contract, ctx)
 
     checked =
-      for {_, outcomes} <- all, {_, outcome} <- outcomes, outcome != :unchecked, do: outcome
+      for {_, outcomes} <- all,
+          {_, outcome} <- outcomes,
+          match?({status, _} when status in [:ok, :suspect], outcome),
+          do: outcome
+
+    not_checkable_here =
+      for {_, outcomes} <- all, {_, {:unchecked, _}} = outcome <- outcomes, do: outcome
 
     suspects =
       Enum.filter(all, fn {_, outcomes} ->
@@ -50,6 +61,9 @@ defmodule Mix.Tasks.Covenant.Conditions do
         Enum.each(outcomes, fn
           {condition, :unchecked} ->
             Mix.shell().info("  - #{condition.text} (not machine-checkable)")
+
+          {condition, {:unchecked, reason}} ->
+            Mix.shell().info("  - #{condition.text} (not checked: #{reason})")
 
           {condition, {:ok, detail}} ->
             Mix.shell().info("  ok #{condition.text} — #{detail}")
@@ -74,6 +88,13 @@ defmodule Mix.Tasks.Covenant.Conditions do
       "covenant.conditions: #{map_size(contract.records)} record(s), " <>
         "#{length(checked)} machine-checkable condition(s), #{length(suspects)} suspect record(s)"
     )
+
+    if not_checkable_here != [] do
+      Mix.shell().info(
+        "covenant.conditions: #{length(not_checkable_here)} condition(s) not checked in this VM " <>
+          "(--verbose says why)"
+      )
+    end
 
     if suspects != [] do
       exit({:shutdown, 1})

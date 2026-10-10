@@ -93,6 +93,38 @@ the build fails when its target no longer exists.
 | `file`   | `path`                     | the path exists                              |
 | `otp`    | `version`                  | the running OTP release matches              |
 | `elixir` | `version`                  | the running Elixir version matches           |
+| `value`  | `call`, `equals`, optional `path` | the function returns the value the record says (below) |
+
+A version requirement may leave out the minor or patch number after a comparison
+operator: `>= 28.0` reads as `>= 28.0.0`. `~>` keeps the parts it was written with, so
+`~> 28.0` still means below 29. The running version is compared as three numbers
+(`28` and `28.5` are padded with zeros, the fourth number of `27.3.4.1` is dropped). A
+requirement that does not parse is suspect, never skipped.
+
+### `value` checks
+
+The record that decides a value can verify it:
+
+```yaml
+conditions:
+  - text: The claim batch is 20
+    check: { kind: value, call: "Agora.Wake.limits/0", path: [claim_batch], equals: 20 }
+  - text: A failed turn is retried after 60 s, then 300 s
+    check: { kind: value, call: "Agora.Wake.limits/0", path: [backoff_s], equals: [60, 300] }
+```
+
+`call` is `Module.fun/0` (arity 0 only; any other shape is an incomplete check). It is
+called in the running project's VM, so `mix covenant.conditions` compiles the project first.
+`path` is an optional list of keys walked through maps; for each key the atom form is tried,
+then the string form. `equals` is a YAML scalar or list, compared after normalising: atoms
+compare as their string (`mode: fast` matches `:fast`), lists element by element, numbers by
+value (`20` equals `20.0`); a boolean and `null` only equal themselves.
+
+| Outcome | When |
+|---|---|
+| holds | the value equals `equals` |
+| suspect | the value differs (`Agora.Wake.limits/0 [claim_batch] is 21, the record says 20`), a key is missing, or the call raises, throws or exits |
+| unchecked | the module is not compiled in this VM (`module not compiled in this VM: Agora.Wake`); counted and listed by `--verbose`, never a failure |
 
 ### Scope ceilings (`system/scope.yml`)
 
@@ -108,7 +140,10 @@ the build fails when its target no longer exists.
 ```
 
 A `glob` counter counts matching files; a `module` counter calls
-`module.function/0`. A count above the ceiling fails `mix covenant.check`.
+`module.function/0`. A count above the ceiling fails `mix covenant.check`. A module
+counter that raises (a stub not implemented yet) leaves its ceiling unchecked: the check
+warns (`scope ceiling `name` unchecked: Mod.fun/0 raised Mod.NotImplemented`), still
+completes and writes `contracts/coverage.json`.
 
 ## Contract tests
 
@@ -152,7 +187,7 @@ ExUnit.start(formatters: [ExUnit.CLIFormatter, Covenant.Formatter])
 |---|---|
 | `mix covenant.check` | Parses the Contract, runs `test/contract` with the formatter, fails on malformed blocks, dangling `record`/`invariant`/`superseded_by`/`depends_on` references, an active obligation without a tagged test, a tag naming an unknown obligation, a failing tagged test, a stale exception, or a scope ceiling exceeded; prints coverage per component and per app; writes `contracts/coverage.json`. `--no-run` reuses the last results; `--contracts DIR`, `--test-path PATH` (repeatable), `--results-dir DIR`. Exit 1 on any problem. Warns, without failing, about the components that declare no modules (see [Declaring modules](#declaring-modules)). |
 | `mix covenant.check --static` | Compiles and runs no test: parses the contract test files (`Code.string_to_quoted/2`), reads every `use Covenant.Case` module's `@tag`/`@describetag`/`@moduletag obligation:` values (strings and lists, merged as ExUnit merges them) and runs every check that needs no compiled code, plus `Covenant.Case`'s compile-time rules. Module/function exception targets and `module` ceiling counters are listed as skipped; file targets and `glob` counters are checked against `--root` (default `Covenant.root/0`). Writes `contracts/coverage.static.json` (`"mode": "static"`), never `coverage.json`. For a Contract written ahead of its implementation. |
-| `mix covenant.conditions` | Evaluates every record condition with a `check` and lists suspect records with the failing premise. `--verbose` prints every outcome. Exit 1 when any record is suspect. |
+| `mix covenant.conditions` | Evaluates every record condition with a `check` (a `value` check runs in the project's VM) and lists suspect records with the failing premise. `--verbose` prints every outcome and why a condition was not checked. Exit 1 when any record is suspect; a condition that cannot be checked in this VM is counted, not failed. |
 | `mix covenant.regen <component>` | Writes a regeneration pack: `PROMPT.md`, the regeneration brief, the convention, the intent (or obligations file) and records, the system intent and records, the component's contract tests and public-surface stubs. The implementation is excluded. `--out DIR` (default `tmp/covenant/regen/<component>`). |
 | `mix covenant.mutate <component>` | Mutates the component's implementation, runs its contract tests against every mutant and credits each kill to the obligations tagged on the tests that caught it; writes the kill matrix. See [Mutation testing](#mutation-testing). `--jobs N`, `--seed N`, `--timeout MS`, `--module MOD` (repeatable), `--out PATH`. Exit 1 on a red baseline, an unannotated survivor or a stale annotation. |
 

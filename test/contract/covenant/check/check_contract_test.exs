@@ -182,6 +182,61 @@ defmodule Covenant.CheckContractTest do
   end
 
   @tag :tmp_dir
+  @tag obligation: "covenant.check.I5"
+  test "a module counter that raises leaves its ceiling unchecked, a warning and never a problem",
+       %{dir: dir} do
+    ContractBuilder.write(dir, %{
+      "lib/a.ex" => "",
+      "lib/b.ex" => "",
+      "system/scope.yml" => """
+      - name: stub
+        ceiling: 3
+        counter: { kind: module, module: Example.Scope, function: unimplemented }
+      - name: thrower
+        ceiling: 3
+        counter: { kind: module, module: Example.Scope, function: thrower }
+      - name: kinds
+        ceiling: 3
+        counter: { kind: module, module: Example.Scope, function: event_kinds }
+      """
+    })
+
+    report = Check.run(Contract.load!(dir), ResultsBuilder.results(@all), root: dir)
+
+    assert short(report) == []
+    assert Check.Report.ok?(report)
+
+    assert Enum.filter(report.warnings, &(&1 =~ "unchecked")) == [
+             "scope ceiling `stub` unchecked: Example.Scope.unimplemented/0 raised ArgumentError",
+             "scope ceiling `thrower` unchecked: Example.Scope.thrower/0 raised throw :stub"
+           ]
+
+    # the other ceilings are still enforced, and static mode skips module counters without a warning
+    ContractBuilder.write(dir, %{
+      "system/scope.yml" => """
+      - name: stub
+        ceiling: 3
+        counter: { kind: module, module: Example.Scope, function: unimplemented }
+      - name: files
+        ceiling: 1
+        counter: { kind: glob, pattern: "lib/**/*.ex" }
+      """
+    })
+
+    report = Check.run(Contract.load!(dir), ResultsBuilder.results(@all), root: dir)
+
+    assert short(report) == [
+             "system/scope.yml:4: scope ceiling `files` exceeded: 2 > 1 (glob lib/**/*.ex)"
+           ]
+
+    static =
+      Check.run(Contract.load!(dir), ResultsBuilder.results(@all), root: dir, mode: :static)
+
+    assert Enum.filter(static.warnings, &(&1 =~ "unchecked")) == []
+    assert {:ceiling, "stub"} in static.skipped
+  end
+
+  @tag :tmp_dir
   @tag obligation: "covenant.check.I6"
   test "dangling references are part of the report", %{dir: dir} do
     ContractBuilder.write(dir, %{

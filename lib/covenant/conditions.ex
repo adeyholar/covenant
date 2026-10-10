@@ -25,7 +25,12 @@ defmodule Covenant.Conditions do
     defstruct root: ".", lock: %{}, env: %{}, elixir_version: "0.0.0", otp_version: "0.0.0"
   end
 
-  @type outcome :: {:ok, String.t()} | {:suspect, String.t()} | :unchecked
+  @typedoc """
+  `:unchecked` is a condition with no `check`; `{:unchecked, reason}` is a check that cannot be
+  evaluated in this VM, which is never a failure.
+  """
+  @type outcome ::
+          {:ok, String.t()} | {:suspect, String.t()} | :unchecked | {:unchecked, String.t()}
 
   @doc """
   Builds the context from the running system. Options:
@@ -113,40 +118,146 @@ defmodule Covenant.Conditions do
   def evaluate(%Condition{check: %{"kind" => "elixir", "version" => req}}, ctx),
     do: version_matches(ctx.elixir_version, req, "Elixir")
 
+  def evaluate(%Condition{check: %{"kind" => "value"} = check}, _ctx), do: evaluate_value(check)
+
   def evaluate(%Condition{check: %{"kind" => kind} = check}, _ctx)
       when kind in ~w(env file otp elixir),
-      do: {:suspect, "check `#{kind}` is incomplete: #{inspect(check)}"}
+      do: incomplete(kind, check)
 
   def evaluate(%Condition{check: %{"kind" => kind}}, _ctx),
-    do: {:suspect, "unknown check kind `#{kind}` (expected dep, env, file, otp or elixir)"}
+    do: {:suspect, "unknown check kind `#{kind}` (expected dep, env, file, otp, elixir or value)"}
 
   def evaluate(%Condition{check: other}, _ctx),
     do: {:suspect, "malformed check #{inspect(other)}"}
+
+  defp incomplete(kind, check),
+    do: {:suspect, "check `#{kind}` is incomplete: #{inspect(check)}"}
+
+  # A `value` check calls `Module.fun/0` in this VM and compares what it returns (at `path`)
+  # with what the record says. The module being absent is not a failure: it is not checked here.
+  defp evaluate_value(%{"call" => call, "equals" => expected} = check) when is_binary(call) do
+    path = Map.get(check, "path", [])
+
+    with {:ok, module, fun} <- parse_call(call),
+         true <- is_list(path) and Enum.all?(path, &(is_binary(&1) or is_atom(&1))) do
+      if Code.ensure_loaded?(module) do
+        read_value(call, module, fun, path, expected)
+      else
+        {:unchecked, "module not compiled in this VM: #{inspect(module)}"}
+      end
+    else
+      _ -> incomplete("value", check)
+    end
+  end
+
+  defp evaluate_value(check), do: incomplete("value", check)
+
+  defp parse_call(call) do
+    case Regex.run(~r/\A([A-Z]\w*(?:\.[A-Z]\w*)*)\.([a-z_]\w*[?!]?)\/(\d+)\z/, call) do
+      [_, module, fun, "0"] -> {:ok, Module.concat([module]), String.to_atom(fun)}
+      _ -> :error
+    end
+  end
+
+  defp read_value(call, module, fun, path, expected) do
+    where = if path == [], do: call, else: "#{call} [#{Enum.map_join(path, ", ", &to_string/1)}]"
+
+    with {:ok, result} <- invoke(module, fun),
+         {:ok, actual} <- dig(result, path) do
+      if normalize(actual) == normalize(expected),
+        do: {:ok, "#{where} is #{inspect(actual)}"},
+        else: {:suspect, "#{where} is #{inspect(actual)}, the record says #{inspect(expected)}"}
+    else
+      {:raised, what} -> {:suspect, "#{call} raised #{what}"}
+      {:missing, key} -> {:suspect, "#{where} has no key `#{key}`"}
+    end
+  end
+
+  defp invoke(module, fun) do
+    {:ok, apply(module, fun, [])}
+  rescue
+    exception -> {:raised, "#{inspect(exception.__struct__)}: #{Exception.message(exception)}"}
+  catch
+    kind, reason -> {:raised, "#{kind} #{inspect(reason)}"}
+  end
+
+  defp dig(value, []), do: {:ok, value}
+
+  defp dig(value, [key | rest]) when is_map(value) do
+    case fetch_key(value, key) do
+      {:ok, inner} -> dig(inner, rest)
+      :error -> {:missing, key}
+    end
+  end
+
+  defp dig(_value, [key | _rest]), do: {:missing, key}
+
+  # YAML keys are strings and code keys are usually atoms: the atom form first, then the string.
+  defp fetch_key(map, key) do
+    Enum.find_value(key_forms(key), :error, fn form ->
+      case Map.fetch(map, form) do
+        {:ok, _} = found -> found
+        :error -> nil
+      end
+    end)
+  end
+
+  defp key_forms(key) when is_atom(key), do: [key, Atom.to_string(key)]
+
+  defp key_forms(key) do
+    [String.to_existing_atom(key), key]
+  rescue
+    ArgumentError -> [key]
+  end
+
+  # A record's YAML says `chat` where the code returns `:chat`; numbers compare by value.
+  defp normalize(value) when is_boolean(value) or is_nil(value), do: value
+  defp normalize(value) when is_atom(value), do: Atom.to_string(value)
+  defp normalize(value) when is_list(value), do: Enum.map(value, &normalize/1)
+  defp normalize(value), do: value
 
   defp version_matches(nil, req, what),
     do: {:suspect, "#{what} has no version to compare with `#{req}`"}
 
   defp version_matches(version, req, what) do
-    normalized = normalize_version(version)
+    with {:version, {:ok, parsed}} <-
+           {:version, version |> normalize_version() |> Version.parse()},
+         {:req, {:ok, requirement}} <-
+           {:req, req |> to_string() |> pad_requirement() |> Version.parse_requirement()} do
+      if Version.match?(parsed, requirement),
+        do: {:ok, "#{what} #{version} matches `#{req}`"},
+        else: {:suspect, "#{what} is #{version}, which does not match `#{req}`"}
+    else
+      {:version, :error} ->
+        {:suspect, "#{what} version `#{version}` cannot be compared with `#{req}`"}
 
-    case Version.parse_requirement(to_string(req)) do
-      {:ok, requirement} ->
-        if Version.match?(normalized, requirement),
-          do: {:ok, "#{what} #{version} matches `#{req}`"},
-          else: {:suspect, "#{what} is #{version}, which does not match `#{req}`"}
-
-      :error ->
+      {:req, :error} ->
         {:suspect, "`#{req}` is not a valid version requirement"}
     end
   end
 
-  # OTP reports "28" or "28.5"; Version needs three parts.
+  # OTP reports "28", "28.5" or "27.3.4.1"; Version needs exactly three numbers.
   defp normalize_version(version) do
-    case String.split(to_string(version), ".") do
-      [major] -> "#{major}.0.0"
-      [major, minor] -> "#{major}.#{minor}.0"
-      _ -> to_string(version)
+    version = to_string(version)
+
+    if version =~ ~r/\A\d+(\.\d+)*\z/ do
+      parts = version |> String.split(".") |> Enum.take(3)
+      Enum.join(parts ++ List.duplicate("0", 3 - length(parts)), ".")
+    else
+      version
     end
+  end
+
+  # Records write `>= 28.0` where Version needs `>= 28.0.0`. `~>` is left as written: `~> 28.0`
+  # means below 29, which `~> 28.0.0` would not.
+  defp pad_requirement(req) do
+    Regex.replace(
+      ~r/(?<![~<>=])((?:>=|<=|==|>|<)\s*)(\d+)(?:\.(\d+))?(?![\d.\w-])/,
+      req,
+      fn _match, operator, major, minor ->
+        "#{operator}#{major}.#{if minor == "", do: "0", else: minor}.0"
+      end
+    )
   end
 
   @doc "Evaluates every condition of a record."

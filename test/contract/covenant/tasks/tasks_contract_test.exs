@@ -148,6 +148,81 @@ defmodule Covenant.TasksContractTest do
     assert output =~ "1 suspect record(s)"
   end
 
+  @tag obligation: "covenant.tasks.I4"
+  test "mix covenant.conditions runs a value check in the project's VM and leaves a missing module unchecked" do
+    contracts = Path.join(@project, "tmp/value-contracts")
+    ContractBuilder.copy_fixture_contracts(contracts)
+    records = Path.join(contracts, "example/counter.decisions.yml")
+
+    File.write!(
+      records,
+      File.read!(records) <>
+        """
+
+        - id: scope-values
+          date: "2026-10-10"
+          decision: The counter records three event kinds.
+          driver: A premise checked against the code the task runs in.
+          approved_by: lead (fixture, 2026-10-10)
+          conditions:
+            - text: The counter has three event kinds
+              check: { kind: value, call: "Example.Scope.event_kinds/0", equals: 3 }
+            - text: A module this project does not compile
+              check: { kind: value, call: "Nope.Missing.limits/0", equals: 1 }
+        """
+    )
+
+    {output, status} =
+      mix(["covenant.conditions", "--verbose", "--contracts", "tmp/value-contracts"])
+
+    assert status == 0, output
+    assert output =~ "ok The counter has three event kinds — Example.Scope.event_kinds/0 is 3"
+
+    assert output =~
+             "A module this project does not compile (not checked: module not compiled in this VM: Nope.Missing)"
+
+    assert output =~ "6 record(s), 7 machine-checkable condition(s), 0 suspect record(s)"
+    assert output =~ "covenant.conditions: 1 condition(s) not checked in this VM"
+
+    File.write!(records, String.replace(File.read!(records), "equals: 3 }", "equals: 4 }"))
+    {output, status} = mix(["covenant.conditions", "--contracts", "tmp/value-contracts"])
+    assert status == 1
+    assert output =~ "record `scope-values` is suspect"
+    assert output =~ "Example.Scope.event_kinds/0 is 3, the record says 4"
+    assert output =~ "1 suspect record(s)"
+  end
+
+  @tag obligation: "covenant.tasks.I1"
+  test "mix covenant.check warns about a ceiling whose counter raises, writes coverage.json and exits 0" do
+    {_, 0} = mix(["covenant.check"])
+
+    contracts = Path.join(@project, "tmp/unchecked-ceiling-contracts")
+    ContractBuilder.copy_fixture_contracts(contracts)
+    scope = Path.join(contracts, "system/scope.yml")
+
+    File.write!(
+      scope,
+      File.read!(scope) <>
+        """
+        - name: stub
+          ceiling: 3
+          counter: { kind: module, module: Example.Scope, function: unimplemented }
+          why: A counter that is not implemented yet.
+        """
+    )
+
+    {output, status} =
+      mix(["covenant.check", "--no-run", "--contracts", "tmp/unchecked-ceiling-contracts"])
+
+    assert status == 0, output
+
+    assert output =~
+             "covenant.check: warning: scope ceiling `stub` unchecked: Example.Scope.unimplemented/0 raised RuntimeError"
+
+    assert output =~ "the Contract holds"
+    assert File.exists?(Path.join(contracts, "coverage.json"))
+  end
+
   @tag obligation: "covenant.tasks.I5"
   test "mix covenant.regen writes a pack and refuses an unknown component" do
     {output, status} = mix(["covenant.regen", "example.counter", "--out", "tmp/pack"])
