@@ -445,7 +445,8 @@ app's suite contributes its own tests.
 Configured `test_paths` are relative to `Covenant.root/0`, not to the directory a
 task runs in: `mix covenant.regen`, `mix covenant.mutate` and `mix covenant.check`
 (`--static` included) find the same contract tests from the umbrella root and from
-`apps/<app>`. A `--test-path` typed on the command line is relative to the directory
+`apps/<app>`, and `mix covenant.conditions` resolves `file` conditions and `mix.lock`
+against that root. A `--test-path` typed on the command line is relative to the directory
 you typed it in, and `--contracts DIR` redirects the Contract without moving the root.
 (`mix covenant.check` hands `mix test` the paths relative to the working directory.)
 `test/fixtures/umbrella_project` is an umbrella-shaped fixture that runs the tasks from

@@ -84,6 +84,54 @@ defmodule Covenant.TasksUmbrellaContractTest do
   end
 
   @tag obligation: "covenant.tasks.I9"
+  test "mix covenant.conditions run from an app resolves file conditions and mix.lock against the root" do
+    contracts = Path.join(@umbrella, "tmp/conditions-contracts")
+    File.mkdir_p!(contracts)
+    File.cp_r!(Path.join(@umbrella, "contracts"), contracts)
+    records = Path.join(contracts, "shop/cart.decisions.yml")
+
+    record = """
+    - id: lives-at-the-root
+      date: "2026-10-10"
+      decision: The umbrella root holds the lock and the apps.
+      driver: A premise checked against the root, not against the app mix runs in.
+      approved_by: lead (fixture, 2026-10-10)
+      conditions:
+        - text: The umbrella root holds mix.lock
+          check: { kind: file, path: mix.lock }
+        - text: The shop app lives under apps
+          check: { kind: file, path: apps/shop/mix.exs }
+        - text: yaml_elixir is locked by the root lock
+          check: { kind: dep, name: yaml_elixir, version: "~> 2.12" }
+    """
+
+    File.write!(records, record)
+
+    {output, status} = mix(["covenant.conditions", "--verbose", "--contracts", contracts])
+    assert status == 0, output
+    assert output =~ "ok The umbrella root holds mix.lock — file `mix.lock` exists"
+    assert output =~ "ok The shop app lives under apps — file `apps/shop/mix.exs` exists"
+    assert output =~ "ok yaml_elixir is locked by the root lock"
+    assert output =~ "1 record(s), 3 machine-checkable condition(s), 0 suspect record(s)"
+
+    File.write!(
+      records,
+      record <>
+        """
+            - text: A file the root does not hold
+              check: { kind: file, path: docs/missing.md }
+        """
+    )
+
+    {output, status} = mix(["covenant.conditions", "--contracts", contracts])
+    assert status == 1
+    assert output =~ "record `lives-at-the-root` is suspect"
+    assert output =~ "A file the root does not hold: file `docs/missing.md` does not exist"
+    refute output =~ "file `mix.lock` does not exist"
+    assert output =~ "1 suspect record(s)"
+  end
+
+  @tag obligation: "covenant.tasks.I9"
   test "mix covenant.mutate run from an app finds the app's contract tests and mutates its module" do
     {output, status} = mix(["covenant.mutate", "shop.cart", "--out", "tmp/kill_matrix.json"])
     assert status == 0, output

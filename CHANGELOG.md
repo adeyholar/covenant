@@ -2,6 +2,11 @@
 
 ## Unreleased (2026-10-10)
 
+- `mix covenant.conditions` resolves `file` conditions and `mix.lock` against
+  `Covenant.root/0` instead of the working directory (as the other tasks resolve
+  their paths, covenant.tasks.I9). Run from `apps/<app>` of an umbrella it used to
+  report every root-relative file and the umbrella lock as missing. The library
+  default of `Conditions.context/1` stays the working directory.
 - Condition kind `value`: `check: {kind: value, call: "Module.fun/0", path: [key], equals: v}`
   calls a function of the running project and compares what it returns (at `path`) with the
   record, so the record that decides a value verifies it. Atoms compare as strings, lists

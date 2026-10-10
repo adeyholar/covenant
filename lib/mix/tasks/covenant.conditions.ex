@@ -13,6 +13,9 @@ defmodule Mix.Tasks.Covenant.Conditions do
   step can flag records to re-examine. See `Covenant.Contract.Condition` for
   the check kinds.
 
+  `file` conditions and `mix.lock` resolve against `Covenant.root/0`, whichever
+  directory the task runs in (`--contracts` does not move it).
+
   A `value` check calls a function of the running project, so the project is
   compiled and its modules loaded first. A module that is not compiled in this
   VM leaves its condition unchecked (a count is printed, `--verbose` says why);
@@ -37,7 +40,7 @@ defmodule Mix.Tasks.Covenant.Conditions do
 
     contracts_dir = opts[:contracts] || Covenant.contracts_dir()
     contract = load_contract(contracts_dir)
-    ctx = Conditions.context()
+    ctx = Conditions.context(root: Covenant.root())
     all = Conditions.check_all(contract, ctx)
 
     checked =

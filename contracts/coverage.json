@@ -988,13 +988,14 @@
         "covenant.tasks.I9": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 6,
           "status": "active",
           "testable": true,
           "tests": [
             "test a --test-path typed on the command line is relative to the working directory",
             "test mix covenant.check --static run from an app reads the tests of every app",
             "test mix covenant.check run from an app runs the configured tests, handed to mix test relative to the app",
+            "test mix covenant.conditions run from an app resolves file conditions and mix.lock against the root",
             "test mix covenant.mutate run from an app finds the app's contract tests and mutates its module",
             "test mix covenant.regen run from an app finds the app's contract tests and lays them out from the root"
           ]
