@@ -28,3 +28,9 @@ covenant-*.tar
 /test/fixtures/example_project/tmp/
 /test/fixtures/example_project/contracts/coverage.json
 /test/fixtures/example_project/contracts/coverage.static.json
+
+# Umbrella fixture build artefacts (test/fixtures/umbrella_project)
+/test/fixtures/umbrella_project/_build/
+/test/fixtures/umbrella_project/tmp/
+/test/fixtures/umbrella_project/contracts/coverage.json
+/test/fixtures/umbrella_project/contracts/coverage.static.json

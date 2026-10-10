@@ -1,0 +1,95 @@
+defmodule Covenant.TasksUmbrellaContractTest do
+  @moduledoc """
+  Runs the mix tasks as subprocesses in `apps/shop` of the umbrella-shaped fixture, where the
+  Contract and the config live two directories up: the working directory is never the root.
+  Slow on the first run (the fixture compiles its own `_build`).
+  """
+
+  use Covenant.Case, component: "covenant.tasks", async: false
+
+  @moduletag :e2e
+  @moduletag timeout: 300_000
+
+  @umbrella Path.expand("../../../fixtures/umbrella_project", __DIR__)
+  @app Path.join(@umbrella, "apps/shop")
+
+  defp mix(args, opts \\ []) do
+    mix = System.find_executable("mix") || raise "mix not on PATH"
+    env = [{"MIX_ENV", "dev"}, {"COVENANT_RESULTS_DIR", nil}, {"COVENANT_ROOT", nil}]
+
+    {output, status} =
+      System.cmd(mix, args, cd: opts[:cd] || @app, env: env, stderr_to_stdout: true)
+
+    if opts[:print], do: IO.puts(output)
+    {output, status}
+  end
+
+  setup_all do
+    File.rm_rf!(Path.join(@umbrella, "_build/covenant"))
+    File.rm_rf!(Path.join(@umbrella, "tmp"))
+    :ok
+  end
+
+  @tag obligation: "covenant.tasks.I9"
+  test "mix covenant.regen run from an app finds the app's contract tests and lays them out from the root" do
+    pack = Path.join(@umbrella, "tmp/pack")
+
+    {output, status} = mix(["covenant.regen", "shop.cart", "--out", pack])
+    assert status == 0, output
+
+    assert output =~ "  apps/shop/test/contract/shop/cart_contract_test.exs\n"
+    assert output =~ "covenant.regen: skipped (owned by shop.catalog): Shop.Catalog"
+
+    assert File.exists?(Path.join(pack, "apps/shop/test/contract/shop/cart_contract_test.exs"))
+    assert File.exists?(Path.join(pack, "stubs/lib/shop/cart.ex"))
+    refute File.exists?(Path.join(pack, "stubs/lib/shop/catalog.ex"))
+
+    assert File.read!(Path.join(pack, "PROMPT.md")) =~
+             "`apps/shop/test/contract/shop/cart_contract_test.exs`"
+  end
+
+  @tag obligation: "covenant.tasks.I9"
+  test "mix covenant.check --static run from an app reads the tests of every app" do
+    {output, status} = mix(["covenant.check", "--static"])
+    assert status == 0, output
+
+    assert output =~
+             "covenant.check --static: read 2 file(s), 2 contract test module(s), 2 tagged test(s) under apps/*/test/contract; no test was compiled or run"
+
+    assert output =~ "covenant.check: the Contract holds statically"
+    refute output =~ "declare no modules"
+  end
+
+  @tag obligation: "covenant.tasks.I9"
+  test "mix covenant.check run from an app runs the configured tests, handed to mix test relative to the app" do
+    {output, status} = mix(["covenant.check"])
+    assert status == 0, output
+
+    assert output =~ "covenant.check: running mix test test/contract\n"
+    assert output =~ ~r/2 tests, 0 failures/
+    assert output =~ ~r/total\s+2\/2\s+100\.0%/
+    assert output =~ "covenant.check: the Contract holds"
+  end
+
+  @tag obligation: "covenant.tasks.I9"
+  test "a --test-path typed on the command line is relative to the working directory" do
+    # from apps/shop, `test/contract` is the app's own tests and `apps/*/test/contract` is nothing
+    # (the configured path of the same spelling finds them: it is relative to the root)
+    {output, status} = mix(["covenant.check", "--static", "--test-path", "test/contract"])
+    assert status == 0, output
+    assert output =~ "read 2 file(s)"
+
+    {output, _status} = mix(["covenant.check", "--static", "--test-path", "apps/*/test/contract"])
+    assert output =~ "read 0 file(s)"
+  end
+
+  @tag obligation: "covenant.tasks.I9"
+  test "mix covenant.mutate run from an app finds the app's contract tests and mutates its module" do
+    {output, status} = mix(["covenant.mutate", "shop.cart", "--out", "tmp/kill_matrix.json"])
+    assert status == 0, output
+
+    assert output =~ "covenant.mutate: tests: test/contract/shop/cart_contract_test.exs\n"
+    assert output =~ "covenant.mutate: Shop.Cart (lib/shop/cart.ex)"
+    refute output =~ "no contract test file declares"
+  end
+end

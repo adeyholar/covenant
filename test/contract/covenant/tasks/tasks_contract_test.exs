@@ -36,6 +36,7 @@ defmodule Covenant.TasksContractTest do
     assert output =~ ~r/example\.counter\s+6\/6\s+100\.0%/
     assert output =~ ~r/example\.greeter\s+1\/1\s+100\.0%/
     assert output =~ ~r/total\s+7\/7\s+100\.0%/
+    assert output =~ "covenant.check: warning: 1 component(s) declare no modules: example.greeter"
     assert output =~ "the Contract holds"
 
     coverage = Path.join(@project, "contracts/coverage.json") |> File.read!() |> JSON.decode!()
@@ -70,7 +71,7 @@ defmodule Covenant.TasksContractTest do
     assert status == 1
 
     assert output =~
-             "tmp/corrupt-contracts/example/counter.intent.md:49: obligation `example.counter.I1` is missing `must`"
+             "tmp/corrupt-contracts/example/counter.intent.md:53: obligation `example.counter.I1` is missing `must`"
 
     assert output =~ "could not be parsed (1 problem(s))"
 
@@ -171,7 +172,9 @@ defmodule Covenant.TasksContractTest do
 
     surface = """
     - `Demo.Widget.size/1` — its size; an empty one calls `System.halt(1)` and `Scope.put/1`.
-    - `Elsewhere.Thing.go/0` — a module nobody can place.
+    - `Example.MixProject.project/0` — loadable, but compiled from a script: its beam lies nowhere.
+    - `Elsewhere.Thing.go/0` — a namespace the component does not use, not loadable.
+    - `Covenant.Error.format/1` — an app of the fixture's dependencies, loadable.
     """
 
     ContractBuilder.demo_contracts(contracts, surface, "")
@@ -191,14 +194,63 @@ defmodule Covenant.TasksContractTest do
     assert status == 0, output
 
     assert output =~
-             "covenant.regen: skipped 2 references to modules the component does not own: Scope, System"
+             "covenant.regen: skipped 4 references to modules the component does not own: Covenant.Error, Elsewhere.Thing, Scope, System"
 
     assert output =~
-             "covenant.regen: possibly_foreign: Elsewhere.Thing (stubbed; list the component's modules"
+             "covenant.regen: possibly_foreign: Example.MixProject (stubbed; list the component's modules"
 
-    assert File.exists?(Path.join(@project, "tmp/skipping-pack/stubs/lib/elsewhere/thing.ex"))
+    assert File.exists?(Path.join(@project, "tmp/skipping-pack/stubs/lib/example/mix_project.ex"))
+    refute File.exists?(Path.join(@project, "tmp/skipping-pack/stubs/lib/elsewhere/thing.ex"))
     refute File.exists?(Path.join(@project, "tmp/skipping-pack/stubs/lib/system.ex"))
     assert File.exists?(Path.join(@project, "tmp/skipping-pack/stubs/lib/demo/widget.ex"))
+  end
+
+  @tag obligation: "covenant.tasks.I5"
+  test "mix covenant.regen attributes a module another component lists and notes what the project already implements" do
+    contracts = Path.join(@project, "tmp/owned-contracts")
+    File.rm_rf!(contracts)
+
+    surface = """
+    - `Demo.Widget.size/1` — its size; it reads `Example.Counter.value/1` and `Example.Greeter.greet/1`.
+    - `Demo.Gadget.beep/0` — the gadget's, through a fragment: `Gadget.beep/0`.
+    """
+
+    ContractBuilder.demo_contracts(contracts, surface, "")
+
+    File.write!(
+      Path.join(contracts, "demo/gadget.obligations.md"),
+      """
+      ---
+      modules: [Demo.Gadget, Example.Counter]
+      ---
+      """ <> ContractBuilder.light_obligations()
+    )
+
+    {output, status} =
+      mix([
+        "covenant.regen",
+        "demo.widget",
+        "--contracts",
+        contracts,
+        "--test-path",
+        Path.join(@project, "test/*"),
+        "--out",
+        "tmp/owned-pack"
+      ])
+
+    assert status == 0, output
+
+    # listed by the gadget: attributed to it, loadable in the fixture or not
+    assert output =~
+             "covenant.regen: skipped (owned by demo.gadget): Demo.Gadget, Example.Counter"
+
+    # in an app of the fixture project and listed by nobody: already implemented
+    assert output =~
+             "covenant.regen: skipped (already implemented in this project): Example.Greeter"
+
+    refute File.exists?(Path.join(@project, "tmp/owned-pack/stubs/lib/example/counter.ex"))
+    refute File.exists?(Path.join(@project, "tmp/owned-pack/stubs/lib/example/greeter.ex"))
+    assert File.exists?(Path.join(@project, "tmp/owned-pack/stubs/lib/demo/widget.ex"))
   end
 
   @tag obligation: "covenant.tasks.I6"
@@ -225,6 +277,7 @@ defmodule Covenant.TasksContractTest do
     assert output =~
              "skipped (need compiled code): 1 exception target(s), 1 module ceiling(s): counter-event-kinds, example.greeter.I2"
 
+    assert output =~ "covenant.check: warning: 1 component(s) declare no modules: example.greeter"
     assert output =~ "covenant.check: the Contract holds statically"
     refute File.exists?(coverage)
 

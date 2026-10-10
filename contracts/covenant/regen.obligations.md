@@ -39,7 +39,7 @@ component from its Contract, with the implementation excluded.
 
 ### covenant.regen.I6 — A listed set of modules is authoritative
 - **scope:** `Covenant.Regen.surface/2`, `Covenant.Regen.stubs/2`, `Covenant.Regen.Ownership.listed/1`, `Covenant.Regen.Ownership.partition/3`
-- **must:** when the Public surface has a `#### Modules` paragraph, or the front matter has `modules:`, stub exactly those modules and skip every other reference, loadable or not; read from the paragraph only the backticked names outside parentheses; merge a bare alias (no dot) into the one listed module whose last segment matches and drop it when none or several match; return every dropped reference in the pack's `skipped` list, and `mix covenant.regen` prints one line with their count and modules
+- **must:** when the Public surface has a `#### Modules` paragraph, or the front matter has `modules:`, stub exactly those modules and skip every other reference, loadable or not; read from the paragraph only the backticked names outside parentheses; merge a bare alias (no dot) into the one listed module whose last segment matches and drop it when none or several match; return every dropped reference in the pack's `skipped` list; `mix covenant.regen` prints one line with the count and modules of those that I8 and I9 do not attribute
 - **kind:** functional
 - **status:** active
 
@@ -50,7 +50,17 @@ component from its Contract, with the implementation excluded.
 - **status:** active
 
 ### covenant.regen.I8 — Without a list, ownership follows where a module lives
-- **scope:** `Covenant.Regen.Ownership.classify/3`, `Covenant.Regen.Ownership.classify_beam/2`, `Covenant.Regen.Ownership.environment/1`, `Covenant.Regen.write_pack/3`
-- **must:** treat a loadable module as foreign when its beam lies under the OTP or Elixir installation or a dependency's build path and as owned when it lies in an app of the running Mix project (umbrella children and `in_umbrella` dependencies included); treat a module that is not loadable as foreign when its first segment is a dependency's namespace and as owned otherwise; stub a module it cannot place (a beam anywhere else, or a first segment that none of the component's obligation scopes use) and return it in the pack's `possibly_foreign` list, which `mix covenant.regen` prints on a `possibly_foreign:` line; never treat a bare name that is a foreign module (`System`) as an alias
+- **scope:** `Covenant.Regen.Ownership.classify/3`, `Covenant.Regen.Ownership.classify_beam/2`, `Covenant.Regen.Ownership.environment/1`, `Covenant.Regen.surface/2`, `Covenant.Regen.write_pack/3`
+- **must:** treat a loadable module as foreign when its beam lies under the OTP or Elixir installation or a dependency's build path, and as already implemented when it lies in an app of the running Mix project (umbrella children and `in_umbrella` dependencies included): skip it, marking the skipped signature `implemented: true`, and have `mix covenant.regen` print a `skipped (already implemented in this project)` line with their modules; treat a module that is not loadable as foreign when its first segment is a dependency's namespace, as owned (stub it) when its first segment is a namespace the component's obligation scopes use or when those scopes name no module, and as unplaced otherwise; stub a loadable module whose beam lies anywhere else and return it in the pack's `possibly_foreign` list, which `mix covenant.regen` prints on a `possibly_foreign:` line; resolve an alias (a bare name, a dotted fragment such as `Repo.Scoped` or an unplaced name such as `Spend.Policy`) to the one known module whose name ends in it, the known modules being the listed ones, the ones other components list and the ones the surface stubs, and drop it into `skipped` when none or several match; never treat a bare name that is a loadable module (`System`) as an alias
+- **why:** a component that lists no modules has claimed none, so a module of the running project is somebody's finished work and a stub of it would shadow it; an unplaced name is far likelier a collaborator's module or a fragment of one than the component's own
 - **kind:** functional
+- **record:** declared-elsewhere-is-foreign
+- **status:** active
+
+### covenant.regen.I9 — A module another component lists is foreign
+- **scope:** `Covenant.Regen.Ownership.declared_elsewhere/2`, `Covenant.Regen.Ownership.partition/4`, `Covenant.Regen.surface/2`, `Covenant.Regen.write_pack/3`
+- **must:** ahead of every other ownership rule, skip a reference to a module that the `#### Modules` paragraph or the `modules:` front matter of another component of the Contract lists, unless this component lists it too, and attribute it to that component (the skipped signature carries `owner: "<component id>"`; a module two components list belongs to the first by component id), whether or not the module is loadable or implemented, with or without a list of its own; resolve aliases against those modules too; `mix covenant.regen` prints one `skipped (owned by <component id>): <modules>` line per owner
+- **why:** a pack for `agora.wake_ingest` stubbed the `core.tenancy` modules it only calls
+- **kind:** functional
+- **record:** declared-elsewhere-is-foreign
 - **status:** active

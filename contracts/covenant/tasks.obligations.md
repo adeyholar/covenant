@@ -10,7 +10,7 @@ step can rely on: what they print and their exit status.
 
 ### covenant.tasks.I1 — covenant.check runs the suite and reports
 - **scope:** `mix covenant.check`
-- **must:** run the configured contract test paths as a `mix test` subprocess with `Covenant.Formatter`, print the coverage table, write `<contracts dir>/coverage.json`, and exit 0 when the Contract holds
+- **must:** run the configured contract test paths as a `mix test` subprocess with `Covenant.Formatter`, print the coverage table and a warning for the components that declare no modules (`covenant.check: warning: N component(s) declare no modules: ...`, covenant.check.I11), write `<contracts dir>/coverage.json`, and exit 0 when the Contract holds
 - **kind:** functional
 - **record:** suite-runs-as-subprocess
 - **status:** active
@@ -35,13 +35,13 @@ step can rely on: what they print and their exit status.
 
 ### covenant.tasks.I5 — covenant.regen writes a pack
 - **scope:** `mix covenant.regen <component>`
-- **must:** write the pack to `--out DIR` (default `tmp/covenant/regen/<component>`), list the files written, say how many Public surface references it skipped as belonging to modules the component does not own and which modules it stubbed without being sure it owns them (a `possibly_foreign:` line), and exit 0; exit 1 naming the problem for an unknown component
+- **must:** write the pack to `--out DIR` (default `tmp/covenant/regen/<component>`), list the files written, say which Public surface references it skipped: a `skipped (owned by <component>)` line per component that lists a module the surface mentions (covenant.regen.I9), a `skipped (already implemented in this project)` line, and how many others belong to modules the component does not own; say which modules it stubbed without being sure it owns them (a `possibly_foreign:` line); exit 0; exit 1 naming the problem for an unknown component
 - **kind:** functional
 - **status:** active
 
 ### covenant.tasks.I6 — covenant.check --static reads, never runs
 - **scope:** `mix covenant.check --static`
-- **must:** compile and run no contract test; print the files, modules and tagged tests read, every problem as `file:line: message` relative to the root, the static coverage table and the skipped checks; write `<contracts dir>/coverage.static.json` and leave `coverage.json` untouched; exit 0 when the Contract holds statically and 1 otherwise; honour `--contracts`, `--test-path` (repeatable) and `--root`
+- **must:** compile and run no contract test; print the files, modules and tagged tests read, every problem as `file:line: message` relative to the root, the static coverage table, the skipped checks and the warning for the components that declare no modules; write `<contracts dir>/coverage.static.json` and leave `coverage.json` untouched; exit 0 when the Contract holds statically and 1 otherwise; honour `--contracts`, `--test-path` (repeatable) and `--root`
 - **kind:** functional
 - **record:** static-coverage-own-file
 - **status:** active
@@ -57,4 +57,12 @@ step can rely on: what they print and their exit status.
 - **scope:** `mix help covenant.mutate`
 - **must:** describe the survivors file: where it lives, the keys of an entry, every sort and what it means, and the exit status
 - **kind:** functional
+- **status:** active
+
+### covenant.tasks.I9 — The configured test paths resolve against the root, whichever directory a task runs in
+- **scope:** `mix covenant.check`, `mix covenant.check --static`, `mix covenant.regen`, `mix covenant.mutate`
+- **must:** search the configured `test_paths` relative to `Covenant.root/0`, so a task run from an umbrella app (`apps/<app>`) finds the contract tests that one run from the root finds (`covenant.check` hands `mix test` those paths relative to the working directory); search a `--test-path` typed on the command line relative to the working directory; let `--contracts` redirect the Contract without moving the root
+- **why:** in the machina-ex umbrella `mix covenant.regen agora.wake_ingest` run from `apps/agora` and `mix covenant.mutate core.tenancy` run from `apps/machina_core` found no contract test, because `apps/*/test/contract` was expanded relative to the app directory
+- **kind:** functional
+- **record:** test-paths-resolve-against-root
 - **status:** active

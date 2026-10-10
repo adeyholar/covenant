@@ -16,7 +16,10 @@ defmodule Covenant do
     results_dir: "_build/covenant/results"  # where `Covenant.Formatter` writes its results
   ```
 
-  Paths are relative to the directory `mix` runs in. In an umbrella, point
+  `contracts_dir` and `results_dir` are relative to the directory `mix` runs
+  in; `test_paths` are relative to `root/0`, so every task finds the same
+  tests whichever directory it runs in (a `--test-path` typed on the command
+  line is relative to the directory it was typed in). In an umbrella, point
   `contracts_dir` at an absolute path (`Path.expand("../contracts", __DIR__)`
   from `config/config.exs`) so every app resolves the same directory, and set
   `test_paths` to `["apps/*/test/contract"]`.
@@ -28,9 +31,30 @@ defmodule Covenant do
   @spec contracts_dir() :: Path.t()
   def contracts_dir, do: Application.get_env(:covenant, :contracts_dir, "contracts")
 
-  @doc "The contract test paths or globs (`:test_paths`, default `[\"test/contract\"]`)."
+  @doc """
+  The contract test paths or globs (`:test_paths`, default `["test/contract"]`) as absolute
+  paths: a relative entry resolves against `root/0`, never against the working directory
+  (in an umbrella `mix` runs each app from `apps/<app>`, where `apps/*/test/contract` would
+  match nothing).
+  """
   @spec test_paths() :: [Path.t()]
-  def test_paths, do: List.wrap(Application.get_env(:covenant, :test_paths, "test/contract"))
+  def test_paths do
+    root = root()
+
+    :covenant
+    |> Application.get_env(:test_paths, "test/contract")
+    |> List.wrap()
+    |> Enum.map(&Path.expand(&1, root))
+  end
+
+  @doc """
+  The test paths a task searches: the `--test-path` values it was given, else `test_paths/0`.
+
+  A value typed on the command line is relative to the working directory it was typed in.
+  """
+  @spec test_paths([Path.t()]) :: [Path.t()]
+  def test_paths([]), do: test_paths()
+  def test_paths(typed), do: Enum.map(typed, &Path.expand/1)
 
   @doc """
   The directory `Covenant.Formatter` writes results to (`:results_dir`).

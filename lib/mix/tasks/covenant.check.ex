@@ -22,7 +22,11 @@ defmodule Mix.Tasks.Covenant.Check do
   * a scope ceiling exceeded.
 
   Prints contract coverage per component and per app, and writes
-  `<contracts dir>/coverage.json`.
+  `<contracts dir>/coverage.json`. It also warns, without failing, about the
+  components that declare no modules (no `#### Modules` paragraph in the Public
+  surface and no `modules:` front matter): `covenant.check: warning: N
+  component(s) declare no modules: ...`. `mix covenant.regen` and `mix
+  covenant.mutate` can only guess which modules such a component owns.
 
   ## Static mode
 
@@ -51,7 +55,8 @@ defmodule Mix.Tasks.Covenant.Check do
 
   * `--no-run` — do not run the suite, read the last results;
   * `--contracts DIR` — the contracts directory (default: config, then `contracts`);
-  * `--test-path PATH` — a contract test path or glob (repeatable; default: config, then `test/contract`);
+  * `--test-path PATH` — a contract test path or glob, relative to the current directory
+    (repeatable; default: config, then `test/contract`, relative to `Covenant.root/0`);
   * `--results-dir DIR` — where results are read from and written to;
   * `--static` — read the tests instead of running them (see above);
   * `--root DIR` — with `--static`, the root file targets and globs resolve against.
@@ -83,9 +88,9 @@ defmodule Mix.Tasks.Covenant.Check do
     contracts_dir = opts[:contracts] || Covenant.contracts_dir()
     results_dir = opts[:results_dir] || Covenant.results_dir()
 
-    test_paths =
-      Keyword.get_values(opts, :test_path)
-      |> then(&if(&1 == [], do: Covenant.test_paths(), else: &1))
+    # before the overrides below: `--contracts` redirects the Contract, not the root the
+    # configured test paths resolve against
+    test_paths = Covenant.test_paths(Keyword.get_values(opts, :test_path))
 
     run? = Keyword.get(opts, :run, true)
 
@@ -108,6 +113,7 @@ defmodule Mix.Tasks.Covenant.Check do
     Enum.each(report.problems, &Mix.shell().error(Error.format(&1)))
     Mix.shell().info("")
     Mix.shell().info(Coverage.format(report.coverage))
+    warn(report)
 
     coverage_path = Path.join(contracts_dir, "coverage.json")
     File.write!(coverage_path, [Covenant.JSON.pretty(Coverage.to_map(report.coverage)), "\n"])
@@ -142,7 +148,7 @@ defmodule Mix.Tasks.Covenant.Check do
     Mix.shell().info(
       "covenant.check --static: read #{length(scan.files)} file(s), " <>
         "#{length(scan.modules)} contract test module(s), #{length(scan.tests)} tagged test(s) " <>
-        "under #{Enum.join(test_paths, ", ")}; no test was compiled or run"
+        "under #{Enum.map_join(test_paths, ", ", &Path.relative_to(&1, root))}; no test was compiled or run"
     )
 
     Enum.each(problems, &Mix.shell().error(Error.format(&1)))
@@ -159,6 +165,8 @@ defmodule Mix.Tasks.Covenant.Check do
       )
     end
 
+    warn(report)
+
     coverage_path = Path.join(contracts_dir, "coverage.static.json")
     File.write!(coverage_path, [Covenant.JSON.pretty(Coverage.to_map(report.coverage)), "\n"])
     Mix.shell().info("\nwrote #{coverage_path}")
@@ -169,6 +177,13 @@ defmodule Mix.Tasks.Covenant.Check do
     else
       fail("#{length(problems)} problem(s) found in the Contract (static)")
     end
+  end
+
+  defp warn(%Check.Report{warnings: warnings}) do
+    Enum.each(
+      warnings,
+      &Mix.shell().info(IO.ANSI.format([:yellow, "covenant.check: warning: ", &1]))
+    )
   end
 
   defp load_contract(dir) do
@@ -184,11 +199,15 @@ defmodule Mix.Tasks.Covenant.Check do
 
   defp run_suite(test_paths, results_dir) do
     paths =
-      test_paths |> Enum.flat_map(&Path.wildcard/1) |> Enum.filter(&File.exists?/1) |> Enum.sort()
+      test_paths
+      |> Enum.flat_map(&Path.wildcard/1)
+      |> Enum.filter(&File.exists?/1)
+      |> Enum.sort()
+      |> Enum.map(&Path.relative_to_cwd/1)
 
     if paths == [] do
       Mix.shell().info(
-        "covenant.check: no contract test paths found (looked for #{Enum.join(test_paths, ", ")})"
+        "covenant.check: no contract test paths found (looked for #{Enum.join(Enum.map(test_paths, &Path.relative_to_cwd/1), ", ")})"
       )
 
       File.rm_rf!(results_dir)

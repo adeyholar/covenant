@@ -17,8 +17,12 @@ defmodule Mix.Tasks.Covenant.Regen do
 
   A Public surface reference to a module the component does not own (see
   `Covenant.Regen.Ownership`: the intent's `#### Modules` paragraph or `modules:`
-  front matter, else where the module lives) gets no stub; the task says how
-  many it skipped. A module it could not place is stubbed anyway and listed on a
+  front matter, the modules other components list, else where the module lives)
+  gets no stub. The task prints a `skipped (owned by <component>)` line per
+  component that lists a module the surface mentions, a `skipped (already
+  implemented in this project)` line for the project's own loadable modules the
+  component does not list, and says how many other references it skipped. A
+  module it could not place is stubbed anyway and listed on a
   `possibly_foreign:` line.
 
   ## Options
@@ -26,7 +30,9 @@ defmodule Mix.Tasks.Covenant.Regen do
   * `--out DIR` — the pack directory (default `tmp/covenant/regen/<component>`);
   * `--contracts DIR` — the contracts directory;
   * `--test-path PATH` — a contract test path or glob to search, relative to the
-    current directory or absolute (repeatable).
+    current directory or absolute (repeatable). Without it, the configured
+    `test_paths` are searched, relative to `Covenant.root/0` whichever directory
+    the task runs in.
   """
 
   use Mix.Task
@@ -53,10 +59,7 @@ defmodule Mix.Tasks.Covenant.Regen do
 
     contracts_dir = opts[:contracts] || Covenant.contracts_dir()
 
-    test_paths =
-      Keyword.get_values(opts, :test_path)
-      |> then(&if(&1 == [], do: Covenant.test_paths(), else: &1))
-      |> Enum.map(&Path.expand/1)
+    test_paths = Covenant.test_paths(Keyword.get_values(opts, :test_path))
 
     contract =
       case Contract.load(contracts_dir) do
@@ -74,12 +77,29 @@ defmodule Mix.Tasks.Covenant.Regen do
       {:ok, %{dir: dir, files: files, skipped: skipped, possibly_foreign: possibly_foreign}} ->
         Enum.each(files, &Mix.shell().info("  #{Path.relative_to(&1, dir)}"))
 
-        if skipped != [] do
-          modules = skipped |> Enum.map(& &1.module) |> Enum.uniq() |> Enum.sort()
+        {owned, skipped} = Enum.split_with(skipped, & &1[:owner])
+        {implemented, skipped} = Enum.split_with(skipped, & &1[:implemented])
 
+        owned
+        |> Enum.group_by(& &1.owner, & &1.module)
+        |> Enum.sort()
+        |> Enum.each(fn {owner, modules} ->
+          Mix.shell().info(
+            "covenant.regen: skipped (owned by #{owner}): #{module_names(modules)}"
+          )
+        end)
+
+        if implemented != [] do
+          Mix.shell().info(
+            "covenant.regen: skipped (already implemented in this project): " <>
+              module_names(Enum.map(implemented, & &1.module))
+          )
+        end
+
+        if skipped != [] do
           Mix.shell().info(
             "covenant.regen: skipped #{length(skipped)} references to modules the component does not own: " <>
-              Enum.join(modules, ", ")
+              module_names(Enum.map(skipped, & &1.module))
           )
         end
 
@@ -97,4 +117,6 @@ defmodule Mix.Tasks.Covenant.Regen do
         Mix.raise(reason)
     end
   end
+
+  defp module_names(modules), do: modules |> Enum.uniq() |> Enum.sort() |> Enum.join(", ")
 end

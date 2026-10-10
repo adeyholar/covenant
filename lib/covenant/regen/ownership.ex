@@ -3,31 +3,43 @@ defmodule Covenant.Regen.Ownership do
   Which modules a Public surface reference names does the component own?
 
   A stub for a module the component does not own (`System.halt(1)` in prose,
-  `Ecto.UUID.cast/1`) would shadow the real one. `partition/3` sorts the
-  signatures of a Public surface into the ones to stub and the ones to skip:
+  `Ecto.UUID.cast/1`, another component's `Machina.Repo.Scoped`) would shadow
+  the real one. `partition/4` sorts the signatures of a Public surface into the
+  ones to stub and the ones to skip:
 
   1. **A listed set is authoritative.** When the Public surface has a
      `#### Modules` paragraph, or the front matter has `modules:`, exactly
      those modules are stubbed and every other reference is skipped. In the
      paragraph only the backticked names outside parentheses count
      (`` `Machina.Cache` (behaviour, see `Machina.Registry`) `` lists one).
-  2. **Otherwise ownership follows where a module lives.** A loadable module
+  2. **A module another component lists is foreign.** A module in the
+     `#### Modules` paragraph or `modules:` of another component of the
+     Contract belongs to that component: it is skipped and attributed to it
+     (`:skipped` entries carry `owner: "<component id>"`), whether or not it
+     is implemented yet.
+  3. **Otherwise ownership follows where a module lives.** A loadable module
      is foreign when its beam (`:code.which/1`) lies under the OTP or Elixir
-     installation or a dependency's build path, and owned when it lies in an
-     app of the running Mix project (umbrella children and `in_umbrella`
-     dependencies included). A module that is not loadable is foreign when
-     its first segment is a dependency's namespace (`Ecto` for `:ecto`, even
-     when `:ecto` is not compiled in this VM) and is stubbed otherwise.
-  3. **When it cannot be told, it is stubbed and reported.** A loadable module
-     whose beam is anywhere else, or a module that is not loadable and whose
-     first segment is none of the namespaces the component's obligation scopes
-     use, is stubbed and listed as `possibly_foreign`.
+     installation or a dependency's build path, and is already implemented
+     (skipped, `implemented: true`) when it lies in an app of the running Mix
+     project (umbrella children and `in_umbrella` dependencies included): the
+     component declared no modules, so nothing says the implementation is its
+     own, and a stub would shadow it. A module that is not loadable is foreign
+     when its first segment is a dependency's namespace (`Ecto` for `:ecto`,
+     even when `:ecto` is not compiled in this VM), is stubbed when its first
+     segment is a namespace the component's obligation scopes use (or when
+     they name no module at all) and is *unplaced* otherwise.
+  4. **When it cannot be told, it is stubbed and reported.** A loadable module
+     whose beam is anywhere else is stubbed and listed as `possibly_foreign`.
 
-  A bare alias (`Scope.put/1`) is merged into the one owned module whose last
-  segment matches (`Machina.Scope`) and dropped when none or several match; a
-  bare name that is itself a foreign module (`System`) is never an alias.
+  An alias is resolved to the one module whose name ends in it: the bare
+  `Scope`, a dotted fragment such as `Repo.Scoped` for `Machina.Repo.Scoped`,
+  and an unplaced module name (`Spend.Policy`). The candidates are the listed
+  modules, the modules other components list and the modules the surface
+  itself stubs. It is dropped when none or several match; a bare name that is
+  itself a loadable module (`System`) is never an alias.
   """
 
+  alias Covenant.Contract
   alias Covenant.Contract.{Component, Obligation}
   alias Covenant.Mutate.Modules
 
@@ -38,7 +50,12 @@ defmodule Covenant.Regen.Ownership do
           dep_namespaces: [String.t()]
         }
 
-  @type verdict :: :own | :foreign | :unsure
+  @typedoc """
+  What `classify/3` says: `:own` (stub it), `:foreign` (skip it), `:implemented` (a loadable
+  module of the running project, skipped), `:unsure` (stub it and report it) or `:unplaced`
+  (not loadable, in a namespace the component does not use: resolve it as an alias or skip it).
+  """
+  @type verdict :: :own | :foreign | :implemented | :unsure | :unplaced
 
   @module_span ~r/`([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)`/
 
@@ -74,30 +91,63 @@ defmodule Covenant.Regen.Ownership do
   end
 
   @doc """
-  Splits `signatures` (maps with a `:module` string) into `:stub`, `:skipped`
-  and the `:possibly_foreign` module names. A stubbed bare alias has its
-  `:module` rewritten to the module it resolves to.
+  The modules the other components of `contract` list (rule 2 of the module docs), as
+  `%{module => component id}`; a module two components list belongs to the first by id.
   """
-  @spec partition(Component.t(), [map()], environment()) :: %{
+  @spec declared_elsewhere(Contract.t(), Component.t()) :: %{String.t() => String.t()}
+  def declared_elsewhere(%Contract{components: components}, %Component{id: id}) do
+    components
+    |> Enum.reject(fn {other, _} -> other == id end)
+    |> Enum.sort()
+    |> Enum.reduce(%{}, fn {other, component}, acc ->
+      Enum.reduce(listed(component), acc, &Map.put_new(&2, &1, other))
+    end)
+  end
+
+  @doc """
+  Splits `signatures` (maps with a `:module` string) into `:stub`, `:skipped`
+  and the `:possibly_foreign` module names. A stubbed alias has its `:module`
+  rewritten to the module it resolves to. A skipped signature carries
+  `owner: "<component id>"` when another component lists its module and
+  `implemented: true` when the running project already has it.
+
+  `declared_elsewhere` is `declared_elsewhere/2`'s `%{module => component id}`.
+  """
+  @spec partition(Component.t(), [map()], environment(), %{String.t() => String.t()}) :: %{
           stub: [map()],
           skipped: [map()],
           possibly_foreign: [String.t()]
         }
-  def partition(%Component{} = component, signatures, environment) do
+  def partition(%Component{} = component, signatures, environment, declared_elsewhere \\ %{}) do
     listed = listed(component)
     namespaces = own_namespaces(component)
 
     verdict = fn module ->
-      if listed == [] do
-        classify(module, environment, namespaces)
-      else
-        if module in listed, do: :own, else: :foreign
+      cond do
+        module in listed -> :own
+        Map.has_key?(declared_elsewhere, module) -> {:elsewhere, declared_elsewhere[module]}
+        listed != [] -> :foreign
+        true -> classify(module, environment, namespaces)
       end
     end
 
     {qualified, bare} = Enum.split_with(signatures, &String.contains?(&1.module, "."))
     qualified = Enum.map(qualified, &{&1, verdict.(&1.module)})
-    known = Enum.uniq(listed ++ for({sig, v} <- qualified, v != :foreign, do: sig.module))
+
+    known =
+      Enum.uniq(
+        listed ++
+          Map.keys(declared_elsewhere) ++
+          for({sig, v} <- qualified, v in [:own, :unsure], do: sig.module)
+      )
+
+    resolve = fn sig -> resolve_alias(sig, known, verdict) end
+
+    qualified =
+      Enum.map(qualified, fn
+        {sig, :unplaced} -> resolve.(sig)
+        other -> other
+      end)
 
     bare =
       Enum.map(bare, fn sig ->
@@ -105,26 +155,36 @@ defmodule Covenant.Regen.Ownership do
 
         cond do
           sig.module in listed -> {sig, :own}
-          loaded? and classify(sig.module, environment) == :foreign -> {sig, :foreign}
-          loaded? and listed != [] -> {sig, :foreign}
           loaded? -> {sig, verdict.(sig.module)}
-          true -> resolve_alias(sig, known)
+          true -> resolve.(sig)
         end
       end)
 
     all = qualified ++ bare
 
     %{
-      stub: for({sig, v} <- all, v != :foreign, do: sig),
-      skipped: for({sig, :foreign} <- all, do: sig),
+      stub: for({sig, v} <- all, v in [:own, :unsure], do: sig),
+      skipped: for({sig, v} <- all, v not in [:own, :unsure], do: skipped(sig, v)),
       possibly_foreign: for({sig, :unsure} <- all, do: sig.module) |> Enum.uniq() |> Enum.sort()
     }
   end
 
-  defp resolve_alias(sig, known) do
-    case Enum.filter(known, &(List.last(String.split(&1, ".")) == sig.module)) do
-      [module] -> {%{sig | module: module}, :own}
-      _ -> {sig, :foreign}
+  defp skipped(sig, {:elsewhere, owner}), do: Map.put(sig, :owner, owner)
+  defp skipped(sig, :implemented), do: Map.put(sig, :implemented, true)
+  defp skipped(sig, _), do: sig
+
+  # The one known module whose name ends in the alias takes its verdict (a stubbed module
+  # keeps the alias's functions); none or several, and the reference is dropped.
+  defp resolve_alias(sig, known, verdict) do
+    case Enum.filter(known, &String.ends_with?(&1, "." <> sig.module)) do
+      [module] ->
+        case verdict.(module) do
+          :unsure -> {%{sig | module: module}, :own}
+          other -> {%{sig | module: module}, other}
+        end
+
+      _ ->
+        {sig, :foreign}
     end
   end
 
@@ -144,20 +204,23 @@ defmodule Covenant.Regen.Ownership do
   defp loaded?(module), do: Code.ensure_loaded?(Module.concat([module]))
 
   @doc """
-  Classifies one module name by where it lives (rule 2 and 3 of the module
+  Classifies one module name by where it lives (rule 3 and 4 of the module
   docs). `own_namespaces` are the first segments the component is known to
   use; with none known, a module nobody can place is simply owned.
   """
   @spec classify(String.t(), environment(), [String.t()]) :: verdict()
   def classify(module, environment, own_namespaces \\ []) do
     if loaded?(module) do
-      [module] |> Module.concat() |> :code.which() |> classify_beam(environment)
+      case [module] |> Module.concat() |> :code.which() |> classify_beam(environment) do
+        :own -> :implemented
+        other -> other
+      end
     else
       first = first_segment(module)
 
       cond do
         first in environment.dep_namespaces -> :foreign
-        own_namespaces != [] and first not in own_namespaces -> :unsure
+        own_namespaces != [] and first not in own_namespaces -> :unplaced
         true -> :own
       end
     end

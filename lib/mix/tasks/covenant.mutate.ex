@@ -45,7 +45,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
     for such a suite;
   * `--out PATH` — the kill matrix JSON (default `tmp/covenant/mutate/<component>/kill_matrix.json`);
   * `--contracts DIR` — the contracts directory;
-  * `--test-path PATH` — a contract test path or glob (repeatable).
+  * `--test-path PATH` — a contract test path or glob, relative to the current
+    directory or absolute (repeatable). Without it, the configured `test_paths`
+    are searched, relative to `Covenant.root/0` whichever directory the task runs in.
 
   `--raw PATH --slice I/N` are the worker's own flags; the task sets them.
 
@@ -113,6 +115,10 @@ defmodule Mix.Tasks.Covenant.Mutate do
         _ -> Mix.raise("usage: mix covenant.mutate <component id> [options]")
       end
 
+    # before the override below: `--contracts` redirects the Contract, not the root the
+    # configured test paths resolve against
+    test_paths = Covenant.test_paths(Keyword.get_values(opts, :test_path))
+
     if opts[:contracts], do: Application.put_env(:covenant, :contracts_dir, opts[:contracts])
 
     settings = %{
@@ -122,9 +128,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
       seed: opts[:seed] || Mutate.default_seed(),
       jobs: max(opts[:jobs] || 1, 1),
       contracts: opts[:contracts] || Covenant.contracts_dir(),
-      test_paths:
-        Keyword.get_values(opts, :test_path)
-        |> then(&if(&1 == [], do: Covenant.test_paths(), else: &1)),
+      test_paths: test_paths,
       out: opts[:out] || Path.join(Mutate.default_dir(component_id), "kill_matrix.json")
     }
 

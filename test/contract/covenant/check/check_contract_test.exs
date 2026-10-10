@@ -262,4 +262,46 @@ defmodule Covenant.CheckContractTest do
     assert run.coverage.mode == :run
     refute Map.has_key?(Covenant.Coverage.to_map(run.coverage), "mode")
   end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.check.I11"
+  test "components that declare no modules are one warning; the system intent is never listed" do
+    # the fixture: the counter lists its modules in a `#### Modules` paragraph, the greeter lists
+    # none, and the whole-product `system` intent has none to list
+    contract = Contract.load!(ContractBuilder.fixture_contracts())
+    report = Check.run(contract, %Results{}, root: ContractBuilder.fixture_project())
+
+    assert report.warnings == ["1 component(s) declare no modules: example.greeter"]
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.check.I11"
+  test "a warning lists every such component sorted, never fails the check and goes away with a list",
+       %{contract: contract, dir: dir} do
+    report = Check.run(contract, ResultsBuilder.results(@all), root: dir)
+
+    assert report.warnings == ["2 component(s) declare no modules: demo.gadget, demo.widget"]
+    assert Check.Report.ok?(report)
+
+    # a `modules:` front matter declares them (light form), a `#### Modules` paragraph too (heavy)
+    ContractBuilder.write(dir, %{
+      "demo/gadget.obligations.md" =>
+        "---\nmodules: [Demo.Gadget]\n---\n" <> ContractBuilder.light_obligations(),
+      "demo/widget.intent.md" =>
+        String.replace(
+          ContractBuilder.heavy_intent(),
+          "## Public surface\n",
+          "## Public surface\n\n#### Modules\n\n`Demo.Widget`.\n"
+        )
+    })
+
+    listed = Contract.load!(dir)
+    assert Check.run(listed, ResultsBuilder.results(@all), root: dir).warnings == []
+
+    # one still unlisted: the line counts one
+    File.write!(Path.join(dir, "demo/gadget.obligations.md"), ContractBuilder.light_obligations())
+
+    assert Check.run(Contract.load!(dir), ResultsBuilder.results(@all), root: dir).warnings ==
+             ["1 component(s) declare no modules: demo.gadget"]
+  end
 end

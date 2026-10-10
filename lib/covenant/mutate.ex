@@ -75,7 +75,7 @@ defmodule Covenant.Mutate do
           tests == [] ->
             {:error,
              "no contract test file declares `use Covenant.Case, component: \"#{component_id}\"` " <>
-               "under #{Enum.join(test_paths, ", ")}"}
+               "under #{Enum.map_join(test_paths, ", ", &Path.relative_to(&1, root))}"}
 
           true ->
             {:ok, %{component: component, names: names, source: source, test_files: tests}}

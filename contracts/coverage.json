@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 69,
+      "active": 73,
       "coverage": 1.0,
-      "covered": 69
+      "covered": 73
     },
     "system": {
       "active": 0,
@@ -83,10 +83,10 @@
       }
     },
     "covenant.check": {
-      "active": 10,
+      "active": 11,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 10,
+      "covered": 11,
       "form": "light",
       "obligations": {
         "covenant.check.I1": {
@@ -107,6 +107,17 @@
           "testable": true,
           "tests": [
             "test static mode skips module targets and module counters, checks files, globs and tags"
+          ]
+        },
+        "covenant.check.I11": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a warning lists every such component sorted, never fails the check and goes away with a list",
+            "test components that declare no modules are one warning; the system intent is never listed"
           ]
         },
         "covenant.check.I2": {
@@ -626,10 +637,10 @@
       }
     },
     "covenant.regen": {
-      "active": 8,
+      "active": 9,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 8,
+      "covered": 9,
       "form": "light",
       "obligations": {
         "covenant.regen.I1": {
@@ -710,14 +721,26 @@
         "covenant.regen.I8": {
           "failing": 0,
           "kind": "functional",
-          "passing": 4,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
             "test a beam is classified by the directory it lies in, umbrella apps included",
-            "test a module that is not loadable is foreign in a dependency's namespace, else stubbed",
+            "test a loadable module whose beam lies anywhere else is stubbed and reported",
+            "test a module that is not loadable is foreign in a dependency's namespace, else stubbed or unplaced",
             "test the in_umbrella dependencies are read from a deps list",
             "test without a list, ownership follows where a module lives"
+          ]
+        },
+        "covenant.regen.I9": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a component that lists a module keeps it, and still skips the others' with their owner",
+            "test a module another component lists is skipped and attributed to it, before any other rule"
           ]
         }
       }
@@ -776,10 +799,10 @@
       }
     },
     "covenant.static": {
-      "active": 5,
+      "active": 6,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 5,
+      "covered": 6,
       "form": "light",
       "obligations": {
         "covenant.static.I1": {
@@ -833,18 +856,29 @@
           "status": "active",
           "testable": true,
           "tests": [
-            "test Covenant.root/0 an absolute contracts_dir, config :root and COVENANT_ROOT win in that order",
-            "test Covenant.root/0 falls back to the working directory when no contracts directory is found",
-            "test Covenant.root/0 is the parent of the contracts directory from any directory under it"
+            "test Covenant.root/0 and Covenant.test_paths an absolute contracts_dir, config :root and COVENANT_ROOT win in that order",
+            "test Covenant.root/0 and Covenant.test_paths falls back to the working directory when no contracts directory is found",
+            "test Covenant.root/0 and Covenant.test_paths is the parent of the contracts directory from any directory under it"
+          ]
+        },
+        "covenant.static.I6": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test Covenant.root/0 and Covenant.test_paths configured test paths resolve against the root, from any directory under it",
+            "test Covenant.root/0 and Covenant.test_paths typed test paths resolve against the working directory; none typed gives the configured ones"
           ]
         }
       }
     },
     "covenant.tasks": {
-      "active": 8,
+      "active": 9,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 8,
+      "covered": 9,
       "form": "light",
       "obligations": {
         "covenant.tasks.I1": {
@@ -891,10 +925,11 @@
         "covenant.tasks.I5": {
           "failing": 0,
           "kind": "functional",
-          "passing": 2,
+          "passing": 3,
           "status": "active",
           "testable": true,
           "tests": [
+            "test mix covenant.regen attributes a module another component lists and notes what the project already implements",
             "test mix covenant.regen skips references to modules the component does not own",
             "test mix covenant.regen writes a pack and refuses an unknown component"
           ]
@@ -929,6 +964,20 @@
           "tests": [
             "test mix help covenant.mutate documents the survivors file: location, keys, every sort and the exit status"
           ]
+        },
+        "covenant.tasks.I9": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a --test-path typed on the command line is relative to the working directory",
+            "test mix covenant.check --static run from an app reads the tests of every app",
+            "test mix covenant.check run from an app runs the configured tests, handed to mix test relative to the app",
+            "test mix covenant.mutate run from an app finds the app's contract tests and mutates its module",
+            "test mix covenant.regen run from an app finds the app's contract tests and lays them out from the root"
+          ]
         }
       }
     },
@@ -943,8 +992,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 69,
+    "active": 73,
     "coverage": 1.0,
-    "covered": 69
+    "covered": 73
   }
 }

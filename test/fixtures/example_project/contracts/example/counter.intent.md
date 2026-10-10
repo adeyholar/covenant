@@ -25,6 +25,10 @@ formatting for display.
 
 ## Public surface
 
+#### Modules
+
+`Example.Counter`.
+
 - `Example.Counter.new(opts) :: t` — a counter at zero; `opts[:max]` sets the cap (default 100, record `configurable-max`, pinned by `example.counter.I7`).
 - `Example.Counter.increment(counter, by) :: t` — adds `by`, clamped at `max`.
 - `Example.Counter.decrement(counter, by) :: t` — subtracts `by`, clamped at zero.

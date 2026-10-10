@@ -291,6 +291,122 @@ defmodule Covenant.RegenContractTest do
     assert [%{module: "Other.Dial"}] = Regen.surface(component).skipped
   end
 
+  # A light component that lists `modules` in its front matter and so owns them.
+  defp lister(id, modules) do
+    """
+    ---
+    modules: #{inspect(modules)}
+    ---
+    # #{id}
+
+    ## Purpose
+
+    Owns modules.
+
+    ## Obligations
+
+    ### #{id}.I1 — Owns them
+    - **scope:** `#{hd(modules)}.go/0`
+    - **must:** exist
+    - **kind:** functional
+    - **status:** active
+    """
+  end
+
+  defp with_listers(dir, surface, front_matter) do
+    ContractBuilder.demo_contracts(dir, surface, front_matter)
+
+    ContractBuilder.write(dir, %{
+      "demo/gadget.obligations.md" =>
+        lister("demo.gadget", [
+          "Demo.Gadget",
+          "Demo.Shared",
+          "Demo.Shared.Deep",
+          "Demo.Mine",
+          "Covenant.Error"
+        ]),
+      "demo/aaa.obligations.md" => lister("demo.aaa", ["Demo.Shared"])
+    })
+
+    Contract.load!(dir)
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.regen.I9"
+  test "a module another component lists is skipped and attributed to it, before any other rule",
+       %{tmp_dir: dir} do
+    surface =
+      Enum.join(
+        [
+          "- `Demo.Widget.size/1` — its size; it reads `Demo.Shared.value/0` and `Covenant.Error.format/1`.",
+          "- `Shared.read/0` — a bare alias of a module the others list.",
+          "- `Shared.Deep.go/0` — a dotted fragment of a module the gadget lists.",
+          "- `Demo.Mine.go/0` — listed by the gadget, not by the widget.",
+          "- `Demo.Own.go/0` — listed by nobody, in the widget's namespace."
+        ],
+        "\n"
+      )
+
+    contract = with_listers(dir, surface, "")
+    component = Contract.component(contract, "demo.widget")
+
+    assert Ownership.listed(component) == []
+
+    # a module two components list belongs to the first by component id; the component's own
+    # listing never counts against it
+    elsewhere = Ownership.declared_elsewhere(contract, component)
+    assert elsewhere["Demo.Shared"] == "demo.aaa"
+    assert elsewhere["Demo.Gadget"] == "demo.gadget"
+    refute Map.has_key?(elsewhere, "Demo.Widget")
+
+    pack = Regen.surface(component, declared_elsewhere: elsewhere)
+    assert pack.stub |> Enum.map(& &1.module) |> Enum.uniq() == ["Demo.Widget", "Demo.Own"]
+    assert pack.possibly_foreign == []
+
+    assert Enum.map(pack.skipped, &{&1.module, &1.function, &1.owner}) == [
+             {"Demo.Shared", "value", "demo.aaa"},
+             {"Covenant.Error", "format", "demo.gadget"},
+             {"Demo.Shared.Deep", "go", "demo.gadget"},
+             {"Demo.Mine", "go", "demo.gadget"},
+             {"Demo.Shared", "read", "demo.aaa"}
+           ]
+
+    # a loadable module of this project another component lists is attributed, not "implemented"
+    refute Enum.any?(pack.skipped, &Map.has_key?(&1, :implemented))
+
+    out = Path.join(dir, "pack")
+
+    assert {:ok, %{skipped: skipped, files: files}} =
+             Regen.write_pack(contract, "demo.widget", out: out, root: dir, test_paths: [])
+
+    assert skipped == pack.skipped
+
+    assert for(file <- files, String.contains?(file, "/stubs/"), do: Path.relative_to(file, out)) ==
+             ["stubs/lib/demo/own.ex", "stubs/lib/demo/widget.ex"]
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.regen.I9"
+  test "a component that lists a module keeps it, and still skips the others' with their owner",
+       %{tmp_dir: dir} do
+    surface =
+      Enum.join(
+        [
+          "- `Demo.Widget.size/1` — its size; it reads `Demo.Shared.value/0`.",
+          "- `Demo.Mine.go/0` — listed by the widget and by the gadget."
+        ],
+        "\n"
+      )
+
+    contract = with_listers(dir, surface, "---\nmodules: [Demo.Widget, Demo.Mine]\n---\n")
+    component = Contract.component(contract, "demo.widget")
+    elsewhere = Ownership.declared_elsewhere(contract, component)
+
+    pack = Regen.surface(component, declared_elsewhere: elsewhere)
+    assert pack.stub |> Enum.map(& &1.module) |> Enum.uniq() == ["Demo.Widget", "Demo.Mine"]
+    assert [%{module: "Demo.Shared", owner: "demo.aaa"}] = pack.skipped
+  end
+
   @tag :tmp_dir
   @tag obligation: "covenant.regen.I8"
   test "without a list, ownership follows where a module lives", %{tmp_dir: dir} do
@@ -304,8 +420,9 @@ defmodule Covenant.RegenContractTest do
           "- `YamlElixir.Mapper.process/2` — a dependency, loadable.",
           "- `YamlElixir.read_from_string/1` — the dependency's top module, bare to the parser.",
           "- `YamlElixir.NotAModule.go/0` — a dependency's namespace, not loadable.",
-          "- `Covenant.Error.format/1` — an app of this project, loadable.",
-          "- `Elsewhere.Thing.go/0` — nobody can place it.",
+          "- `Covenant.Error.format/1` — an app of this project, loadable: already implemented.",
+          "- `Elsewhere.Thing.go/0` — a namespace the component does not use, not loadable.",
+          "- `Spend.Policy.admit/3` — a dotted fragment of a module that is not in this Contract.",
           "- `Widget.reset/1` — a short alias of `Demo.Widget`.",
           "- `Ghost.vanish/0` — no module ends in `Ghost`."
         ],
@@ -317,8 +434,7 @@ defmodule Covenant.RegenContractTest do
 
     assert Ownership.listed(component) == []
 
-    assert Enum.map(Regen.stubs(component), &elem(&1, 0)) ==
-             ["Covenant.Error", "Demo.Widget", "Elsewhere.Thing"]
+    assert Enum.map(Regen.stubs(component), &elem(&1, 0)) == ["Demo.Widget"]
 
     %{skipped: skipped, possibly_foreign: possibly_foreign} = Regen.surface(component)
 
@@ -327,21 +443,48 @@ defmodule Covenant.RegenContractTest do
                {"Mix.Project", "config"},
                {"YamlElixir.Mapper", "process"},
                {"YamlElixir.NotAModule", "go"},
+               {"Covenant.Error", "format"},
+               {"Elsewhere.Thing", "go"},
+               {"Spend.Policy", "admit"},
                {"System", "halt"},
                {"Mix", "raise"},
                {"YamlElixir", "read_from_string"},
                {"Ghost", "vanish"}
              ]
 
-    assert possibly_foreign == ["Elsewhere.Thing"]
+    # only a module of the running project is "already implemented": the reason is on the entry
+    assert for(%{implemented: true} = sig <- skipped, do: sig.module) == ["Covenant.Error"]
+    assert possibly_foreign == []
 
     out = Path.join(dir, "pack")
 
-    assert {:ok, %{possibly_foreign: ^possibly_foreign}} =
+    assert {:ok, %{skipped: ^skipped, possibly_foreign: []}} =
              Regen.write_pack(contract, "demo.widget", out: out, root: dir, test_paths: [])
 
-    assert File.exists?(Path.join(out, "stubs/lib/elsewhere/thing.ex"))
+    assert File.exists?(Path.join(out, "stubs/lib/demo/widget.ex"))
+    refute File.exists?(Path.join(out, "stubs/lib/covenant/error.ex"))
+    refute File.exists?(Path.join(out, "stubs/lib/elsewhere/thing.ex"))
+    refute File.exists?(Path.join(out, "stubs/lib/spend/policy.ex"))
     refute File.exists?(Path.join(out, "stubs/lib/mix/project.ex"))
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.regen.I8"
+  test "a loadable module whose beam lies anywhere else is stubbed and reported", %{tmp_dir: dir} do
+    surface = "- `Demo.Widget.size/1` — its size; it calls `Covenant.Error.format/1`."
+    contract = Contract.load!(ContractBuilder.demo_contracts(dir, surface, ""))
+    component = Contract.component(contract, "demo.widget")
+
+    # an environment in which no app, dependency or installation holds Covenant's own beams
+    nowhere = Ownership.environment(%{app: :nowhere, build_path: Path.join(dir, "_build")})
+
+    assert Ownership.classify_beam(:code.which(Covenant.Error), nowhere) == :unsure
+
+    assert %{possibly_foreign: ["Covenant.Error"], skipped: []} =
+             Regen.surface(component, environment: nowhere)
+
+    assert Enum.map(Regen.stubs(component, environment: nowhere), &elem(&1, 0)) ==
+             ["Covenant.Error", "Demo.Widget"]
   end
 
   @tag obligation: "covenant.regen.I8"
@@ -396,15 +539,19 @@ defmodule Covenant.RegenContractTest do
   end
 
   @tag obligation: "covenant.regen.I8"
-  test "a module that is not loadable is foreign in a dependency's namespace, else stubbed" do
+  test "a module that is not loadable is foreign in a dependency's namespace, else stubbed or unplaced" do
     env = Ownership.environment(%{app: :shop, deps: [:ecto], build_path: "/work/_build/dev"})
 
     assert Ownership.classify("Ecto.NotAModule", env) == :foreign
     assert Ownership.classify("Shop.NotAModule", env) == :own
     assert Ownership.classify("Shop.NotAModule", env, ["Shop"]) == :own
     assert Ownership.classify("Other.NotAModule", env) == :own
-    assert Ownership.classify("Other.NotAModule", env, ["Shop"]) == :unsure
+    assert Ownership.classify("Other.NotAModule", env, ["Shop"]) == :unplaced
     assert Ownership.classify("System", env) == :foreign
+
+    # a loadable module is judged by its beam: Covenant's own is in an app of this project
+    project = Ownership.environment(%{app: :covenant, build_path: Mix.Project.build_path()})
+    assert Ownership.classify("Covenant.Error", project) == :implemented
   end
 
   @tag :tmp_dir

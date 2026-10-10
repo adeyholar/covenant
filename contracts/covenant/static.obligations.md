@@ -43,3 +43,10 @@ contract tests resolve paths from.
 - **kind:** functional
 - **record:** root-is-contracts-parent
 - **status:** active
+
+### covenant.static.I6 — Test paths resolve against the root
+- **scope:** `Covenant.test_paths/0`, `Covenant.test_paths/1`
+- **must:** return the configured `:test_paths` (default `["test/contract"]`) as absolute paths, each relative entry resolved against `Covenant.root/0` and never against the working directory, an absolute entry and a glob left as they are; with `--test-path` values typed on the command line, return them resolved against the working directory, and with none, the configured ones; the same answer from any directory under the root
+- **kind:** functional
+- **record:** test-paths-resolve-against-root
+- **status:** active

@@ -23,15 +23,20 @@ defmodule Covenant.Regen do
   ## Modules the component does not own
 
   A Public surface line may mention `System.halt(1)` or `Scope.put/1` in
-  prose, and a stub for a module the component does not own would shadow the
-  real one. `Covenant.Regen.Ownership` decides: a `#### Modules` paragraph in
-  the Public surface (or the front matter's `modules:`) is the authoritative
-  list; without one, a module is foreign when it lives in OTP, Elixir or a
-  dependency, and owned when it lives in one of the running project's apps.
-  What it cannot tell is stubbed and reported as `:possibly_foreign`;
-  references it dropped come back in `:skipped`. A bare alias (`Scope`) is
-  merged into the one owned module whose last segment matches
-  (`Machina.Scope`) and dropped when none or several match.
+  prose, or the collaborators the component calls, and a stub for a module the
+  component does not own would shadow the real one. `Covenant.Regen.Ownership`
+  decides: a `#### Modules` paragraph in the Public surface (or the front
+  matter's `modules:`) is the authoritative list; a module another component
+  of the Contract lists belongs to that one; without a list, a module is
+  foreign when it lives in OTP, Elixir or a dependency, already implemented
+  when it lives in one of the running project's apps, and stubbed when it is
+  not loadable and in a namespace the component's obligations use. What it
+  cannot tell (a beam anywhere else) is stubbed and reported as
+  `:possibly_foreign`; references it dropped come back in `:skipped`, each
+  carrying `owner: "<component id>"` when another component lists the module
+  and `implemented: true` when the running project already has it. An alias
+  (`Scope`, `Repo.Scoped`) is merged into the one known module whose name ends
+  in it (`Machina.Scope`) and dropped when none or several match.
   """
 
   alias Covenant.Contract
@@ -57,6 +62,8 @@ defmodule Covenant.Regen do
   * `:environment` — where OTP, Elixir, the dependencies and the project's apps live, to tell
     which modules the component owns (default `Covenant.Regen.Ownership.environment/0`, the
     running VM).
+
+  The modules the other components of `contract` list are foreign to this one and are skipped.
   """
   @spec write_pack(Contract.t(), String.t(), keyword()) :: {:ok, pack()} | {:error, String.t()}
   def write_pack(%Contract{} = contract, component_id, opts \\ []) do
@@ -71,7 +78,10 @@ defmodule Covenant.Regen do
         test_paths = Keyword.get(opts, :test_paths, Covenant.test_paths())
         tests = find_tests(component_id, test_paths, root)
 
-        stub_opts = Keyword.take(opts, [:environment])
+        stub_opts =
+          Keyword.take(opts, [:environment]) ++
+            [declared_elsewhere: Ownership.declared_elsewhere(contract, component)]
+
         %{skipped: skipped, possibly_foreign: possibly_foreign} = surface(component, stub_opts)
 
         File.rm_rf!(out)
@@ -163,13 +173,18 @@ defmodule Covenant.Regen do
 
   @signature ~r/`([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)\.([a-z_][A-Za-z0-9_]*[?!]?)(?:\(([^)`]*)\)|\/(\d+))(?:\s*::\s*([^`]+))?`/
 
-  @typedoc "A public-surface signature read from the intent."
+  @typedoc """
+  A public-surface signature read from the intent. A skipped one may also carry `owner` (the
+  component that lists its module) or `implemented: true` (the running project has the module).
+  """
   @type signature :: %{
-          module: String.t(),
-          function: String.t(),
-          args: [String.t()],
-          return: String.t() | nil,
-          doc: String.t()
+          required(:module) => String.t(),
+          required(:function) => String.t(),
+          required(:args) => [String.t()],
+          required(:return) => String.t() | nil,
+          required(:doc) => String.t(),
+          optional(:owner) => String.t(),
+          optional(:implemented) => true
         }
 
   @doc "Reads `Module.function(args) :: type` and `Module.function/arity` signatures from the Public surface section."
@@ -248,9 +263,10 @@ defmodule Covenant.Regen do
   @doc """
   Splits `signatures/1` into the ones to stub and the references to skip: modules the component
   does not own (see "Modules the component does not own" in the module docs), plus the modules
-  it stubbed but could not be sure it owns (`:possibly_foreign`). A stubbed bare alias has its
-  module rewritten to the one it resolves to. `opts[:environment]` replaces the running VM
-  (`Covenant.Regen.Ownership.environment/0`).
+  it stubbed but could not be sure it owns (`:possibly_foreign`). A stubbed alias has its
+  module rewritten to the one it resolves to. Options: `:environment` replaces the running VM
+  (`Covenant.Regen.Ownership.environment/0`); `:declared_elsewhere` is the modules the other
+  components list, `%{module => component id}` (`Covenant.Regen.Ownership.declared_elsewhere/2`).
   """
   @spec surface(Component.t(), keyword()) :: %{
           stub: [signature()],
@@ -259,7 +275,10 @@ defmodule Covenant.Regen do
         }
   def surface(%Component{} = component, opts \\ []) do
     environment = Keyword.get_lazy(opts, :environment, &Ownership.environment/0)
-    %{stub: stub} = parts = Ownership.partition(component, signatures(component), environment)
+    elsewhere = Keyword.get(opts, :declared_elsewhere, %{})
+
+    %{stub: stub} =
+      parts = Ownership.partition(component, signatures(component), environment, elsewhere)
 
     %{parts | stub: Enum.uniq_by(stub, &{&1.module, &1.function, length(&1.args)})}
   end

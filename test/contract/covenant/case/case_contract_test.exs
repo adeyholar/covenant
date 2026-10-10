@@ -80,7 +80,7 @@ defmodule Covenant.CaseContractTest do
 
     assert error.line == 4
     assert error.description =~ "`example.counter.I5`, which is retired"
-    assert error.description =~ "counter.intent.md:79"
+    assert error.description =~ "counter.intent.md:83"
   end
 
   @tag obligation: ["covenant.case.I2", "covenant.case.I3"]

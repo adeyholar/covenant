@@ -71,3 +71,11 @@ Contract and a test run it returns every problem and the coverage table.
 - **kind:** functional
 - **record:** static-skips-compiled-checks
 - **status:** active
+
+### covenant.check.I11 — A component that declares no modules is a warning, never a failure
+- **scope:** `Covenant.Check.run/3`, `mix covenant.check`
+- **must:** list, in `Report.warnings` as one `N component(s) declare no modules: <ids>` line with the ids sorted, every component other than the whole-product `system` whose Public surface has no `#### Modules` paragraph and whose front matter has no `modules:`; leave `Report.ok?/1` and the coverage as they are; `mix covenant.check` and `mix covenant.check --static` print the line as `covenant.check: warning: ...`
+- **why:** regeneration and mutation can only guess which modules a component without a list owns
+- **kind:** functional
+- **record:** undeclared-modules-warn-only
+- **status:** active

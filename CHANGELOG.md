@@ -19,14 +19,15 @@
   (`Covenant.Regen.Ownership`). A `#### Modules` paragraph in the Public
   surface (or the front matter's `modules:`) is authoritative: exactly those
   modules are stubbed. Without one, a loadable module is foreign when its beam
-  lies under OTP, Elixir or a dependency's build path and owned when it lies
-  in the running project's apps (umbrella children included), and a module
-  that is not loadable is foreign when its first segment is a dependency's
-  namespace. A module it cannot place is stubbed and returned as
-  `:possibly_foreign`. A bare alias (`Scope`) is merged into the owned module
-  whose last segment matches, or dropped. The pack map has `:skipped` and
-  `:possibly_foreign` (`Covenant.Regen.surface/2`) and the task prints a
-  count line and a `possibly_foreign:` line.
+  lies under OTP, Elixir or a dependency's build path and already implemented
+  when it lies in the running project's apps (umbrella children included), and
+  a module that is not loadable is foreign when its first segment is a
+  dependency's namespace (see the entries below for what a pack skips and
+  why). A loadable module whose beam lies anywhere else is stubbed and
+  returned as `:possibly_foreign`. A bare alias (`Scope`) is merged into the
+  one known module whose name ends in it, or dropped. The pack map has
+  `:skipped` and `:possibly_foreign` (`Covenant.Regen.surface/2`) and the task
+  prints a count line and a `possibly_foreign:` line.
 - `Covenant.Mutate.Modules.references/1` reads module names out of the code
   spans of any text.
 - `mix covenant.regen` keeps inline code in stub `@doc` strings: only the
@@ -34,6 +35,45 @@
   on the line used to be (`calls  when ...`). Docs longer than 4096 bytes are
   no longer truncated.
 - Obligations `covenant.regen.I5`–`I8` pin these fixes.
+- Configured test paths resolve against `Covenant.root/0`, for every task. In an
+  umbrella `config :covenant, test_paths: ["apps/*/test/contract"]` used to be
+  expanded relative to the directory `mix` ran in, so `mix covenant.regen
+  agora.wake_ingest` run from `apps/agora` and `mix covenant.mutate core.tenancy`
+  run from `apps/machina_core` found no contract test. `Covenant.test_paths/0`
+  now returns absolute paths (a relative entry resolved against the root, a glob
+  kept) and `Covenant.test_paths/1` takes the task's `--test-path` values, which
+  stay relative to the working directory where they were typed. `--contracts`
+  redirects the Contract without moving the root. `mix covenant.check` hands
+  `mix test` the paths relative to the working directory, as before; the static
+  summary prints them relative to the root. Obligations `covenant.static.I6` and
+  `covenant.tasks.I9`, with an umbrella-shaped fixture
+  (`test/fixtures/umbrella_project`, tasks run from `apps/shop`).
+- `mix covenant.regen` no longer stubs another component's modules. A module
+  that the `#### Modules` paragraph or `modules:` of another component lists is
+  foreign, ahead of every other rule: skipped, attributed in the pack's
+  `:skipped` entries (`owner: "<component id>"`) and printed on a `skipped (owned
+  by <component>)` line (`Covenant.Regen.Ownership.declared_elsewhere/2`; a
+  module two components list belongs to the first by id). Without a list, a
+  loadable module of the running project is now *already implemented* and
+  skipped (`implemented: true`, a `skipped (already implemented in this
+  project)` line) instead of being stubbed as the component's own: a component
+  that wants its own implemented modules stubbed lists them. A module that is
+  not loadable and whose namespace the component's obligation scopes do not use
+  is no longer stubbed and reported as `possibly_foreign`; it is resolved as an
+  alias or dropped. An alias resolves to the one known module whose name ends in
+  it (the listed modules, the other components' modules and the modules the
+  surface stubs), so a dotted fragment such as `Repo.Scoped` or `Spend.Policy`
+  never becomes a stub. `possibly_foreign` now means a loadable module whose beam
+  lies nowhere known. `Ownership.partition/3` gained a fourth argument (the
+  other components' modules; default none) and `Ownership.classify/3` the
+  verdicts `:implemented` and `:unplaced`. Obligation `covenant.regen.I9`;
+  `covenant.regen.I8` rewritten. In the fixture the counter's intent now has a
+  `#### Modules` paragraph, which moved its obligations four lines down.
+- `mix covenant.check` and `mix covenant.check --static` warn, without failing,
+  about the components that declare no modules (no `#### Modules` paragraph, no
+  `modules:` front matter; the `system` intent is exempt): `covenant.check:
+  warning: N component(s) declare no modules: ...`. `Covenant.Check.Report` has a
+  `:warnings` field. Obligation `covenant.check.I11`.
 - `mix covenant.mutate --jobs N` no longer corrupts the kill credit. ExUnit
   creates a test's `:tmp_dir` at `tmp/<module>/<test>` under the OS process's
   working directory, so N workers shared it, cleared and rewrote each other's

@@ -14,6 +14,10 @@ defmodule Covenant.Check do
 
   Malformed blocks are reported earlier, by `Covenant.Contract.load/1`.
 
+  `Report.warnings` holds what is worth saying but never fails the check: the components that
+  declare no modules (no `#### Modules` paragraph in the Public surface and no `modules:` front
+  matter), whose pack `mix covenant.regen` can only guess the ownership of.
+
   With `mode: :static` (`mix covenant.check --static`, where the code under
   test is not compiled) the checks that need compiled code are skipped and
   listed in `Report.skipped` instead of failing: exception targets naming a
@@ -24,23 +28,26 @@ defmodule Covenant.Check do
 
   alias Covenant.Contract
   alias Covenant.Contract.{Ceiling, Component, Obligation, Validate}
+  alias Covenant.Regen.Ownership
   alias Covenant.{Coverage, Error, Results, Target}
 
   defmodule Report do
     @moduledoc """
-    What a check produced: sorted problems, the coverage table and (static
+    What a check produced: sorted problems, the coverage table, (static
     mode) the checks skipped for want of compiled code, as `{kind, name}`
-    with kind `:exception` or `:ceiling`.
+    with kind `:exception` or `:ceiling`, and the warnings, which never
+    make `ok?/1` false.
     """
 
     @type t :: %__MODULE__{
             problems: [Covenant.Error.t()],
             coverage: Covenant.Coverage.t(),
-            skipped: [{:exception | :ceiling, String.t()}]
+            skipped: [{:exception | :ceiling, String.t()}],
+            warnings: [String.t()]
           }
 
     @enforce_keys [:problems, :coverage]
-    defstruct [:problems, :coverage, skipped: []]
+    defstruct [:problems, :coverage, skipped: [], warnings: []]
 
     @doc "True when no problem was found."
     @spec ok?(t()) :: boolean()
@@ -78,8 +85,23 @@ defmodule Covenant.Check do
     %Report{
       problems: Error.sort(problems),
       coverage: coverage,
-      skipped: Enum.sort(skipped_exceptions ++ skipped_ceilings)
+      skipped: Enum.sort(skipped_exceptions ++ skipped_ceilings),
+      warnings: undeclared_modules(contract)
     }
+  end
+
+  # The whole-product intent has no modules to declare, so `system` is never listed.
+  defp undeclared_modules(contract) do
+    undeclared =
+      for {id, %Component{form: form} = component} <- contract.components,
+          form != :system,
+          Ownership.listed(component) == [],
+          do: id
+
+    case Enum.sort(undeclared) do
+      [] -> []
+      ids -> ["#{length(ids)} component(s) declare no modules: #{Enum.join(ids, ", ")}"]
+    end
   end
 
   defp untested(contract, by_obligation) do

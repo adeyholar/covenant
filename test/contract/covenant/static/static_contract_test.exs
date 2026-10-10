@@ -302,7 +302,7 @@ defmodule Covenant.StaticContractTest do
              ]
   end
 
-  describe "Covenant.root/0" do
+  describe "Covenant.root/0 and Covenant.test_paths" do
     setup do
       env = System.get_env("COVENANT_ROOT")
       app = Application.get_all_env(:covenant)
@@ -354,6 +354,76 @@ defmodule Covenant.StaticContractTest do
 
       System.put_env("COVENANT_ROOT", Path.join(dir, "from-env"))
       assert Covenant.root() == Path.join(dir, "from-env")
+    end
+
+    @tag :tmp_dir
+    @tag obligation: "covenant.static.I6"
+    test "configured test paths resolve against the root, from any directory under it", %{
+      tmp_dir: dir
+    } do
+      dir = Path.expand(dir)
+      File.mkdir_p!(Path.join(dir, "contracts"))
+      app = Path.join(dir, "apps/agora")
+      File.mkdir_p!(app)
+
+      Application.put_env(:covenant, :contracts_dir, Path.join(dir, "contracts"))
+
+      Application.put_env(:covenant, :test_paths, [
+        "apps/*/test/contract",
+        "test/contract",
+        "/elsewhere/contract"
+      ])
+
+      expected = [
+        Path.join(dir, "apps/*/test/contract"),
+        Path.join(dir, "test/contract"),
+        "/elsewhere/contract"
+      ]
+
+      for cwd <- [dir, app] do
+        assert File.cd!(cwd, fn -> Covenant.test_paths() end) == expected
+        assert File.cd!(cwd, fn -> Covenant.test_paths([]) end) == expected
+      end
+
+      # a single string and the default are paths too
+      Application.put_env(:covenant, :test_paths, "spec/contract")
+      assert File.cd!(app, fn -> Covenant.test_paths() end) == [Path.join(dir, "spec/contract")]
+
+      Application.delete_env(:covenant, :test_paths)
+      assert File.cd!(app, fn -> Covenant.test_paths() end) == [Path.join(dir, "test/contract")]
+
+      # a relative contracts_dir is found from the working directory upwards, as root/0 finds it
+      Application.put_env(:covenant, :contracts_dir, "contracts")
+      assert File.cd!(app, fn -> Covenant.test_paths() end) == [Path.join(dir, "test/contract")]
+
+      # and COVENANT_ROOT moves them, like everything else under the root
+      System.put_env("COVENANT_ROOT", Path.join(dir, "elsewhere"))
+
+      assert File.cd!(app, fn -> Covenant.test_paths() end) ==
+               [Path.join(dir, "elsewhere/test/contract")]
+    end
+
+    @tag :tmp_dir
+    @tag obligation: "covenant.static.I6"
+    test "typed test paths resolve against the working directory; none typed gives the configured ones",
+         %{tmp_dir: dir} do
+      dir = Path.expand(dir)
+      File.mkdir_p!(Path.join(dir, "contracts"))
+      app = Path.join(dir, "apps/agora")
+      File.mkdir_p!(app)
+
+      Application.put_env(:covenant, :contracts_dir, Path.join(dir, "contracts"))
+      Application.put_env(:covenant, :test_paths, ["apps/*/test/contract"])
+
+      assert File.cd!(app, fn -> Covenant.test_paths(["test/contract", "../*/test", "/abs/x"]) end) ==
+               [
+                 Path.join(app, "test/contract"),
+                 Path.join(dir, "apps/*/test"),
+                 "/abs/x"
+               ]
+
+      assert File.cd!(app, fn -> Covenant.test_paths([]) end) ==
+               [Path.join(dir, "apps/*/test/contract")]
     end
 
     @tag :tmp_dir

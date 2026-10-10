@@ -150,7 +150,7 @@ ExUnit.start(formatters: [ExUnit.CLIFormatter, Covenant.Formatter])
 
 | Task | Does |
 |---|---|
-| `mix covenant.check` | Parses the Contract, runs `test/contract` with the formatter, fails on malformed blocks, dangling `record`/`invariant`/`superseded_by`/`depends_on` references, an active obligation without a tagged test, a tag naming an unknown obligation, a failing tagged test, a stale exception, or a scope ceiling exceeded; prints coverage per component and per app; writes `contracts/coverage.json`. `--no-run` reuses the last results; `--contracts DIR`, `--test-path PATH` (repeatable), `--results-dir DIR`. Exit 1 on any problem. |
+| `mix covenant.check` | Parses the Contract, runs `test/contract` with the formatter, fails on malformed blocks, dangling `record`/`invariant`/`superseded_by`/`depends_on` references, an active obligation without a tagged test, a tag naming an unknown obligation, a failing tagged test, a stale exception, or a scope ceiling exceeded; prints coverage per component and per app; writes `contracts/coverage.json`. `--no-run` reuses the last results; `--contracts DIR`, `--test-path PATH` (repeatable), `--results-dir DIR`. Exit 1 on any problem. Warns, without failing, about the components that declare no modules (see [Declaring modules](#declaring-modules)). |
 | `mix covenant.check --static` | Compiles and runs no test: parses the contract test files (`Code.string_to_quoted/2`), reads every `use Covenant.Case` module's `@tag`/`@describetag`/`@moduletag obligation:` values (strings and lists, merged as ExUnit merges them) and runs every check that needs no compiled code, plus `Covenant.Case`'s compile-time rules. Module/function exception targets and `module` ceiling counters are listed as skipped; file targets and `glob` counters are checked against `--root` (default `Covenant.root/0`). Writes `contracts/coverage.static.json` (`"mode": "static"`), never `coverage.json`. For a Contract written ahead of its implementation. |
 | `mix covenant.conditions` | Evaluates every record condition with a `check` and lists suspect records with the failing premise. `--verbose` prints every outcome. Exit 1 when any record is suspect. |
 | `mix covenant.regen <component>` | Writes a regeneration pack: `PROMPT.md`, the regeneration brief, the convention, the intent (or obligations file) and records, the system intent and records, the component's contract tests and public-surface stubs. The implementation is excluded. `--out DIR` (default `tmp/covenant/regen/<component>`). |
@@ -193,25 +193,60 @@ The doc keeps the line's inline code verbatim; only the signature spans that
 open the line are removed.
 
 A reference to a module the component does not own (`System.halt(1)` or
-`Ecto.UUID.cast/1` in prose) gets no stub. Which modules the component owns:
+`Ecto.UUID.cast/1` in prose, or a collaborator's `Machina.Repo.Scoped.scoped/2`)
+gets no stub. Which modules the component owns:
 
 1. If the Public surface has a `#### Modules` paragraph (or the front matter a
    `modules:` list), that list is authoritative: exactly those modules are
    stubbed and every other reference is skipped. Only the backticked names
    outside parentheses count.
-2. Otherwise a loadable module is foreign when its beam lies under the OTP or
-   Elixir installation or a dependency's build path, and owned when it lies in
-   an app of the running Mix project (umbrella children and `in_umbrella`
-   dependencies included). A module that is not loadable is foreign when its
-   first segment is a dependency's namespace (`Ecto` for `:ecto`) and stubbed
-   otherwise.
-3. A module it cannot place (a beam anywhere else, or a namespace none of the
-   component's obligation scopes use) is stubbed and printed on a
+2. A module that another component of the Contract lists (in its own
+   `#### Modules` paragraph or `modules:`) belongs to that component, whether or
+   not it is implemented yet: it is skipped, and the task prints it on a
+   `skipped (owned by <component>)` line.
+3. Otherwise a loadable module is foreign when its beam lies under the OTP or
+   Elixir installation or a dependency's build path, and *already implemented*
+   when it lies in an app of the running Mix project (umbrella children and
+   `in_umbrella` dependencies included): the component declared no modules, so
+   nothing says the implementation is its own and a stub would shadow it. It is
+   skipped, on a `skipped (already implemented in this project)` line. A module
+   that is not loadable is foreign when its first segment is a dependency's
+   namespace (`Ecto` for `:ecto`), stubbed when its first segment is a namespace
+   the component's obligation scopes use (or when they name no module), and
+   *unplaced* otherwise.
+4. A loadable module whose beam is anywhere else is stubbed and printed on a
    `possibly_foreign:` line.
 
-A bare alias such as `Scope.put/1` is merged into the one owned module ending
-in `Scope`, and dropped when none or several do. The task prints one line with
-the number and modules of the skipped references.
+An alias is merged into the one known module whose name ends in it, the known
+modules being the listed ones, the ones other components list and the ones the
+surface stubs: the bare `Scope` (`Scope.put/1`), a dotted fragment such as
+`Repo.Scoped`, and an unplaced name such as `Spend.Policy`. It is dropped when
+none or several match. The task prints one more line with the number and modules
+of the skipped references no other line accounts for.
+
+### Declaring modules
+
+Rule 3 is a guess, and it skips the component's *own* implemented modules too: a
+component that lists no modules has claimed none. Declare them, in a
+`#### Modules` paragraph of the Public surface or in the front matter:
+
+```markdown
+## Public surface
+
+#### Modules
+
+`Example.Counter`, `Example.Counter.Log`.
+```
+
+`mix covenant.check` (and `--static`) warns about every component that declares
+none, as one line that never fails the check:
+
+```
+covenant.check: warning: 2 component(s) declare no modules: example.greeter, example.widget
+```
+
+The whole-product `system` intent is never listed. (`mix covenant.mutate` reads only the
+front matter's `modules:`, then derives the modules from the Public surface and the scopes.)
 
 ## Mutation testing
 
@@ -371,6 +406,15 @@ In an umbrella, set `contracts_dir` to an absolute path
 `test_paths: ["apps/*/test/contract"]`. Results are written per app
 (`<results_dir>/<app>.json`) and merged by `mix covenant.check`, so each
 app's suite contributes its own tests.
+
+Configured `test_paths` are relative to `Covenant.root/0`, not to the directory a
+task runs in: `mix covenant.regen`, `mix covenant.mutate` and `mix covenant.check`
+(`--static` included) find the same contract tests from the umbrella root and from
+`apps/<app>`. A `--test-path` typed on the command line is relative to the directory
+you typed it in, and `--contracts DIR` redirects the Contract without moving the root.
+(`mix covenant.check` hands `mix test` the paths relative to the working directory.)
+`test/fixtures/umbrella_project` is an umbrella-shaped fixture that runs the tasks from
+`apps/shop`.
 
 ## Example
 

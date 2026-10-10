@@ -218,3 +218,52 @@
   approved_by: contract integrator (workflow pass, 2026-10-10); pending lead review
   expires: Never
   source: ["lib/covenant.ex"]
+
+- id: test-paths-resolve-against-root
+  date: "2026-10-10"
+  decision: "The configured `test_paths` resolve against `Covenant.root/0` in every task and in `Covenant.test_paths/0`; a `--test-path` typed on the command line resolves against the working directory. `--contracts` redirects the Contract, not the root the configured paths resolve against."
+  driver: "In the machina-ex umbrella `mix covenant.regen agora.wake_ingest` run from `apps/agora` and `mix covenant.mutate core.tenancy` run from `apps/machina_core` found no contract tests: `apps/*/test/contract` was expanded relative to the app directory."
+  alternatives:
+    - option: Resolve against the working directory, as before
+      rejected: "A configured path is the project's, not the user's; in an umbrella the working directory is never the root (record root-is-contracts-parent)."
+    - option: Resolve a typed `--test-path` against the root too
+      rejected: "A user types a path relative to where they are; every shell tool works that way."
+    - option: Let `--contracts DIR` move the root to DIR's parent
+      rejected: "`mix covenant.check --contracts tmp/copy` documents another Contract for the same tests in the working directory; moving the root would stop finding them."
+  evidence: machina-ex ruling R11; covenant.tasks.I9.
+  invariant: covenant.static.I6
+  approved_by: lead's Covenant fixes brief (2026-10-10); pending lead review
+  expires: Never
+  source: ["lib/covenant.ex", "lib/mix/tasks/covenant.check.ex", "lib/mix/tasks/covenant.regen.ex", "lib/mix/tasks/covenant.mutate.ex"]
+
+- id: declared-elsewhere-is-foreign
+  date: "2026-10-10"
+  decision: "A module another component lists (`#### Modules` paragraph or `modules:`) belongs to that component, ahead of every location rule, and a loadable module of the running project that no list claims is already implemented, not the component's to stub. A name that is neither loadable nor in a namespace the component uses is resolved as an alias of a known module or dropped."
+  driver: "A pack for `agora.wake_ingest` stubbed `Machina.Repo.Scoped`, `Machina.Tenancy`, `Machina.Clock` and `Machina.Test.*`: modules `core.tenancy` lists and the project already implements. Without a list every module of the running project counted as the component's."
+  alternatives:
+    - option: Keep treating every loadable module of the project as owned
+      rejected: "That is the bug: the pack shadows other components' implemented modules."
+    - option: Derive the owner from the modules other components name in their obligation scopes
+      rejected: "Scopes name collaborators as well as the component's own code, so the owner would be a guess; a list is a declaration."
+    - option: Stub what cannot be placed and report it, for every unplaced name
+      rejected: "`Spend.Policy` (a fragment of `Machina.LLM.Spend.Policy`) and `Machina.Test.Log` were stubbed as if the component owned them. Only a loadable module whose beam lies nowhere known is still stubbed and reported."
+  evidence: machina-ex `contracts/core/tenancy.intent.md` (`#### Modules`); covenant.regen.I8, I9.
+  invariant: covenant.regen.I9
+  approved_by: lead's Covenant fixes brief (2026-10-10); pending lead review
+  conditions:
+    - text: A component that wants its own implemented modules stubbed lists them
+  expires: When a component can claim modules some other way than a list
+  source: ["lib/covenant/regen/ownership.ex"]
+
+- id: undeclared-modules-warn-only
+  date: "2026-10-10"
+  decision: "A component that declares no modules is a warning of `mix covenant.check`, never a failure; the whole-product `system` intent is exempt."
+  driver: "`mix covenant.regen` and `mix covenant.mutate` can only guess what a component without a list owns; most of a young Contract declares none, and failing on all of them would block every check."
+  alternatives:
+    - option: Fail the check
+      rejected: "A Contract written ahead of its implementation has nothing to list yet, and a failure nobody can act on is ignored."
+  evidence: covenant.check.I11.
+  invariant: covenant.check.I11
+  approved_by: lead's Covenant fixes brief (2026-10-10); pending lead review
+  expires: When every component declares its modules
+  source: ["lib/covenant/check.ex"]
