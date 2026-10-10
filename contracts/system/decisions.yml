@@ -1,0 +1,143 @@
+- id: exceptions-need-no-test
+  date: "2026-10-09"
+  decision: "A `kind: exception` block is a declaration about code, not a promise; it needs no tagged test and is excluded from coverage denominators, as are retired obligations."
+  driver: The convention says an exception "fails the build when its target no longer exists" and nothing about tests; a test for "we intentionally duplicate this" asserts nothing.
+  alternatives:
+    - option: Count exceptions as obligations needing a test
+      rejected: Every exception would get a vacuous test written to satisfy the tool, which the convention forbids ("a contract example is never deleted to satisfy a tool" cuts both ways).
+    - option: Count exceptions in the denominator but never as covered
+      rejected: Coverage could never reach 100% for a component with a declared exception, which hides real gaps.
+  evidence: contracts/README.md (machina-ex), "Light form" section.
+  invariant: covenant.check.I1
+  approved_by: Covenant's author (initial build, 2026-10-09)
+  conditions:
+    - text: "The convention keeps `kind: exception` as a block kind rather than a separate section"
+  expires: If exceptions move out of obligation blocks
+  source: ["contracts/README.md (machina-ex)"]
+
+- id: untagged-test-is-compile-error
+  date: "2026-10-09"
+  decision: A test inside a `Covenant.Case` module without an `obligation` tag is a compile error, not a warning.
+  driver: The convention tags every contract test; an untagged test in `test/contract/` is an implementation test in the wrong place and contributes nothing to coverage.
+  alternatives:
+    - option: Warn and skip untagged tests
+      rejected: Warnings scroll past; the test still runs and looks like a contract test to a reader.
+    - option: Count untagged tests as coverage for nothing
+      rejected: Same as warning, with a misleading results file.
+  evidence: contracts/README.md (machina-ex), "Contract tests" section.
+  invariant: covenant.case.I2
+  approved_by: Covenant's author (initial build, 2026-10-09)
+  conditions:
+    - text: Contract tests live in their own directory, so implementation tests have somewhere else to go
+  expires: Never
+  source: ["contracts/README.md (machina-ex)"]
+
+- id: same-component-tags
+  date: "2026-10-09"
+  decision: A test may only be tagged with obligations of the component its module declares; tagging another component's obligation is a compile error.
+  driver: `mix covenant.regen` collects a component's contract tests by the module's `component:` declaration; a test tagged across components would be left out of the pack it proves.
+  alternatives:
+    - option: Allow any obligation id and let coverage sort it out
+      rejected: Regeneration packs would be silently incomplete.
+  evidence: Covenant.Regen.find_tests/3 reads the `use Covenant.Case, component:` line.
+  invariant: covenant.case.I1
+  approved_by: Covenant's author (initial build, 2026-10-09)
+  conditions:
+    - text: Regeneration packs are assembled per component
+  expires: If packs are assembled per obligation instead
+  source: ["lib/covenant/regen.ex"]
+
+- id: results-per-app
+  date: "2026-10-09"
+  decision: Covenant.Formatter writes one results file per Mix app (`<results_dir>/<app>.json`) under a `_build/covenant/results` directory shared by every MIX_ENV; `mix covenant.check` merges them.
+  driver: Machina is an umbrella; one results file would be overwritten by each app's suite, and `_build/test` is not where the check task (running in dev) looks.
+  alternatives:
+    - option: One results file, merged by module on write
+      rejected: Entries for deleted modules linger forever.
+    - option: Results under `_build/<env>`
+      rejected: The check task runs in dev and the suite in test; they would never see the same directory.
+  evidence: Mix.Project.build_path/0 is `_build/<env>`; its dirname is stable across envs.
+  invariant: covenant.results.I2
+  approved_by: Covenant's author (initial build, 2026-10-09)
+  conditions:
+    - text: Elixir ships the JSON module used to write results
+      check: { kind: elixir, version: ">= 1.18.0" }
+  expires: If Covenant grows its own results store
+  source: ["lib/covenant/formatter.ex", "lib/covenant.ex"]
+
+- id: targets-are-public-code
+  date: "2026-10-09"
+  decision: An exception `target` names a public function (`Module.fun/arity`), a module, or a file path; private functions cannot be targeted.
+  driver: Staleness is checked with `function_exported?/3`, which only sees public functions; parsing source to find private ones is not worth its weight for a first version.
+  alternatives:
+    - option: Parse the module's source with Code.string_to_quoted to find private functions
+      rejected: Needs a source-path mapping per module; deferred until a real exception needs it.
+  evidence: Covenant.Target.exists?/2.
+  invariant: covenant.check.I4
+  approved_by: Covenant's author (initial build, 2026-10-09)
+  kind: known-gap
+  conditions:
+    - text: No exception in Machina's contracts targets a private function yet
+  expires: When the first private-function exception is declared
+  source: ["lib/covenant/target.ex"]
+
+- id: suite-runs-as-subprocess
+  date: "2026-10-09"
+  decision: `mix covenant.check` runs the contract suite as a `mix test` subprocess with `MIX_ENV=test`, never in-process.
+  driver: Running ExUnit inside another Mix task would share the task's env and build, and a failing suite would take the task down with it.
+  alternatives:
+    - option: Mix.Task.run("test") in-process
+      rejected: Env switching and ExUnit lifecycle inside a running task are fragile; the test build would also pollute the dev build.
+  evidence: Elixir's own `mix test` switches env through the CLI, not through Mix.Task.run.
+  invariant: covenant.tasks.I1
+  approved_by: Covenant's author (initial build, 2026-10-09)
+  conditions:
+    - text: The `mix` executable is found through PATH
+      check: { kind: env, name: PATH }
+  expires: Never
+  source: ["lib/mix/tasks/covenant.check.ex"]
+
+- id: yaml-via-yaml-elixir
+  date: "2026-10-09"
+  decision: Decision records and scope ceilings are YAML read through yaml_elixir, the only runtime dependency.
+  driver: The convention fixes YAML for records; yaml_elixir wraps the mature Erlang yamerl parser and adds nothing else.
+  alternatives:
+    - option: Records as Elixir terms or JSON
+      rejected: The convention is YAML, shared with Agora's Ruby-era records.
+  evidence: contracts/README.md (machina-ex), "Decision records" section.
+  approved_by: Covenant's author (initial build, 2026-10-09)
+  conditions:
+    - text: yaml_elixir 2.12 or compatible is locked
+      check: { kind: dep, name: yaml_elixir, version: "~> 2.12" }
+  expires: If the convention moves records off YAML
+  source: ["mix.exs"]
+
+- id: references-checked-at-check-time
+  date: "2026-10-09"
+  decision: Dangling `record`, `invariant`, `superseded_by` and `depends_on` references fail `mix covenant.check`, not the compilation of contract tests.
+  driver: A test module needs a parsable Contract to validate its tags; a dangling record reference does not make an obligation id ambiguous, so it must not stop the suite from compiling.
+  alternatives:
+    - option: Fail compilation on any Contract problem
+      rejected: One stale record id would block every contract test from compiling.
+  evidence: Covenant.Contract.load/1 (structural) versus Covenant.Contract.Validate.dangling/1 (references).
+  invariant: covenant.check.I6
+  approved_by: Covenant's author (initial build, 2026-10-09)
+  conditions:
+    - text: Structural errors still fail compilation through Covenant.Case
+  expires: Never
+  source: ["lib/covenant/contract/validate.ex", "lib/covenant/case.ex"]
+
+- id: small-surface
+  date: "2026-10-09"
+  decision: Covenant stays under 30 source files in lib/.
+  driver: Every unit of complexity pays rent in leverage; a contract tool that cannot be read in an afternoon will not be trusted to gate merges.
+  alternatives:
+    - option: No ceiling
+      rejected: The first scope budget Covenant checks should be its own.
+  evidence: 23 files at the initial build.
+  approved_by: Covenant's author (initial build, 2026-10-09)
+  conditions:
+    - text: The source lives under lib/
+      check: { kind: file, path: lib/covenant.ex }
+  expires: When `mix covenant.mutate` lands and the ceiling is re-examined
+  source: ["contracts/system/scope.yml"]

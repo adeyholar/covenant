@@ -1,0 +1,68 @@
+# Survivor sort for example.counter (`mix covenant.mutate example.counter`).
+# Every surviving mutant is either caught by a new test or annotated here with
+# the judgment behind letting it live. Sorts: equivalent | log-only |
+# dead-code | timeout | evaluation-gap | decision-hole.
+- at: lib/example/counter.ex:18:20
+  operator: integer_shift
+  mutation: "`0` → `1`"
+  sort: equivalent
+  reason: new/1 sets value explicitly; the defstruct default is never read.
+- at: lib/example/counter.ex:18:20
+  operator: integer_shift
+  mutation: "`0` → `-1`"
+  sort: equivalent
+  reason: new/1 sets value explicitly; the defstruct default is never read.
+- at: lib/example/counter.ex:25:29
+  operator: logical_swap
+  sort: evaluation-gap
+  reason: new/1 rejecting a non-integer max is not an obligation yet; add one before callers rely on it.
+- at: lib/example/counter.ex:25:37
+  operator: comparison_swap
+  mutation: "`>` → `>=`"
+  sort: evaluation-gap
+  reason: new/1 rejecting max 0 is not an obligation yet; same gap as the non-integer case.
+- at: lib/example/counter.ex:25:39
+  operator: integer_shift
+  mutation: "`0` → `-1`"
+  sort: evaluation-gap
+  reason: new/1 rejecting max 0 is not an obligation yet; same gap as the non-integer case.
+- at: lib/example/counter.ex:26:28
+  operator: string_empty
+  sort: log-only
+  reason: The ArgumentError message is prose for humans; the Contract pins the exception, not its text.
+- at: lib/example/counter.ex:29:17
+  operator: element_removal
+  sort: equivalent
+  reason: The struct default for value is 0 already.
+- at: lib/example/counter.ex:29:37
+  operator: element_removal
+  sort: equivalent
+  reason: The struct default for events is [] already.
+- at: lib/example/counter.ex:34:48
+  operator: integer_shift
+  mutation: "`1` → `2`"
+  sort: decision-hole
+  reason: The Contract lists increment/2 only; whether a default step exists is deliberately undecided.
+- at: lib/example/counter.ex:34:48
+  operator: integer_shift
+  mutation: "`1` → `0`"
+  sort: decision-hole
+  reason: The Contract lists increment/2 only; whether a default step exists is deliberately undecided.
+- at: lib/example/counter.ex:46:48
+  operator: integer_shift
+  mutation: "`1` → `2`"
+  sort: decision-hole
+  reason: The Contract lists decrement/2 only; whether a default step exists is deliberately undecided.
+- at: lib/example/counter.ex:46:48
+  operator: integer_shift
+  mutation: "`1` → `0`"
+  sort: decision-hole
+  reason: The Contract lists decrement/2 only; whether a default step exists is deliberately undecided.
+- at: lib/example/counter.ex:69:60
+  operator: return_nil
+  sort: dead-code
+  reason: check_step!/1's return value is never read; only its raise is observable.
+- at: lib/example/counter.ex:72:26
+  operator: string_empty
+  sort: log-only
+  reason: The ArgumentError message is prose for humans; the Contract pins the exception, not its text.

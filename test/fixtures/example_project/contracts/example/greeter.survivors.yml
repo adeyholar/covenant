@@ -1,0 +1,7 @@
+# Survivor sort for example.greeter (`mix covenant.mutate example.greeter`).
+# Mutants inside `Example.Greeter.clamp/1` need no entry: that function is the
+# target of exception `example.greeter.I2` and is sorted `decision-hole`.
+- at: lib/example/greeter.ex:10:19
+  operator: guard_removal
+  sort: decision-hole
+  reason: I1 only speaks of names and nil; what greet/1 does with a non-string is deliberately undecided.

@@ -1,0 +1,346 @@
+defmodule Covenant.Regen do
+  @moduledoc """
+  Writes a regeneration pack for one component: everything a fresh agent
+  needs to rebuild the implementation from the Contract, and nothing else.
+
+  ```
+  <out>/
+    PROMPT.md                         # the brief for the regenerating agent
+    REGENERATION_BRIEF.md             # the intent's "Regeneration brief" section
+    CONTRACT_CONVENTION.md            # contracts/README.md, when present
+    contracts/<app>/<name>.intent.md  # or .obligations.md, verbatim
+    contracts/<app>/<name>.decisions.yml
+    contracts/system/intent.md        # when present
+    contracts/system/decisions.yml    # when present
+    test/contract/...                 # the component's contract tests, verbatim
+    stubs/lib/<module path>.ex        # public-surface stubs (heavy form)
+  ```
+
+  The old implementation is deliberately excluded (IMP R17): if the rebuilt
+  component diverges, the Contract was missing a sentence.
+  """
+
+  alias Covenant.Contract
+  alias Covenant.Contract.Component
+
+  @type pack :: %{dir: Path.t(), files: [Path.t()]}
+
+  @doc """
+  Writes the pack for `component_id`. Options:
+
+  * `:out` — the pack directory (default `tmp/covenant/regen/<component id>`);
+  * `:test_paths` — contract test paths or globs to search (default `Covenant.test_paths/0`);
+  * `:root` — the project root the test paths are relative to (default: current directory).
+  """
+  @spec write_pack(Contract.t(), String.t(), keyword()) :: {:ok, pack()} | {:error, String.t()}
+  def write_pack(%Contract{} = contract, component_id, opts \\ []) do
+    case Contract.component(contract, component_id) do
+      nil ->
+        {:error,
+         "unknown component `#{component_id}`; known: #{Enum.join(Contract.component_ids(contract), ", ")}"}
+
+      %Component{} = component ->
+        root = Keyword.get(opts, :root, File.cwd!())
+        out = Keyword.get(opts, :out, Path.join(["tmp", "covenant", "regen", component_id]))
+        test_paths = Keyword.get(opts, :test_paths, Covenant.test_paths())
+        tests = find_tests(component_id, test_paths, root)
+
+        File.rm_rf!(out)
+        File.mkdir_p!(out)
+
+        files =
+          contract_files(contract, component, out) ++
+            test_files(tests, root, out) ++
+            stub_files(component, out) ++
+            [brief_file(component, out), prompt_file(component, tests, out)]
+
+        {:ok, %{dir: out, files: files |> Enum.reject(&is_nil/1) |> Enum.sort()}}
+    end
+  end
+
+  @doc "Contract test files that declare `use Covenant.Case, component: \"<id>\"`."
+  @spec find_tests(String.t(), [Path.t()], Path.t()) :: [Path.t()]
+  def find_tests(component_id, test_paths, root) do
+    pattern = ~r/use\s+Covenant\.Case\s*,[^\n]*component:\s*"#{Regex.escape(component_id)}"/
+
+    test_paths
+    |> Enum.flat_map(&Path.wildcard(Path.join(root, &1)))
+    |> Enum.flat_map(fn path ->
+      if File.dir?(path), do: Path.wildcard(Path.join(path, "**/*_test.exs")), else: [path]
+    end)
+    |> Enum.uniq()
+    |> Enum.filter(fn file ->
+      case File.read(file) do
+        {:ok, source} -> Regex.match?(pattern, source)
+        _ -> false
+      end
+    end)
+    |> Enum.map(&Path.relative_to(&1, root))
+    |> Enum.sort()
+  end
+
+  # -- contract files ---------------------------------------------------------
+
+  defp contract_files(contract, component, out) do
+    system = Contract.component(contract, "system")
+
+    sources =
+      [
+        component.file,
+        component.records_file,
+        system && system.file,
+        system && system.records_file
+      ] ++
+        [Path.join([contract.dir, "system", "decisions.yml"])]
+
+    copies =
+      sources
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.filter(&File.exists?/1)
+      |> Enum.map(fn source ->
+        target = Path.join([out, "contracts", Path.relative_to(source, contract.dir)])
+        copy(source, target)
+      end)
+
+    convention = Path.join(contract.dir, "README.md")
+
+    convention_copy =
+      if File.exists?(convention), do: copy(convention, Path.join(out, "CONTRACT_CONVENTION.md"))
+
+    copies ++ List.wrap(convention_copy)
+  end
+
+  defp test_files(tests, root, out) do
+    Enum.map(tests, fn relative -> copy(Path.join(root, relative), Path.join(out, relative)) end)
+  end
+
+  defp copy(source, target) do
+    File.mkdir_p!(Path.dirname(target))
+    File.cp!(source, target)
+    target
+  end
+
+  # -- stubs ------------------------------------------------------------------
+
+  @signature ~r/`([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)\.([a-z_][A-Za-z0-9_]*[?!]?)(?:\(([^)`]*)\)|\/(\d+))(?:\s*::\s*([^`]+))?`/
+
+  @typedoc "A public-surface signature read from the intent."
+  @type signature :: %{
+          module: String.t(),
+          function: String.t(),
+          args: [String.t()],
+          return: String.t() | nil,
+          doc: String.t()
+        }
+
+  @doc "Reads `Module.function(args) :: type` and `Module.function/arity` signatures from the Public surface section."
+  @spec signatures(Component.t()) :: [signature()]
+  def signatures(%Component{} = component) do
+    case Component.section(component, "Public surface") do
+      nil ->
+        []
+
+      section ->
+        section.body
+        |> String.split("\n")
+        |> Enum.flat_map(fn line ->
+          @signature
+          |> Regex.scan(line)
+          |> Enum.map(fn match ->
+            [_, module, function, args, arity, return] = pad(match, 6)
+
+            %{
+              module: module,
+              function: function,
+              args: args(args, arity),
+              return: if(return == "", do: nil, else: String.trim(return)),
+              doc:
+                line
+                |> String.replace(@signature, "")
+                |> String.replace(~r/^[\s\-—–:*]+|[\s\-—–:*]+$/u, "")
+            }
+          end)
+        end)
+        |> Enum.uniq_by(&{&1.module, &1.function, length(&1.args)})
+    end
+  end
+
+  # Regex.scan omits trailing optional groups that did not match.
+  defp pad(list, n), do: list ++ List.duplicate("", n - length(list))
+
+  defp args("", ""), do: []
+  defp args("", arity), do: Enum.map(1..String.to_integer(arity)//1, &"arg#{&1}")
+
+  defp args(args, _arity) do
+    args
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.with_index(1)
+    |> Enum.map(fn {arg, i} ->
+      name = arg |> String.split("::") |> hd() |> String.trim()
+      if Regex.match?(~r/^[a-z_][A-Za-z0-9_]*(\s*\\\\.*)?$/, name), do: name, else: "arg#{i}"
+    end)
+  end
+
+  @doc "Renders one stub module per public-surface module."
+  @spec stubs(Component.t()) :: [{String.t(), String.t()}]
+  def stubs(%Component{} = component) do
+    component
+    |> signatures()
+    |> Enum.group_by(& &1.module)
+    |> Enum.sort()
+    |> Enum.map(fn {module, sigs} -> {module, render_stub(component, module, sigs)} end)
+  end
+
+  defp render_stub(component, module, sigs) do
+    functions =
+      Enum.map_join(sigs, "\n", fn sig ->
+        arity = length(sig.args)
+        signature = "#{sig.function}(#{Enum.join(sig.args, ", ")})"
+        head = "#{sig.function}(#{Enum.map_join(sig.args, ", ", &("_" <> &1))})"
+        spec = if sig.return, do: " :: #{sig.return}", else: ""
+        doc = if sig.doc == "", do: signature <> spec, else: "#{signature}#{spec} — #{sig.doc}"
+
+        """
+          @doc #{inspect(doc)}
+          def #{head} do
+            raise "#{component.id}: #{module}.#{sig.function}/#{arity} is not implemented yet"
+          end
+        """
+      end)
+
+    """
+    defmodule #{module} do
+      @moduledoc \"\"\"
+      Public surface of component `#{component.id}` (regeneration stub).
+
+      Generated by `mix covenant.regen` from #{Path.basename(component.file)}.
+      Every function here is named in the intent's Public surface section;
+      replace the bodies until the contract tests pass.
+      \"\"\"
+
+    #{functions}end
+    """
+  end
+
+  defp stub_files(component, out) do
+    component
+    |> stubs()
+    |> Enum.map(fn {module, source} ->
+      path = Path.join([out, "stubs", "lib", Macro.underscore(module) <> ".ex"])
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, source)
+      path
+    end)
+  end
+
+  # -- brief and prompt -------------------------------------------------------
+
+  defp brief_file(component, out) do
+    body =
+      case Component.section(component, "Regeneration brief") do
+        nil ->
+          "_The #{form_name(component)} for `#{component.id}` has no `## Regeneration brief` section; the obligations and the contract tests are the whole brief._\n"
+
+        section ->
+          section.body <> "\n"
+      end
+
+    path = Path.join(out, "REGENERATION_BRIEF.md")
+    File.write!(path, "# Regeneration brief — #{component.id}\n\n" <> body)
+    path
+  end
+
+  defp prompt_file(component, tests, out) do
+    path = Path.join(out, "PROMPT.md")
+    File.write!(path, prompt(component, tests))
+    path
+  end
+
+  @doc "The brief handed to the regenerating agent."
+  @spec prompt(Component.t(), [Path.t()]) :: String.t()
+  def prompt(%Component{} = component, tests) do
+    contract_file =
+      Path.join(
+        "contracts",
+        Path.relative_to(component.file, Path.dirname(Path.dirname(component.file)))
+      )
+
+    stubs = stubs(component)
+    obligations = Component.testable_obligations(component)
+
+    test_list =
+      case tests do
+        [] ->
+          "  - _no contract test file declares `use Covenant.Case, component: \"#{component.id}\"` — write them from the obligations first_"
+
+        tests ->
+          Enum.map_join(tests, "\n", &"  - `#{&1}`")
+      end
+
+    stub_list =
+      case stubs do
+        [] ->
+          "  - _none: the #{form_name(component)} lists no `Module.function/arity` signatures in a `## Public surface` section_"
+
+        stubs ->
+          Enum.map_join(stubs, "\n", fn {module, _} ->
+            "  - `stubs/lib/#{Macro.underscore(module)}.ex` (`#{module}`)"
+          end)
+      end
+
+    obligation_list =
+      Enum.map_join(obligations, "\n", fn o -> "- `#{o.id}` — #{o.title}" end)
+
+    """
+    # Regenerate `#{component.id}`
+
+    You are rebuilding the implementation of the component `#{component.id}`
+    from its Contract. **You do not have the previous implementation and you
+    must not look for it**: no git history, no sibling worktrees, no deployed
+    artefacts. If the Contract leaves a question open, record the question
+    (see "Questions" below) and make the most conservative choice.
+
+    ## What you have
+
+    - `#{contract_file}` — the component's #{form_name(component)}: purpose, scope,
+      environment facts, public surface, obligations, decisions, orderings and
+      known limits. Read it in full first.
+    #{if component.records_file, do: "- `contracts/#{Path.relative_to(component.records_file, Path.dirname(Path.dirname(component.records_file)))}` — its decision records: the reasons behind every value that looks arbitrary.\n", else: ""}- `contracts/system/` — the whole-product intent and records, when present.
+    - `REGENERATION_BRIEF.md` — the questions previous regenerations asked, answered.
+    - `CONTRACT_CONVENTION.md` — how obligation blocks and records are written.
+    - Contract tests (they are the executable obligations; do not edit them):
+    #{test_list}
+    - Public-surface stubs to start from:
+    #{stub_list}
+
+    ## Obligations to satisfy
+
+    #{obligation_list}
+
+    ## How to work
+
+    1. Copy the stubs into `lib/` and the contract tests into `test/contract/`
+       of a fresh project that depends on `covenant`.
+    2. Implement until `mix test test/contract` is green, then run
+       `mix covenant.check`: every active obligation must have a passing test
+       and every `kind: exception` target must exist.
+    3. Keep the public surface exactly as listed; persisted formats are pinned
+       literally by the tests and must not be renamed.
+    4. Code comments cite decision records by id (`record <id>`) instead of
+       restating their values.
+
+    ## Questions
+
+    Every question you had to answer by guessing is a missing sentence in the
+    intent. Write them to `QUESTIONS.md` in this directory, one per line, with
+    the choice you made. They become the next revision of the intent.
+    """
+  end
+
+  defp form_name(%Component{form: :heavy}), do: "intent"
+  defp form_name(%Component{form: :light}), do: "obligations file"
+  defp form_name(%Component{form: :system}), do: "system intent"
+end

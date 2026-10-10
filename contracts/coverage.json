@@ -1,0 +1,588 @@
+{
+  "apps": {
+    "covenant": {
+      "active": 41,
+      "coverage": 1.0,
+      "covered": 41
+    },
+    "system": {
+      "active": 0,
+      "coverage": null,
+      "covered": 0
+    }
+  },
+  "components": {
+    "covenant.case": {
+      "active": 5,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 5,
+      "form": "light",
+      "obligations": {
+        "covenant.case.I1": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a module with valid tags compiles, carries the module tags and accepts a list of obligations",
+            "test a retired obligation is a compile error that points at the block",
+            "test a tag that is not a string or list of strings is a compile error",
+            "test an obligation of another component is a compile error",
+            "test an unknown obligation is a compile error at the test's line"
+          ]
+        },
+        "covenant.case.I2": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test an untagged test is a compile error",
+            "test describe blocks and setup are fine; every test inside still needs a tag"
+          ]
+        },
+        "covenant.case.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a retired obligation is a compile error that points at the block",
+            "test an obligation of another component is a compile error",
+            "test an unknown obligation is a compile error at the test's line",
+            "test an untagged test is a compile error",
+            "test describe blocks and setup are fine; every test inside still needs a tag"
+          ]
+        },
+        "covenant.case.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a Contract that does not parse is a compile error listing its problems",
+            "test an unknown component is a compile error listing the known ones",
+            "test component: is required"
+          ]
+        },
+        "covenant.case.I5": {
+          "failing": 0,
+          "kind": "persisted_format",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a module with valid tags compiles, carries the module tags and accepts a list of obligations"
+          ]
+        }
+      }
+    },
+    "covenant.check": {
+      "active": 9,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 9,
+      "form": "light",
+      "obligations": {
+        "covenant.check.I1": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test an active obligation without a tagged test fails; retired and exception blocks need none"
+          ]
+        },
+        "covenant.check.I2": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a tag naming an unknown obligation fails at the test"
+          ]
+        },
+        "covenant.check.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a failing or invalid tagged test fails; the obligation is not covered",
+            "test skipped and excluded tests count as tagged but not as coverage"
+          ]
+        },
+        "covenant.check.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 7,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a retired exception is not checked",
+            "test a stale exception fails: missing function, missing module, missing file",
+            "test an unreadable exception target is reported",
+            "test describe renders the parsed target",
+            "test exception targets that exist pass: a function, a module, a file",
+            "test exists? checks loaded code and the file system",
+            "test parses functions, modules and files"
+          ]
+        },
+        "covenant.check.I5": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a scope ceiling exceeded fails, one at the limit passes, an uncountable one fails",
+            "test calls a module counter and reports an unusable one",
+            "test counts files matching a glob under the root"
+          ]
+        },
+        "covenant.check.I6": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test dangling references are part of the report",
+            "test problems are sorted by file and line"
+          ]
+        },
+        "covenant.check.I7": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test counts covered obligations per component, per app and overall",
+            "test format renders a table with percentages and n/a for empty components"
+          ]
+        },
+        "covenant.check.I8": {
+          "failing": 0,
+          "kind": "persisted_format",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test empty containers, atoms and floats",
+            "test pretty-prints with sorted keys, deterministic across map orders",
+            "test round-trips through JSON.decode",
+            "test to_map is JSON-ready with string keys and a version"
+          ]
+        },
+        "covenant.check.I9": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a fully tested Contract holds"
+          ]
+        }
+      }
+    },
+    "covenant.conditions": {
+      "active": 5,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 5,
+      "form": "light",
+      "obligations": {
+        "covenant.conditions.I1": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test dep: present, present with a matching or failing requirement, missing, unversioned",
+            "test env: set or not",
+            "test file: exists or not, relative to the root",
+            "test otp and elixir version requirements, with short OTP versions normalised"
+          ]
+        },
+        "covenant.conditions.I2": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a condition without a check is unchecked",
+            "test unknown or incomplete checks are suspect, never silently ok"
+          ]
+        },
+        "covenant.conditions.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test reads a mix.lock into name => version, nil for non-hex deps"
+          ]
+        },
+        "covenant.conditions.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test suspects lists only records with a failing premise, with only the failing conditions",
+            "test the fixture Contract has no suspect records against the real system"
+          ]
+        },
+        "covenant.conditions.I5": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test context/1 reads the running system and the project's lock"
+          ]
+        }
+      }
+    },
+    "covenant.contract": {
+      "active": 9,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 9,
+      "form": "light",
+      "obligations": {
+        "covenant.contract.I1": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test derives component ids from paths",
+            "test loads the fixture Contract: components, records, ceilings, provenance",
+            "test looks obligations up by id",
+            "test records without a component file are still loaded"
+          ]
+        },
+        "covenant.contract.I2": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 7,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test heavy form accepts a plain hyphen between id and title",
+            "test heavy form ignores headings and field lines inside fenced code blocks",
+            "test heavy form joins indented continuation lines into the field above",
+            "test heavy form keeps unknown fields and strips backticks from record and target",
+            "test heavy form parses the baseline intent into a component with obligations and sections",
+            "test light form parses obligations anywhere after Purpose, including exception blocks",
+            "test system form requires no sections and reads obligations under any heading"
+          ]
+        },
+        "covenant.contract.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 13,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test heavy form an exception block needs a target",
+            "test heavy form rejects a block whose heading is not `### <id> — <title>`",
+            "test heavy form rejects a duplicated section",
+            "test heavy form rejects an empty Purpose",
+            "test heavy form reports a missing final section at the end of the file",
+            "test heavy form reports a missing required field at the block's line",
+            "test heavy form reports a missing required section where it should appear",
+            "test heavy form reports an empty field at the field's line",
+            "test heavy form reports sections out of order",
+            "test heavy form requires the revision log table in Purpose",
+            "test heavy form requires why in heavy form only",
+            "test light form does not require why",
+            "test light form requires only Purpose"
+          ]
+        },
+        "covenant.contract.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 6,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a component declared in both forms is an error",
+            "test a record id declared in two files is an error",
+            "test heavy form rejects a duplicated obligation id",
+            "test heavy form rejects an obligation id that does not belong to the component",
+            "test heavy form rejects an unknown kind and an unknown status at their lines",
+            "test rejects duplicate ids, pointing at the second"
+          ]
+        },
+        "covenant.contract.I5": {
+          "failing": 0,
+          "kind": "persisted_format",
+          "passing": 10,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test accepts plain-string conditions",
+            "test an empty file holds no records",
+            "test labels a record without an id by its position",
+            "test parses a minimal record and wraps scalar invariant and source",
+            "test parses the fixture's counter records with line provenance",
+            "test rejects a document that is not a list",
+            "test rejects a non kebab-case id and a malformed date",
+            "test rejects an unknown kind, a non-list alternatives and a check without a kind",
+            "test reports each missing required key at the record's item line",
+            "test reports invalid YAML with its line"
+          ]
+        },
+        "covenant.contract.I6": {
+          "failing": 0,
+          "kind": "persisted_format",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test an empty file holds no ceilings",
+            "test parses the fixture's ceilings with their counters and lines",
+            "test rejects a document that is not a list",
+            "test requires name, a non-negative integer ceiling and a known counter"
+          ]
+        },
+        "covenant.contract.I7": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test collects problems from every file",
+            "test heavy form collects several problems at once",
+            "test parse_file reports an unreadable file",
+            "test parse_file reports an unreadable file"
+          ]
+        },
+        "covenant.contract.I8": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a missing directory is an error",
+            "test an empty contracts directory is a valid, empty Contract"
+          ]
+        },
+        "covenant.contract.I9": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a ceiling citing a missing record",
+            "test a record protecting a missing invariant, superseded by or depending on a missing record",
+            "test an obligation citing a missing record",
+            "test the demo Contract has no dangling references",
+            "test the fixture Contract has no dangling references"
+          ]
+        }
+      }
+    },
+    "covenant.regen": {
+      "active": 4,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 4,
+      "form": "light",
+      "obligations": {
+        "covenant.regen.I1": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test writes the full pack for a heavy component"
+          ]
+        },
+        "covenant.regen.I2": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test reads signatures in both forms from the public surface",
+            "test stubs compile and raise until implemented"
+          ]
+        },
+        "covenant.regen.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a component without tests says so in the prompt",
+            "test a light component without surface or brief still gets a pack that says so"
+          ]
+        },
+        "covenant.regen.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test an unknown component is an error listing the known ones",
+            "test find_tests matches on the component declaration, through globs",
+            "test rewrites an existing pack directory from scratch"
+          ]
+        }
+      }
+    },
+    "covenant.results": {
+      "active": 4,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 4,
+      "form": "light",
+      "obligations": {
+        "covenant.results.I1": {
+          "failing": 0,
+          "kind": "persisted_format",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test records tagged tests by outcome and writes <results_dir>/<app>.json at suite end"
+          ]
+        },
+        "covenant.results.I2": {
+          "failing": 0,
+          "kind": "persisted_format",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test results_dir honours COVENANT_RESULTS_DIR over config",
+            "test the default results dir sits next to the Mix build directory, independent of MIX_ENV",
+            "test writes one file per app and merges them back in file order"
+          ]
+        },
+        "covenant.results.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a corrupt file is reported with its path",
+            "test an empty results dir is an error that says what to do",
+            "test decodes an unknown state as invalid"
+          ]
+        },
+        "covenant.results.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test groups tests by obligation, keeping multi-obligation tests under each"
+          ]
+        }
+      }
+    },
+    "covenant.tasks": {
+      "active": 5,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 5,
+      "form": "light",
+      "obligations": {
+        "covenant.tasks.I1": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test mix covenant.check runs the contract suite, prints coverage, writes coverage.json and exits 0"
+          ]
+        },
+        "covenant.tasks.I2": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test mix covenant.check --no-run on a corrupted copy of the Contract fails with precise messages"
+          ]
+        },
+        "covenant.tasks.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test mix covenant.check fails when a contract test fails"
+          ]
+        },
+        "covenant.tasks.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test mix covenant.conditions fails on a suspect record",
+            "test mix covenant.conditions passes on the fixture and lists the checked premises"
+          ]
+        },
+        "covenant.tasks.I5": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test mix covenant.regen writes a pack and refuses an unknown component"
+          ]
+        }
+      }
+    },
+    "system": {
+      "active": 0,
+      "app": "system",
+      "coverage": null,
+      "covered": 0,
+      "form": "system",
+      "obligations": {}
+    }
+  },
+  "covenant": "0.1.0",
+  "totals": {
+    "active": 41,
+    "coverage": 1.0,
+    "covered": 41
+  }
+}

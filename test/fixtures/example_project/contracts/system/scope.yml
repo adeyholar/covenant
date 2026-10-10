@@ -1,0 +1,10 @@
+# Scope-budget ceilings, checked by `mix covenant.check`.
+- name: example-modules
+  ceiling: 4
+  counter: { kind: glob, pattern: "lib/**/*.ex" }
+  why: The example stays small enough to read in a minute.
+  record: one-example-app
+- name: counter-event-kinds
+  ceiling: 3
+  counter: { kind: module, module: Example.Scope, function: event_kinds }
+  why: Every event kind is a persisted format a reader must know.

@@ -1,0 +1,16 @@
+- id: one-example-app
+  date: "2026-10-09"
+  decision: The fixture has exactly one app, `example`, with one heavy and one light component.
+  driver: Covenant's own suite needs a realistic Contract that is still small enough to read in a minute.
+  alternatives:
+    - option: Several apps in an umbrella
+      rejected: Slower to compile in the test suite; umbrella handling is covered by unit tests on paths instead.
+  evidence: The suite runs the fixture's `mix covenant.check` as a subprocess.
+  approved_by: lead (fixture, 2026-10-09)
+  conditions:
+    - text: The PATH environment variable is set (mix is found through it)
+      check: { kind: env, name: PATH }
+    - text: The fixture keeps its own mix.lock
+      check: { kind: file, path: mix.lock }
+  expires: When Covenant's suite needs an umbrella fixture
+  source: ["tools/covenant/test/fixtures/example_project"]

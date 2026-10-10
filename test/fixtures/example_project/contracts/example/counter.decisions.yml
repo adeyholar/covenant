@@ -1,0 +1,62 @@
+- id: clamp-at-zero
+  date: "2026-10-09"
+  decision: A decrement that would go below zero stops at zero instead of raising.
+  driver: v1 raised on underflow and every caller rescued it, hiding real bugs (fixture incident #1).
+  alternatives:
+    - option: Raise ArgumentError on underflow
+      rejected: Every caller wrapped the call in rescue; the exception carried no information.
+    - option: Allow negative values
+      rejected: A negative count has no meaning for any caller.
+  evidence: Fixture incident log #1.
+  invariant: example.counter.I1
+  approved_by: lead (fixture, 2026-10-09)
+  conditions:
+    - text: Elixir is at least 1.18
+      check: { kind: elixir, version: ">= 1.18.0" }
+    - text: Callers treat the counter as a value, never as a process
+  expires: When callers need signed counters
+  source: ["tools/covenant/test/fixtures/example_project"]
+
+- id: positive-steps
+  date: "2026-10-09"
+  decision: increment/2 and decrement/2 accept only positive integers and raise ArgumentError otherwise.
+  driver: A zero step recorded a no-op event in v1 and doubled the event log (fixture incident #2).
+  alternatives:
+    - option: Ignore zero steps silently
+      rejected: Silent no-ops hid a caller bug for a week.
+  evidence: Fixture incident log #2.
+  invariant: example.counter.I2
+  approved_by: lead (fixture, 2026-10-09)
+  conditions:
+    - text: The contract tooling depends on yaml_elixir
+      check: { kind: dep, name: yaml_elixir, version: "~> 2.12" }
+  expires: Never
+  source: ["tools/covenant/test/fixtures/example_project"]
+
+- id: fixed-max-100
+  date: "2026-10-09"
+  decision: The counter is capped at 100.
+  driver: v1 counters were display widgets with a fixed width.
+  kind: fact
+  invariant: example.counter.I5
+  approved_by: lead (fixture, 2026-10-09)
+  superseded_by: configurable-max
+  notes: Superseded on 2026-10-09 when widgets of other widths appeared.
+
+- id: configurable-max
+  date: "2026-10-09"
+  decision: The cap is configurable per counter via new(max:) and defaults to 100.
+  driver: Widgets of other widths appeared; the fixed cap had to be forked.
+  alternatives:
+    - option: A global application-env cap
+      rejected: Two widgets on one page need two caps.
+  evidence: Two widget widths in the fixture's imaginary UI.
+  approved_by: lead (fixture, 2026-10-09)
+  depends_on: [fixed-max-100]
+  conditions:
+    - text: OTP 26 or later
+      check: { kind: otp, version: ">= 26.0.0" }
+    - text: The counter implementation lives in lib/example/counter.ex
+      check: { kind: file, path: lib/example/counter.ex }
+  expires: When the cap moves to a persisted setting
+  source: ["tools/covenant/test/fixtures/example_project"]
