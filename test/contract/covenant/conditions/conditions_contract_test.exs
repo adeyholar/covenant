@@ -69,7 +69,7 @@ defmodule Covenant.ConditionsContractTest do
 
   @tag obligation: "covenant.conditions.I1"
   test "env: set or not", %{ctx: ctx} do
-    assert {:ok, _} =
+    assert {:ok, "env `DATABASE_URL` is set"} =
              Conditions.evaluate(premise(%{"kind" => "env", "name" => "DATABASE_URL"}), ctx)
 
     assert {:suspect, "env `SECRET` is not set"} =
@@ -78,7 +78,7 @@ defmodule Covenant.ConditionsContractTest do
 
   @tag obligation: "covenant.conditions.I1"
   test "file: exists or not, relative to the root", %{ctx: ctx} do
-    assert {:ok, _} =
+    assert {:ok, "file `present.txt` exists"} =
              Conditions.evaluate(premise(%{"kind" => "file", "path" => "present.txt"}), ctx)
 
     assert {:suspect, "file `gone.txt` does not exist"} =
@@ -115,6 +115,24 @@ defmodule Covenant.ConditionsContractTest do
              Conditions.evaluate(premise(%{"kind" => "env"}), ctx)
 
     assert {:suspect, "malformed check " <> _} = Conditions.evaluate(premise("yes"), ctx)
+
+    # only the kind selects the evaluation: another kind's fields never rescue a check
+    foreign = %{"name" => "DATABASE_URL", "path" => "present.txt", "version" => ">= 0.0.0"}
+
+    assert {:suspect, "unknown check kind `weather` " <> _} =
+             Conditions.evaluate(premise(Map.put(foreign, "kind", "weather")), ctx)
+
+    for {kind, own} <- [
+          {"env", "name"},
+          {"file", "path"},
+          {"otp", "version"},
+          {"elixir", "version"}
+        ] do
+      check = foreign |> Map.delete(own) |> Map.put("kind", kind)
+
+      assert {:suspect, reason} = Conditions.evaluate(premise(check), ctx)
+      assert String.starts_with?(reason, "check `#{kind}` is incomplete: "), reason
+    end
   end
 
   @tag obligation: "covenant.conditions.I3"
@@ -128,17 +146,40 @@ defmodule Covenant.ConditionsContractTest do
     }
     """)
 
-    assert Conditions.read_lock(path) == %{"postgrex" => "0.20.1", "mine" => nil}
+    # Mix quotes every key; reading must not leak the compiler's "quotes not required" warning
+    assert {%{"postgrex" => "0.20.1", "mine" => nil}, []} =
+             Code.with_diagnostics(fn -> Conditions.read_lock(path) end)
+
     assert Conditions.read_lock(Path.join(ctx.root, "nope.lock")) == %{}
+
+    for text <- ["%{", "42", "[postgrex: 1]"] do
+      File.write!(path, text)
+      assert Conditions.read_lock(path) == %{}, "lock text #{inspect(text)}"
+    end
+
+    # the version is the third element of a hex entry; one too short to carry it is nil
+    File.write!(path, """
+    %{
+      "tiny": {:hex, :tiny, "1.0.0"},
+      "short": {:hex, :short},
+    }
+    """)
+
+    assert Conditions.read_lock(path) == %{"tiny" => "1.0.0", "short" => nil}
   end
 
   @tag obligation: "covenant.conditions.I5"
   test "context/1 reads the running system and the project's lock" do
     ctx = Conditions.context(root: ContractBuilder.fixture_project())
     assert ctx.elixir_version == System.version()
-    assert ctx.otp_version =~ ~r/^\d+/
     assert Map.has_key?(ctx.lock, "yaml_elixir")
     assert Map.has_key?(ctx.env, "PATH")
+
+    # the full version the release's OTP_VERSION file reports ("28.5"), not just the major ("28")
+    release = :erlang.system_info(:otp_release) |> List.to_string()
+    file = Path.join([to_string(:code.root_dir()), "releases", release, "OTP_VERSION"])
+    assert {:ok, text} = File.read(file)
+    assert ctx.otp_version == String.trim(text)
   end
 
   @tag obligation: "covenant.conditions.I4"

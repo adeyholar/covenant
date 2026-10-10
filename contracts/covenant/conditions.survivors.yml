@@ -1,0 +1,24 @@
+# Survivor sort for covenant.conditions (`mix covenant.mutate covenant.conditions`).
+# Every surviving mutant is either caught by a new test or annotated here with
+# the judgment behind letting it live. Sorts: equivalent | log-only |
+# dead-code | timeout | evaluation-gap | decision-hole.
+- at: lib/covenant/conditions.ex:53:68
+  operator: boolean_flip
+  mutation: "`false` → `true`"
+  sort: equivalent
+  reason: >-
+    warn_on_unnecessary_quotes is inert here. emit_warnings: false already
+    silences every tokenizer warning, and Elixir 1.19.6 ignores the option even
+    when emit_warnings is true (probed: with emit_warnings: true the quoted-key
+    warning still fires whatever warn_on_unnecessary_quotes says). The sibling
+    flip at 53:90 is not equivalent and is killed by the I3 no-warning assertion.
+- at: lib/covenant/conditions.ex:75:9
+  operator: clause_removal
+  mutation: "`case _ ->` → `(removed)`"
+  sort: evaluation-gap
+  reason: >-
+    The fallback to the major release runs only when the OTP install has no
+    releases/<n>/OTP_VERSION file. The test host always has it, and
+    otp_version/0 reads :code.root_dir() inline, so there is no seam to point it
+    at a root without the file. I5 names the fallback; it stays unpinned until
+    the root is injectable.
