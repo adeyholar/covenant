@@ -8,18 +8,21 @@ defmodule Covenant.Mutate.Workdir do
   directory of their own they would clear and rewrite each other's files, and
   the failures that follow would be credited as kills.
 
-  A worker's directory (under `System.tmp_dir!/0`, named after the worker's OS
-  pid) holds a symlink to every entry of the project root, so a relative path
+  A worker's directory (under `System.tmp_dir!/0` by default, named after the
+  worker's OS pid) holds a symlink to every entry of the project root, so a relative path
   in a test resolves as it does in the project, except `tmp`, which is a real,
   empty directory: ExUnit's `:tmp_dir` paths and anything else a test writes
   below `tmp/` are the worker's alone.
   """
 
-  @doc "Creates the directory for the current OS process and returns its path."
-  @spec build(Path.t()) :: Path.t()
-  def build(root) do
+  @doc """
+  Creates the directory for the current OS process under `base` (the system
+  temp directory by default) and returns its path.
+  """
+  @spec build(Path.t(), Path.t()) :: Path.t()
+  def build(root, base \\ System.tmp_dir!()) do
     root = Path.expand(root)
-    dir = Path.join(System.tmp_dir!(), "covenant-mutate-#{System.pid()}")
+    dir = Path.join(base, "covenant-mutate-#{System.pid()}")
 
     File.rm_rf!(dir)
     File.mkdir_p!(Path.join(dir, "tmp"))

@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 54,
+      "active": 69,
       "coverage": 1.0,
-      "covered": 54
+      "covered": 69
     },
     "system": {
       "active": 0,
@@ -414,6 +414,217 @@
         }
       }
     },
+    "covenant.mutate": {
+      "active": 15,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 15,
+      "form": "light",
+      "obligations": {
+        "covenant.mutate.I1": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 10,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a corpus of every construct the operators and skip rules care about yields exactly the recorded mutants",
+            "test a node is described in one line of at most 60 characters",
+            "test boolean_flip, comparison_swap, arithmetic_swap and logical_swap swap the operator",
+            "test condition_negate negates an if or unless condition",
+            "test ecto_where_removal drops a where stage or a where: key",
+            "test element_removal drops one element or pair, never around a cons",
+            "test guard_removal and clause_removal drop a guard or one of several clauses",
+            "test integer_shift and string_empty change written literals",
+            "test return_nil replaces the last expression of a def or defp, unless it is nil already",
+            "test statement_removal drops a non-final call, never an assignment or the last expression"
+          ]
+        },
+        "covenant.mutate.I10": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a module is located by its source file; derived ones that cannot be are skipped, explicit ones refused",
+            "test located modules come back sorted by name, with every reason spelled out",
+            "test module names are read from inline code spans, never from fenced blocks",
+            "test the Public surface section alone names the modules to mutate",
+            "test the flags win over the front matter, which wins over the names in the Contract"
+          ]
+        },
+        "covenant.mutate.I11": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 6,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a component that names no module cannot be planned",
+            "test a mutant survives to_map and from_map, whatever its verdict",
+            "test a worker's results survive JSON and merging puts the mutants in id order",
+            "test every outcome and the defaults of a worker's results survive JSON",
+            "test from_map takes the index when it is given",
+            "test the plan resolves modules and test files, or says what is missing"
+          ]
+        },
+        "covenant.mutate.I12": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test an empty matrix has the documented defaults and its problems say where to annotate",
+            "test the matrix is written to --out as JSON and printed as a table",
+            "test the matrix map has a fixed shape",
+            "test the matrix table prints exactly the numbers, survivors and blind tests",
+            "test the struct defaults of the matrix and of a mutant are the documented ones"
+          ]
+        },
+        "covenant.mutate.I13": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a survivors file that does not parse fails the task naming the file and line",
+            "test an annotation for a killed or a vanished mutant is stale or unmatched and fails the task",
+            "test an unannotated survivor fails the task and gets a skeleton to fill"
+          ]
+        },
+        "covenant.mutate.I14": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test two runs over the same sources with the same seed give the same mutants and credit"
+          ]
+        },
+        "covenant.mutate.I15": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a worker directory links every root entry but tmp and has a tmp of its own",
+            "test removing it deletes the links, never what they point at",
+            "test within runs in the directory and restores the previous one, even on a raise"
+          ]
+        },
+        "covenant.mutate.I2": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 9,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a corpus of every construct the operators and skip rules care about yields exactly the recorded mutants",
+            "test a module whose name is not an alias or an atom is reported as ?",
+            "test a mutant needs its location, operator, change and index",
+            "test a mutant reports the file, line and column of its node, its module and its function",
+            "test a nested skipped form does not end the skipping early, and a source without a file name says nofile",
+            "test an attribute read is not a documentation attribute, other attributes are mutated, code outside a module is not",
+            "test documentation, specs, types, compiler attributes, macros, guards, use and quote are not mutated",
+            "test ids run m001, m002, ... in walk order and widen past m999; the walk is deterministic",
+            "test only the target modules are mutated, nested modules by their own name"
+          ]
+        },
+        "covenant.mutate.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 6,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a failure with no diagnostic is reported by its message, one with a line only by its line",
+            "test a source that does not parse is an error naming the file and line",
+            "test apply replaces exactly the node at the mutant's index",
+            "test compile loads the module in memory, replacing it, and reports what does not compile",
+            "test compile reports an error position as a line, with a column when there is one",
+            "test parsing emits no compiler warning"
+          ]
+        },
+        "covenant.mutate.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a mutant that does not compile is invalid: no kill, no survivor, no credit, not in the score"
+          ]
+        },
+        "covenant.mutate.I5": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a finished test is reported with its outcome, tags and file relative to the root",
+            "test a mutant is killed by failed or invalid tests, a timeout only survives, all green survives"
+          ]
+        },
+        "covenant.mutate.I6": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a red baseline mutates nothing and exits 1 naming the failing test",
+            "test no contract test for the component, or an unknown component, exits 1 with the reason"
+          ]
+        },
+        "covenant.mutate.I7": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a passing test without a unique kill is mutation-blind, with its declared reason; the score excludes invalid mutants",
+            "test kills are credited to the obligations of every failing test, uniquely and in total",
+            "test the score is rounded to four digits and a kill by an unknown test credits no obligation"
+          ]
+        },
+        "covenant.mutate.I8": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 6,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a YAML error is reported at its own line, a flow list gets line 1",
+            "test a missing or empty file is no annotations; the file lives beside the component's contract",
+            "test a valid survivors file is a list of annotations with their line",
+            "test every kind of bad entry is reported as file:line: message",
+            "test find and matches? compare location, operator and mutation",
+            "test line endings, empty documents, invalid YAML and a missing sort are handled"
+          ]
+        },
+        "covenant.mutate.I9": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a survivor inside the target of an active exception is a decision-hole without an entry",
+            "test an annotation matching no mutant is moved, one matching only a killed mutant is stale",
+            "test an annotation sorts the survivor it names by location, operator and, when given, mutation",
+            "test an exception on a module or a file sorts the survivors inside it",
+            "test an unannotated survivor or timeout is a problem naming the mutant"
+          ]
+        }
+      }
+    },
     "covenant.regen": {
       "active": 8,
       "app": "covenant",
@@ -732,8 +943,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 54,
+    "active": 69,
     "coverage": 1.0,
-    "covered": 54
+    "covered": 69
   }
 }

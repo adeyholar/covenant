@@ -1,0 +1,179 @@
+defmodule Corpus do
+  @moduledoc "not mutated: 1 + 2"
+  @type t :: 1 | 2
+  @compile {:inline, plain: 1}
+
+  use Foo, flag: true
+  import Bar, only: [a: 1]
+  alias Baz.Qux, as: Q
+  require Logger
+
+  defstruct count: 0, tags: [:a, :b]
+
+  defmacro twice(x), do: quote(do: unquote(x) + unquote(x))
+  defguard small(x) when x < 10
+  defmacrop hidden(x), do: x
+  defguardp tiny(x) when x < 3
+  defdelegate other(x), to: Elsewhere
+
+  def plain(x) when x > 0 and x < 10 do
+    y = x + 1
+    IO.puts(y)
+    z = y * 2 - 1
+    send(self(), z)
+    y / 2
+  end
+
+  def plain(_), do: nil
+
+  def flags(a, b) do
+    if a && b, do: true, else: false
+    unless a || b, do: 1, else: 2
+    a == b or a != b
+    a === b and a !== b
+    a <= b
+    a >= b
+    a > b
+    a < b
+    not a
+  end
+
+  def clauses(x) do
+    case x do
+      1 -> :one
+      2 -> :two
+      _ -> :many
+    end
+
+    cond do
+      x > 1 -> :big
+      true -> :small
+    end
+
+    with {:ok, v} <- x, do: v
+    for i <- [1, 2, 3], do: i * 2
+    receive do
+      :ping -> :pong
+    after
+      10 -> :timeout
+    end
+
+    try do
+      x
+    rescue
+      _ -> 0
+    end
+
+    f = fn
+      1 -> :a
+      _ -> :b
+    end
+
+    g = fn y -> y end
+    f.(g.(x))
+  end
+
+  def collections(m) do
+    list = [1, 2, 3]
+    [head | tail] = list
+    map = %{"b" => 2, a: 1}
+    updated = %{map | a: 3}
+    struct = %Corpus{count: 1}
+    tuple = {1, 2}
+    bin = <<1, 2>>
+    mixed = <<"a", 1>>
+    cap = &(&1 + 1)
+    pin = ^m
+    {head, tail, updated, struct, tuple, bin, cap, pin}
+  end
+
+  def strings(name) do
+    "plain"
+    "hello #{name}"
+    ""
+    'charlist'
+    ~s(sigil #{name} #{1 + 2})
+    String.upcase(name)
+  end
+
+  def query(q) do
+    q |> where(x == 1) |> or_where(y == 2)
+    from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p)
+    from(p in Post, select: p)
+  end
+
+  def extras(m, from) do
+    a
+    Foo.Bar
+    fn x -> x end
+    quote do: 1
+    %{k: 1}
+    %Corpus{}
+    {1, 2, 3}
+    &(&1)
+    ^m
+    a | b
+    a when b
+    1.5
+    q |> where
+    q |> limit(1)
+    from(Post)
+    from
+    m
+  end
+
+  def two do
+    IO.puts("a")
+    :b
+  end
+
+  def multi do
+    fn
+      1, 2 -> :x
+      _, _ -> :y
+    end
+  end
+
+  defp private(x), do: x
+
+  defp guarded(x) when is_integer(x), do: x
+  def unnamed, do: 5
+  def nilled, do: nil
+  def block_nil do
+    IO.puts("x")
+    nil
+  end
+
+  def unquoted(name) do
+    def unquote(name)(x), do: x
+  end
+
+  defmodule Inner do
+    def deep(x), do: x - 1
+    defmodule Deeper, do: def(go, do: 0)
+  end
+
+  defmodule __MODULE__.Child do
+    def child, do: 1
+  end
+
+  defmodule unquote(:dynamic) do
+    def dyn, do: 1
+  end
+
+  defimpl String.Chars, for: Corpus do
+    def to_string(c), do: "corpus #{c.count}"
+  end
+
+  defprotocol Sizer do
+    def size(x)
+  end
+
+  defoverridable plain: 1
+  defexception message: "boom"
+  def last_call, do: IO.puts("last")
+end
+
+defmodule :erlang_style do
+  def f, do: 1
+end

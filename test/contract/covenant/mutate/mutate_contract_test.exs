@@ -1,0 +1,1714 @@
+defmodule Covenant.MutateContractTest do
+  @moduledoc """
+  Unit-level contract tests of `covenant.mutate`: pure calls into the mutate
+  modules, so `mix covenant.mutate covenant.mutate --test-path <this file>`
+  can hot-swap those modules and see these tests catch the mutants. The
+  end-to-end obligations live in `mutate_e2e_contract_test.exs`.
+  """
+
+  use Covenant.Case, component: "covenant.mutate", async: true
+
+  alias Covenant.{Contract, Error, Mutate}
+  alias Covenant.Contract.Component
+  alias Covenant.ContractBuilder
+  alias Covenant.Mutate.{Matrix, Modules, Mutant, Mutator, Operators, Runner, Survivors}
+
+  @moduletag :tmp_dir
+
+  # absolute, so the tests do not depend on the working directory (a mutate
+  # worker runs them from a private one)
+  @root Path.expand("../../../..", __DIR__)
+
+  setup_all do
+    contract = Contract.load!(ContractBuilder.fixture_contracts())
+    {:ok, fixture: contract, counter: Contract.component(contract, "example.counter")}
+  end
+
+  # -- helpers ----------------------------------------------------------------
+
+  defp parse!(source) do
+    assert {:ok, ast} = Mutator.parse(source, "sample.ex")
+    ast
+  end
+
+  defp mutants(body, opts \\ []) do
+    ("defmodule Sample do\n" <> body <> "\nend\n")
+    |> parse!()
+    |> Mutator.sites([file: "sample.ex"] ++ opts)
+    |> Mutator.numbered()
+  end
+
+  defp changes(body, operator) do
+    for m <- mutants(body), m.operator == operator, do: {m.from, m.to}
+  end
+
+  defp mutant(id, verdict, attrs \\ []) do
+    struct!(
+      Mutant,
+      [
+        id: id,
+        file: "lib/x.ex",
+        line: 4,
+        column: 7,
+        operator: :integer_shift,
+        from: "1",
+        to: "2",
+        index: 1,
+        module: "X",
+        function: "f/0",
+        verdict: verdict
+      ] ++ attrs
+    )
+  end
+
+  defp entry(name, obligations, outcome \\ :passed, extra \\ []) do
+    Map.merge(
+      %{
+        key: "M:#{name}",
+        module: "M",
+        name: name,
+        file: "test/m_test.exs",
+        line: 1,
+        obligations: obligations,
+        mutation_blind: nil,
+        outcome: outcome
+      },
+      Map.new(extra)
+    )
+  end
+
+  defp results(tests, mutants),
+    do: %{
+      tests: tests,
+      mutants: mutants,
+      modules: ["X", "Y"],
+      files: ["lib/x.ex"],
+      baseline_ms: 5
+    }
+
+  # -- I1: the operators --------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I1"
+  test "boolean_flip, comparison_swap, arithmetic_swap and logical_swap swap the operator" do
+    assert changes("def a, do: true", :boolean_flip) == [{"true", "false"}]
+    assert changes("def a, do: false", :boolean_flip) == [{"false", "true"}]
+
+    comparisons = [
+      {"==", ["!="]},
+      {"!=", ["=="]},
+      {"===", ["!=="]},
+      {"!==", ["==="]},
+      {"<", ["<=", ">="]},
+      {"<=", ["<", ">"]},
+      {">", [">=", "<="]},
+      {">=", [">", "<"]}
+    ]
+
+    for {op, tos} <- comparisons do
+      assert changes("def a(x, y), do: x #{op} y", :comparison_swap) == Enum.map(tos, &{op, &1}),
+             "comparison #{op}"
+    end
+
+    for {op, to} <- [{"+", "-"}, {"-", "+"}, {"*", "/"}, {"/", "*"}] do
+      assert changes("def a(x, y), do: x #{op} y", :arithmetic_swap) == [{op, to}],
+             "arithmetic #{op}"
+    end
+
+    for {op, to} <- [{"and", "or"}, {"or", "and"}, {"&&", "||"}, {"||", "&&"}] do
+      assert changes("def a(x, y), do: x #{op} y", :logical_swap) == [{op, to}], "logical #{op}"
+    end
+  end
+
+  @tag obligation: "covenant.mutate.I1"
+  test "condition_negate negates an if or unless condition" do
+    assert changes("def a(x) do\n if x, do: 1, else: 2\n end", :condition_negate) ==
+             [{"if x", "if !(x)"}]
+
+    assert changes("def a(x) do\n unless x, do: 1, else: 2\n end", :condition_negate) ==
+             [{"unless x", "unless !(x)"}]
+  end
+
+  @tag obligation: "covenant.mutate.I1"
+  test "statement_removal drops a non-final call, never an assignment or the last expression" do
+    body = """
+    def a(x) do
+      IO.puts(x)
+      y = x
+      send(self(), y)
+      y
+    end
+    """
+
+    assert changes(body, :statement_removal) ==
+             [{"IO.puts(x)", "(removed)"}, {"send(self(), y)", "(removed)"}]
+
+    assert changes("def a(x), do: IO.puts(x)", :statement_removal) == []
+  end
+
+  @tag obligation: "covenant.mutate.I1"
+  test "return_nil replaces the last expression of a def or defp, unless it is nil already" do
+    body = "def a(x), do: x + 1\ndefp b(x) do\n IO.puts(x)\n x\n end\ndef c, do: nil"
+    assert changes(body, :return_nil) == [{"x + 1", "nil"}, {"x", "nil"}]
+  end
+
+  @tag obligation: "covenant.mutate.I1"
+  test "integer_shift and string_empty change written literals" do
+    assert changes("def a, do: 5", :integer_shift) == [{"5", "6"}, {"5", "4"}]
+    assert changes("def a, do: \"abc\"", :string_empty) == [{~s("abc"), ~s("")}]
+    assert changes("def a(x), do: \"a\#{x}\"", :string_empty) == [{~S("a#{x}"), ~s("")}]
+    assert changes("def a, do: \"\"", :string_empty) == []
+    assert changes("def a, do: x", :integer_shift) == []
+  end
+
+  @tag obligation: "covenant.mutate.I1"
+  test "guard_removal and clause_removal drop a guard or one of several clauses" do
+    assert changes("def a(x) when x > 0, do: x", :guard_removal) == [{"when x > 0", "(no guard)"}]
+
+    kase = "def a(x) do\n case x do\n 1 -> :one\n _ -> :other\n end\n end"
+
+    assert changes(kase, :clause_removal) == [
+             {"case 1 ->", "(removed)"},
+             {"case _ ->", "(removed)"}
+           ]
+
+    single = "def a(x) do\n case x do\n _ -> :other\n end\n end"
+    assert changes(single, :clause_removal) == []
+
+    cond_ = "def a(x) do\n cond do\n x -> 1\n true -> 2\n end\n end"
+
+    assert changes(cond_, :clause_removal) == [
+             {"cond x ->", "(removed)"},
+             {"cond true ->", "(removed)"}
+           ]
+
+    fun = "def a(l), do: Enum.map(l, fn\n 1 -> :a\n _ -> :b\n end)"
+    assert changes(fun, :clause_removal) == [{"fn 1 ->", "(removed)"}, {"fn _ ->", "(removed)"}]
+  end
+
+  @tag obligation: "covenant.mutate.I1"
+  test "element_removal drops one element or pair, never around a cons" do
+    assert changes("def a, do: [:x, :y]", :element_removal) ==
+             [{":x", "(removed)"}, {":y", "(removed)"}]
+
+    assert changes("def a, do: %{a: :x, b: :y}", :element_removal) ==
+             [{"a: :x", "(removed)"}, {"b: :y", "(removed)"}]
+
+    assert changes("def a([h | t]), do: {h, t}", :element_removal) == []
+
+    assert changes("def a(m), do: %{m | a: 1}", :element_removal) == []
+    assert changes("def a, do: []", :element_removal) == []
+  end
+
+  @tag obligation: "covenant.mutate.I1"
+  test "ecto_where_removal drops a where stage or a where: key" do
+    assert changes("def a(q), do: q |> where(x == 1)", :ecto_where_removal) ==
+             [{"|> where(x == 1)", "(removed)"}]
+
+    assert changes("def a, do: from(p in P, where: p.id == 1)", :ecto_where_removal) ==
+             [{"where: p.id == 1", "(removed)"}]
+  end
+
+  # -- I2: enumeration ------------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I2"
+  test "a mutant reports the file, line and column of its node, its module and its function" do
+    [first, second, third] = mutants("def a, do: 5")
+    assert {first.operator, Mutant.mutation(first)} == {:return_nil, "`5` → `nil`"}
+    assert {second.operator, Mutant.mutation(second)} == {:integer_shift, "`5` → `6`"}
+    assert {third.operator, Mutant.mutation(third)} == {:integer_shift, "`5` → `4`"}
+
+    for mutant <- [first, second, third] do
+      assert mutant.file == "sample.ex"
+      assert {mutant.line, mutant.column} == {2, 12}
+      assert Mutant.at(mutant) == "sample.ex:2:12"
+      assert mutant.module == "Sample"
+      assert mutant.function == "a/0"
+    end
+  end
+
+  @tag obligation: "covenant.mutate.I2"
+  test "documentation, specs, types, compiler attributes, macros, guards, use and quote are not mutated" do
+    skipped = """
+    @moduledoc "doc"
+    @doc "d"
+    @spec f(integer()) :: integer()
+    @type t :: 1 | 2
+    @compile {:inline, f: 1}
+    defmacro m(x), do: x + 1
+    defguard g(x) when x > 1
+    use Foo, a: true
+    import Bar, only: [a: 1]
+    alias Baz.Qux, as: Q
+    require Logger
+    """
+
+    assert mutants(skipped) == []
+
+    # a def around them is mutated, but only as a whole
+    assert mutants("def q, do: quote(do: 1 + 2)") |> Enum.map(& &1.operator) == [:return_nil]
+    assert mutants("def s, do: ~s(abc)") |> Enum.map(& &1.operator) == [:return_nil]
+  end
+
+  @tag obligation: "covenant.mutate.I2"
+  test "only the target modules are mutated, nested modules by their own name" do
+    source = """
+    defmodule A do
+      def f(x), do: x + 1
+
+      defmodule Inner do
+        def g, do: 2
+      end
+    end
+
+    defmodule B do
+      def h, do: 3
+    end
+    """
+
+    ast = parse!(source)
+
+    where = fn modules ->
+      ast |> Mutator.sites(modules: modules) |> Enum.map(&{&1.module, &1.function}) |> Enum.uniq()
+    end
+
+    assert where.(nil) == [{"A", "f/1"}, {"A.Inner", "g/0"}, {"B", "h/0"}]
+    assert where.(["A"]) == [{"A", "f/1"}]
+    assert where.(["A.Inner"]) == [{"A.Inner", "g/0"}]
+    assert where.(["B", "A.Inner"]) == [{"A.Inner", "g/0"}, {"B", "h/0"}]
+    assert where.(["C"]) == []
+  end
+
+  @tag obligation: "covenant.mutate.I2"
+  test "ids run m001, m002, ... in walk order and widen past m999; the walk is deterministic" do
+    body = "def a(x), do: x + 1\ndef b(x), do: [x, 2]"
+    first = mutants(body)
+
+    assert Enum.map(first, & &1.id) ==
+             for(i <- 1..length(first), do: "m" <> String.pad_leading("#{i}", 3, "0"))
+
+    assert first == mutants(body)
+    assert Enum.map(first, & &1.index) == Enum.sort(Enum.map(first, & &1.index))
+
+    bare = for i <- 1..1000, do: mutant(nil, nil, index: i)
+    ids = bare |> Mutator.numbered() |> Enum.map(& &1.id)
+    assert hd(ids) == "m0001"
+    assert List.last(ids) == "m1000"
+    assert length(Enum.uniq(ids)) == 1000
+
+    small = for i <- 1..999, do: mutant(nil, nil, index: i)
+    assert small |> Mutator.numbered() |> List.last() |> Map.fetch!(:id) == "m999"
+  end
+
+  # -- I3: apply / compile / parse -------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I3"
+  test "apply replaces exactly the node at the mutant's index", %{tmp_dir: _} do
+    ast = parse!("defmodule Sample do\n  def f(x), do: x + 1 * 2\nend\n")
+    sites = ast |> Mutator.sites() |> Mutator.numbered()
+    plus = Enum.find(sites, &(&1.operator == :arithmetic_swap and &1.from == "+"))
+    times = Enum.find(sites, &(&1.operator == :arithmetic_swap and &1.from == "*"))
+
+    text = fn mutant -> ast |> Mutator.apply(mutant) |> Mutator.unwrap() |> Macro.to_string() end
+    original = ast |> Mutator.unwrap() |> Macro.to_string()
+
+    assert original =~ "x + 1 * 2"
+    assert text.(plus) =~ "x - 1 * 2"
+    assert text.(times) =~ "x + 1 / 2"
+    assert text.(plus) == String.replace(original, "x + 1 * 2", "x - 1 * 2")
+  end
+
+  @tag obligation: "covenant.mutate.I3"
+  test "compile loads the module in memory, replacing it, and reports what does not compile" do
+    name =
+      Module.concat(
+        Covenant.MutateContractSample,
+        "Compiled#{System.unique_integer([:positive])}"
+      )
+
+    source = "defmodule #{inspect(name)} do\n  def f(x), do: x + 1\nend\n"
+    ast = parse!(source)
+
+    assert {:ok, [{^name, binary}]} = Mutator.compile(ast, "nofile.ex")
+    assert is_binary(binary)
+    assert name.f(1) == 2
+    refute File.exists?("nofile.ex")
+
+    mutant = ast |> Mutator.sites() |> Enum.find(&(&1.operator == :arithmetic_swap))
+    assert {:ok, [{^name, _}]} = Mutator.compile(Mutator.apply(ast, mutant), "nofile.ex")
+    assert name.f(1) == 0
+
+    broken = parse!("defmodule #{inspect(name)} do\n  def f([a, b]), do: a + b\nend\n")
+    removal = broken |> Mutator.sites() |> Enum.find(&(&1.operator == :element_removal))
+    assert {:error, message} = Mutator.compile(Mutator.apply(broken, removal), "nofile.ex")
+    assert message =~ ~r/^line \d+:\d+: .*undefined variable "a"/
+
+    :code.purge(name)
+    :code.delete(name)
+  end
+
+  @tag obligation: "covenant.mutate.I3"
+  test "a source that does not parse is an error naming the file and line" do
+    assert {:error, message} = Mutator.parse("defmodule A do\n  def f(\nend\n", "lib/a.ex")
+    assert message =~ ~r/^lib\/a\.ex:\d+: /
+  end
+
+  # -- I5: verdicts -----------------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I5"
+  test "a mutant is killed by failed or invalid tests, a timeout only survives, all green survives" do
+    green = entry("a", ["x.I1"])
+    red = entry("b", ["x.I1"], :failed)
+    invalid = entry("c", ["x.I1"], :invalid)
+    slow = entry("d", ["x.I1"], :timeout)
+    skipped = entry("e", ["x.I1"], :skipped)
+
+    killed = Runner.verdict(mutant("m1", nil), [green, red, invalid, slow, skipped])
+    assert killed.verdict == :killed
+    assert killed.killed_by == ["M:b", "M:c"]
+    assert killed.timeouts == ["M:d"]
+
+    assert Runner.verdict(mutant("m1", nil), [green, invalid]).verdict == :killed
+
+    timed_out = Runner.verdict(mutant("m1", nil), [green, slow])
+    assert {timed_out.verdict, timed_out.killed_by, timed_out.timeouts} == {:timeout, [], ["M:d"]}
+
+    survived = Runner.verdict(mutant("m1", nil), [green, skipped])
+    assert {survived.verdict, survived.killed_by, survived.timeouts} == {:survived, [], []}
+  end
+
+  @tag obligation: "covenant.mutate.I5"
+  test "a finished test is reported with its outcome, tags and file relative to the root" do
+    test = fn state, tags ->
+      %ExUnit.Test{
+        name: :"test it works",
+        module: Sample.Test,
+        state: state,
+        tags: Map.merge(%{file: "/proj/test/contract/a_test.exs", line: 7}, tags)
+      }
+    end
+
+    entry = Runner.entry(test.(nil, %{obligation: "x.I1"}), "/proj")
+
+    assert entry == %{
+             key: "Sample.Test:test it works",
+             module: "Sample.Test",
+             name: "test it works",
+             file: "test/contract/a_test.exs",
+             line: 7,
+             obligations: ["x.I1"],
+             mutation_blind: nil,
+             outcome: :passed
+           }
+
+    assert Runner.entry(
+             test.(nil, %{obligation: ["x.I1", "x.I2"], mutation_blind: "why"}),
+             "/proj"
+           )
+           |> Map.take([:obligations, :mutation_blind]) ==
+             %{obligations: ["x.I1", "x.I2"], mutation_blind: "why"}
+
+    assert Runner.entry(test.(nil, %{}), "/proj").obligations == []
+
+    timeout = {:error, %ExUnit.TimeoutError{timeout: 100, type: "test"}, []}
+    failure = {:error, %ExUnit.AssertionError{message: "no"}, []}
+
+    assert Runner.entry(test.({:failed, [timeout]}, %{}), "/proj").outcome == :timeout
+    assert Runner.entry(test.({:failed, [timeout, timeout]}, %{}), "/proj").outcome == :timeout
+    assert Runner.entry(test.({:failed, [failure]}, %{}), "/proj").outcome == :failed
+    assert Runner.entry(test.({:failed, [timeout, failure]}, %{}), "/proj").outcome == :failed
+    assert Runner.entry(test.({:invalid, Sample}, %{}), "/proj").outcome == :invalid
+    assert Runner.entry(test.({:skipped, "no"}, %{}), "/proj").outcome == :skipped
+    assert Runner.entry(test.({:excluded, "no"}, %{}), "/proj").outcome == :excluded
+  end
+
+  # -- I7: credit -------------------------------------------------------------------
+
+  defp credited(counter) do
+    tests = [
+      entry("a", ["example.counter.I1"]),
+      entry("b", ["example.counter.I2"]),
+      entry("c", ["example.counter.I1", "example.counter.I4"], :passed,
+        mutation_blind: "shares kills"
+      ),
+      entry("d", ["example.counter.I3"])
+    ]
+
+    mutants = [
+      mutant("m001", :killed, killed_by: ["M:a"]),
+      mutant("m002", :killed, killed_by: ["M:a", "M:b"]),
+      mutant("m003", :killed, killed_by: ["M:b"]),
+      mutant("m004", :survived),
+      mutant("m005", :timeout, timeouts: ["M:a"]),
+      mutant("m006", :invalid, reason: "line 1: x")
+    ]
+
+    {Matrix.build(results(tests, mutants), component: counter, seed: 3, timeout: 1000, jobs: 2),
+     tests}
+  end
+
+  @tag obligation: "covenant.mutate.I7"
+  test "kills are credited to the obligations of every failing test, uniquely and in total", %{
+    counter: counter
+  } do
+    {matrix, _} = credited(counter)
+
+    assert Enum.map(matrix.mutants, &{&1.id, &1.obligations}) == [
+             {"m001", ["example.counter.I1"]},
+             {"m002", ["example.counter.I1", "example.counter.I2"]},
+             {"m003", ["example.counter.I2"]},
+             {"m004", []},
+             {"m005", []},
+             {"m006", []}
+           ]
+
+    assert matrix.obligations["example.counter.I1"] ==
+             %{killed: 2, unique: 1, mutants: ["m001", "m002"], unique_mutants: ["m001"]}
+
+    assert matrix.obligations["example.counter.I2"] ==
+             %{killed: 2, unique: 1, mutants: ["m002", "m003"], unique_mutants: ["m003"]}
+
+    zero = %{killed: 0, unique: 0, mutants: [], unique_mutants: []}
+
+    for id <- ~w(I3 I4 I6 I7) do
+      assert matrix.obligations["example.counter.#{id}"] == zero, id
+    end
+
+    refute Map.has_key?(matrix.obligations, "example.counter.I5")
+
+    assert matrix.test_stats["M:a"] ==
+             %{kills: 2, unique_kills: 1, mutants: ["m001", "m002"], unique_mutants: ["m001"]}
+
+    assert matrix.test_stats["M:b"].unique_mutants == ["m003"]
+
+    assert matrix.test_stats["M:c"] == %{
+             kills: 0,
+             unique_kills: 0,
+             mutants: [],
+             unique_mutants: []
+           }
+  end
+
+  @tag obligation: "covenant.mutate.I7"
+  test "a passing test without a unique kill is mutation-blind, with its declared reason; the score excludes invalid mutants",
+       %{counter: counter} do
+    {matrix, _} = credited(counter)
+
+    assert Enum.map(matrix.blind, &{&1.test.name, &1.kills, &1.declared}) ==
+             [{"c", 0, "shares kills"}, {"d", 0, nil}]
+
+    assert matrix.summary.mutants == 6
+    assert matrix.summary.killed == 3
+    assert matrix.summary.survived == 1
+    assert matrix.summary.timeouts == 1
+    assert matrix.summary.invalid == 1
+    assert matrix.summary.score == 0.6
+
+    # blind tests warn; only survivors and annotations fail the matrix
+    assert Enum.all?(matrix.problems, &(&1.message =~ "survived" or &1.message =~ "timed out"))
+
+    empty = Matrix.build(results([entry("a", ["example.counter.I1"])], []), component: counter)
+    assert empty.summary.score == nil
+    assert empty.summary.mutants == 0
+    assert Matrix.ok?(empty)
+
+    invalid_only =
+      Matrix.build(results([entry("a", ["example.counter.I1"])], [mutant("m001", :invalid)]),
+        component: counter
+      )
+
+    assert invalid_only.summary.score == nil
+  end
+
+  # -- I9: sorting and staleness ---------------------------------------------------
+
+  defp annotation(attrs) do
+    struct!(
+      Survivors.Annotation,
+      [
+        at: "lib/x.ex:4:7",
+        operator: "integer_shift",
+        mutation: nil,
+        sort: "equivalent",
+        reason: "because",
+        file: "x.survivors.yml",
+        line: 3
+      ] ++
+        attrs
+    )
+  end
+
+  defp build(component, mutants, annotations),
+    do:
+      Matrix.build(results([entry("a", ["example.counter.I1"])], mutants),
+        component: component,
+        annotations: annotations,
+        survivors_path: "x.survivors.yml"
+      )
+
+  @tag obligation: "covenant.mutate.I9"
+  test "an annotation sorts the survivor it names by location, operator and, when given, mutation",
+       %{counter: counter} do
+    survivor = mutant("m001", :survived)
+
+    sorted = build(counter, [survivor], [annotation([])])
+    assert [%{sort: "equivalent", reason: "because"}] = sorted.survivors
+    assert sorted.problems == []
+    assert sorted.summary.annotated == 1 and sorted.summary.unsorted == 0
+    assert Matrix.ok?(sorted)
+
+    with_mutation = build(counter, [survivor], [annotation(mutation: "`1` → `2`")])
+    assert with_mutation.problems == []
+
+    wrong_mutation = build(counter, [survivor], [annotation(mutation: "`1` → `0`")])
+    assert length(wrong_mutation.problems) == 2
+    refute Matrix.ok?(wrong_mutation)
+
+    other_operator = build(counter, [survivor], [annotation(operator: "string_empty")])
+    assert length(other_operator.problems) == 2
+
+    other_place = build(counter, [survivor], [annotation(at: "lib/x.ex:4:8")])
+    assert length(other_place.problems) == 2
+
+    timed_out = build(counter, [mutant("m001", :timeout)], [annotation(sort: "timeout")])
+    assert timed_out.problems == []
+    assert [%{sort: "timeout"}] = timed_out.survivors
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "an unannotated survivor or timeout is a problem naming the mutant", %{counter: counter} do
+    matrix = build(counter, [mutant("m001", :survived), mutant("m002", :timeout, line: 9)], [])
+
+    assert [first, second] = matrix.problems
+    assert first.file == "lib/x.ex" and first.line == 4
+
+    assert first.message =~
+             "mutant m001 (integer_shift `1` → `2`) survived; add a test that catches it or annotate it in x.survivors.yml"
+
+    assert second.line == 9
+    assert second.message =~ "mutant m002"
+    assert second.message =~ "timed out (a survivor)"
+    assert matrix.summary.unsorted == 2
+    refute Matrix.ok?(matrix)
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "an annotation matching no mutant is moved, one matching only a killed mutant is stale", %{
+    counter: counter
+  } do
+    killed = mutant("m001", :killed, killed_by: ["M:a"])
+
+    stale = build(counter, [killed], [annotation([])])
+    assert [problem] = stale.problems
+    assert problem.file == "x.survivors.yml" and problem.line == 3
+
+    assert problem.message =~
+             "annotation for lib/x.ex:4:7 integer_shift (m001) is stale: that mutant is now killed — delete it"
+
+    moved = build(counter, [killed], [annotation(at: "lib/x.ex:99:1")])
+    assert [problem] = moved.problems
+
+    assert problem.message =~
+             "annotation for lib/x.ex:99:1 integer_shift matches no mutant; the code moved or the mutation changed — delete or update it"
+
+    invalid = build(counter, [mutant("m001", :invalid)], [annotation([])])
+
+    assert [%{message: "annotation for lib/x.ex:4:7 integer_shift (m001) is stale" <> _}] =
+             invalid.problems
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "a survivor inside the target of an active exception is a decision-hole without an entry",
+       %{fixture: contract} do
+    greeter = Contract.component(contract, "example.greeter")
+    inside = mutant("m001", :survived, module: "Example.Greeter", function: "clamp/1")
+    outside = mutant("m002", :survived, module: "Example.Greeter", function: "greet/1", line: 10)
+
+    matrix =
+      Matrix.build(results([entry("a", ["example.greeter.I1"])], [inside, outside]),
+        component: greeter
+      )
+
+    assert [
+             %{sort: "decision-hole", reason: "declared by exception `example.greeter.I2`"},
+             %{sort: nil}
+           ] = matrix.survivors
+
+    assert [%{line: 10}] = matrix.problems
+
+    annotated =
+      Matrix.build(results([entry("a", ["example.greeter.I1"])], [inside]),
+        component: greeter,
+        annotations: [annotation(sort: "log-only", reason: "mine")]
+      )
+
+    assert [%{sort: "log-only", reason: "mine"}] = annotated.survivors
+  end
+
+  # -- I8: the survivors file ---------------------------------------------------------
+
+  @valid """
+  # a comment
+  - at: lib/example/counter.ex:29:17
+    operator: element_removal
+    mutation: "`value: 0` → `(removed)`"
+    sort: equivalent
+    reason: The struct default for value is already 0.
+  - at: lib/example/counter.ex:30:1
+    operator: guard_removal
+    sort: decision-hole
+    reason: undecided
+  """
+
+  @tag obligation: "covenant.mutate.I8"
+  test "a valid survivors file is a list of annotations with their line" do
+    assert {:ok, [first, second]} = Survivors.parse(@valid, "c.survivors.yml")
+
+    assert %Survivors.Annotation{
+             at: "lib/example/counter.ex:29:17",
+             operator: "element_removal",
+             mutation: "`value: 0` → `(removed)`",
+             sort: "equivalent",
+             reason: "The struct default for value is already 0.",
+             file: "c.survivors.yml",
+             line: 2
+           } = first
+
+    assert second.mutation == nil
+    assert second.line == 7
+    assert second.sort == "decision-hole"
+
+    assert Survivors.sorts() ==
+             ~w(equivalent log-only dead-code timeout evaluation-gap decision-hole)
+
+    assert Mutant.operators() |> length() == 13
+  end
+
+  @tag obligation: "covenant.mutate.I8"
+  test "every kind of bad entry is reported as file:line: message" do
+    errors = fn text ->
+      assert {:error, errors} = Survivors.parse(text, "s.yml")
+      Enum.map(errors, &Error.format/1)
+    end
+
+    base = "at: a.ex:1:1\n  operator: integer_shift\n  sort: equivalent\n  reason: r\n"
+
+    assert errors.("- " <> String.replace(base, "  reason: r\n", "")) ==
+             ["s.yml:1: annotation #1 is missing `reason`"]
+
+    assert errors.("- " <> String.replace(base, "reason: r", "reason: \"\"")) ==
+             ["s.yml:1: annotation #1 has an empty `reason`"]
+
+    assert errors.("- " <> String.replace(base, "reason: r", "reason: 5")) ==
+             ["s.yml:1: annotation #1 `reason` must be a string, got 5"]
+
+    [message] = errors.("- " <> String.replace(base, "integer_shift", "bend"))
+
+    assert message =~
+             "s.yml:1: annotation #1 has unknown `operator` `bend` (expected one of: boolean_flip, "
+
+    assert message =~ "ecto_where_removal)"
+
+    assert errors.("- " <> String.replace(base, "equivalent", "fine")) ==
+             [
+               "s.yml:1: annotation #1 has unknown `sort` `fine` (expected one of: equivalent, log-only, dead-code, timeout, evaluation-gap, decision-hole)"
+             ]
+
+    assert errors.("- " <> String.replace(base, "a.ex:1:1", "a.ex:1")) ==
+             ["s.yml:1: annotation #1 `at` must be `file:line:column`, got `a.ex:1`"]
+
+    assert errors.("- just text\n") == ["s.yml:1: annotation #1 must be a mapping"]
+
+    # the second entry is reported at its own line
+    assert errors.("- " <> base <> "- sort: equivalent\n") ==
+             [
+               "s.yml:5: annotation #2 is missing `at`",
+               "s.yml:5: annotation #2 is missing `operator`",
+               "s.yml:5: annotation #2 is missing `reason`"
+             ]
+
+    assert errors.("key: value\n") == [
+             "s.yml:1: survivors file must be a YAML list of annotations"
+           ]
+
+    assert [<<"s.yml:", _::binary>>] = errors.("- [unclosed\n")
+  end
+
+  @tag obligation: "covenant.mutate.I8"
+  test "a missing or empty file is no annotations; the file lives beside the component's contract",
+       %{tmp_dir: dir, counter: counter} do
+    assert Survivors.load(Path.join(dir, "none.yml")) == {:ok, []}
+    assert Survivors.parse("", "e.yml") == {:ok, []}
+    assert Survivors.parse("  \n\n", "e.yml") == {:ok, []}
+
+    file = Path.join(dir, "real.yml")
+    File.write!(file, @valid)
+    assert {:ok, [%{file: ^file}, _]} = Survivors.load(file)
+
+    assert Survivors.path("contracts", counter) == "contracts/example/counter.survivors.yml"
+    assert Survivors.path("contracts", %{form: :system}) == "contracts/system/survivors.yml"
+
+    assert {:error, [error]} = Survivors.load(dir)
+    assert error.file == dir
+    assert error.message =~ "cannot read file"
+  end
+
+  @tag obligation: "covenant.mutate.I8"
+  test "find and matches? compare location, operator and mutation", %{tmp_dir: _} do
+    survivor = mutant("m001", :survived)
+    a = annotation([])
+    refine = annotation(mutation: "`1` → `2`")
+
+    assert Survivors.matches?(a, survivor)
+    assert Survivors.matches?(refine, survivor)
+    refute Survivors.matches?(annotation(mutation: "`1` → `3`"), survivor)
+    refute Survivors.matches?(annotation(operator: "string_empty"), survivor)
+    refute Survivors.matches?(annotation(at: "lib/x.ex:4:8"), survivor)
+    assert Survivors.find([annotation(at: "z"), refine], survivor) == refine
+    assert Survivors.find([annotation(at: "z")], survivor) == nil
+
+    template = Survivors.template(survivor)
+
+    assert template =~
+             "- at: lib/x.ex:4:7\n  operator: integer_shift\n  mutation: \"`1` → `2`\"\n  sort: evaluation-gap\n  reason: TODO"
+
+    assert Survivors.template(mutant("m001", :timeout)) =~ "sort: timeout"
+  end
+
+  # -- I10: modules ---------------------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I10"
+  test "the flags win over the front matter, which wins over the names in the Contract", %{
+    fixture: contract,
+    counter: counter
+  } do
+    mutate = Contract.component(Contract.load!(Covenant.contracts_dir()), "covenant.mutate")
+
+    assert {:flag, ["A", "B.C"]} = Modules.resolve(counter, ["B.C", "Elixir.A", "A"])
+    assert {:flag, ["A"]} = Modules.resolve(mutate, ["A"])
+
+    assert {:front_matter, names} = Modules.resolve(mutate)
+    assert names == Enum.sort(names)
+    assert "Covenant.Mutate.Operators" in names
+    assert names == Component.declared_modules(mutate) |> Enum.uniq() |> Enum.sort()
+
+    assert {:derived, ["Example.Counter"]} = Modules.resolve(counter)
+
+    assert {:derived, ["Example.Greeter"]} =
+             Modules.resolve(Contract.component(contract, "example.greeter"))
+
+    assert Modules.derive(counter) == ["Example.Counter"]
+  end
+
+  @tag obligation: "covenant.mutate.I10"
+  test "module names are read from inline code spans, never from fenced blocks" do
+    text = """
+    See `Foo.Bar.baz/1` and `Qux.quux(a) :: Baz`, but not Plain.Prose or `lower.case`.
+
+    ```elixir
+    `Fenced.Module.call()`
+    ```
+
+    `Foo.Bar.other/2`
+    """
+
+    assert Modules.references(text) == ["Baz", "Foo.Bar", "Qux"]
+    assert Modules.references("`String.t()` and `Foo.Bar.baz/1`") == ["Foo.Bar", "String"]
+    assert Modules.references("") == []
+  end
+
+  @tag obligation: "covenant.mutate.I10"
+  test "a module is located by its source file; derived ones that cannot be are skipped, explicit ones refused" do
+    root = @root
+
+    assert {:ok, [{Covenant.Conditions, file}, {Covenant.Mutate, _}], ignored} =
+             Modules.locate(
+               ["Covenant.Mutate", "Covenant.Conditions", "Nope.Missing", "String"],
+               :derived,
+               root
+             )
+
+    assert file == Path.join(root, "lib/covenant/conditions.ex")
+    assert Enum.map(ignored, &elem(&1, 0)) == ["Nope.Missing", "String"]
+    assert {"Nope.Missing", "is not a loaded module"} in ignored
+
+    {"String", why} = List.keyfind(ignored, "String", 0)
+    assert why =~ "outside the project" or why =~ "does not exist"
+
+    assert {:error, message} =
+             Modules.locate(["Covenant.Conditions", "Nope.Missing"], :flag, root)
+
+    assert message == "Nope.Missing: is not a loaded module"
+
+    assert {:error, "no implementation module to mutate" <> rest} =
+             Modules.locate(["Nope.Missing"], :derived, root)
+
+    assert rest =~ "Declare `modules:` in the front matter or pass --module"
+
+    assert {:error, "no implementation module to mutate"} = Modules.locate([], :flag, root)
+
+    assert {:error, message} = Modules.locate(["Covenant.Conditions"], :flag, "/nowhere")
+    assert message =~ "Covenant.Conditions:"
+  end
+
+  # -- I11: plan, raw results, merge ----------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I11"
+  test "the plan resolves modules and test files, or says what is missing", %{fixture: contract} do
+    project = ContractBuilder.fixture_project()
+
+    assert {:ok, plan} =
+             Mutate.plan(contract, "example.counter",
+               root: project,
+               test_paths: ["test/contract"]
+             )
+
+    assert plan.names == ["Example.Counter"]
+    assert plan.source == :derived
+    assert plan.component.id == "example.counter"
+    assert plan.test_files == ["test/contract/example/counter_contract_test.exs"]
+
+    assert {:ok, %{names: ["A"], source: :flag}} =
+             Mutate.plan(contract, "example.counter",
+               root: project,
+               test_paths: ["test/contract"],
+               modules: ["A"]
+             )
+
+    assert {:error, "unknown component `nope`; known: example.counter, example.greeter" <> _} =
+             Mutate.plan(contract, "nope", root: project)
+
+    assert {:error, message} =
+             Mutate.plan(contract, "example.greeter", root: project, test_paths: ["nowhere"])
+
+    assert message ==
+             "no contract test file declares `use Covenant.Case, component: \"example.greeter\"` under nowhere"
+
+    assert {:error, message} =
+             Mutate.plan(contract, "example.greeter",
+               root: project,
+               test_paths: ["nowhere", "elsewhere"]
+             )
+
+    assert message =~ "under nowhere, elsewhere"
+
+    assert Mutate.default_timeout() == 10_000
+    assert Mutate.default_seed() == 0
+    assert Mutate.default_dir("a.b") == "tmp/covenant/mutate/a.b"
+  end
+
+  @tag obligation: "covenant.mutate.I11"
+  test "a worker's results survive JSON and merging puts the mutants in id order", %{tmp_dir: dir} do
+    tests = [
+      entry("a", ["x.I1"]),
+      entry("b", ["x.I2"], :failed, mutation_blind: "why", line: nil, file: nil)
+    ]
+
+    mutants = [
+      mutant("m002", :killed, killed_by: ["M:b"]),
+      mutant("m001", :timeout, timeouts: ["M:a"], reason: nil)
+    ]
+
+    result = %{files: ["lib/x.ex"], all: 4, baseline_ms: 12, tests: tests, mutants: mutants}
+
+    path = Path.join(dir, "raw.json")
+
+    File.write!(
+      path,
+      Mutate.encode_raw(result,
+        component: "x.y",
+        slice: "2/3",
+        modules: ["X"],
+        ignored: [{"Y", "why not"}]
+      )
+    )
+
+    assert {:ok, raw} = Mutate.decode_raw(path)
+    assert raw.component == "x.y"
+    assert raw.slice == "2/3"
+    assert raw.modules == ["X"]
+    assert raw.ignored == [{"Y", "why not"}]
+    assert raw.files == ["lib/x.ex"]
+    assert raw.all == 4
+    assert raw.baseline_ms == 12
+    assert raw.tests == tests
+
+    assert Enum.map(raw.mutants, &{&1.id, &1.verdict, &1.killed_by, &1.timeouts}) ==
+             [{"m002", :killed, ["M:b"], []}, {"m001", :timeout, [], ["M:a"]}]
+
+    assert {:error, message} = Mutate.decode_raw(Path.join(dir, "missing.json"))
+    assert message =~ "missing.json: no such file or directory"
+    File.write!(path, "[1]")
+    assert {:error, "#{path}: not a covenant.mutate results file"} == Mutate.decode_raw(path)
+    File.write!(path, "{")
+    assert {:error, invalid} = Mutate.decode_raw(path)
+    assert String.starts_with?(invalid, "#{path}: invalid JSON: ")
+
+    one = %{raw | mutants: [mutant("m003", :killed), mutant("m001", :survived)], all: 4}
+    two = %{raw | mutants: [mutant("m002", :survived), mutant("m004", :survived)], all: 4}
+
+    assert {:ok, merged} = Mutate.merge([one, two])
+    assert Enum.map(merged.mutants, & &1.id) == ["m001", "m002", "m003", "m004"]
+    assert merged.tests == tests
+
+    assert {:error, "worker results overlap (the same mutant was run twice)"} ==
+             Mutate.merge([one, one])
+
+    assert {:error, "worker results are incomplete: 2 of 4 mutants have a verdict"} ==
+             Mutate.merge([one])
+
+    assert {:error, "no worker results to merge"} == Mutate.merge([])
+  end
+
+  # -- I12: the JSON shape ----------------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I12"
+  test "the matrix map has a fixed shape", %{counter: counter} do
+    {matrix, _} = credited(counter)
+    map = Matrix.to_map(matrix)
+
+    assert map |> Map.keys() |> Enum.sort() ==
+             ~w(baseline component covenant files jobs modules mutants obligations problems seed summary survivors tests timeout_ms)
+
+    assert map["covenant"] == Covenant.version()
+    assert map["component"] == "example.counter"
+    assert map["modules"] == ["X", "Y"]
+    assert map["files"] == ["lib/x.ex"]
+    assert {map["seed"], map["timeout_ms"], map["jobs"]} == {3, 1000, 2}
+    assert map["baseline"] == %{"tests" => 4, "ms" => 5}
+
+    assert map["summary"] ==
+             %{
+               "mutants" => 6,
+               "killed" => 3,
+               "survived" => 1,
+               "timeouts" => 1,
+               "invalid" => 1,
+               "score" => 0.6,
+               "annotated" => 0,
+               "unsorted" => 2
+             }
+
+    assert map["mutants"] |> hd() |> Map.keys() |> Enum.sort() ==
+             Enum.sort(
+               ~w(at column file function from id killed_by line module obligations operator reason timeouts to verdict)
+             )
+
+    assert hd(map["mutants"])["at"] == "lib/x.ex:4:7"
+    assert hd(map["mutants"])["verdict"] == "killed"
+    assert hd(map["mutants"])["obligations"] == ["example.counter.I1"]
+
+    assert map["obligations"]["example.counter.I1"] ==
+             %{
+               "killed" => 2,
+               "unique" => 1,
+               "mutants" => ["m001", "m002"],
+               "unique_mutants" => ["m001"]
+             }
+
+    test = map["tests"]["M:a"]
+
+    assert test |> Map.keys() |> Enum.sort() ==
+             ~w(file kills line module mutants mutation_blind name obligations unique_kills unique_mutants)
+
+    assert {test["kills"], test["unique_kills"], test["mutation_blind"]} == {2, 1, false}
+    assert map["tests"]["M:c"]["mutation_blind"] == "shares kills"
+    assert map["tests"]["M:d"]["mutation_blind"] == true
+
+    [survivor | _] = map["survivors"]
+
+    assert survivor |> Map.keys() |> Enum.sort() ==
+             ~w(at id mutation operator reason sort verdict)
+
+    assert %{"id" => "m004", "verdict" => "survived", "sort" => nil} = survivor
+    assert Enum.map(map["survivors"], & &1["verdict"]) == ["survived", "timeout"]
+    assert length(map["problems"]) == 2
+
+    text = Matrix.format(matrix)
+    assert text =~ "Kill matrix — example.counter (X, Y)"
+    assert text =~ "6 mutants: 3 killed, 1 survived, 1 timed out, 1 invalid — score 60.0%"
+    assert text =~ "example.counter.I1       2       1"
+    assert text =~ "Survivors (2; 2 unsorted)"
+    assert text =~ "UNSORTED"
+    assert text =~ "Mutation-blind tests (warn)"
+    assert text =~ "declared: shares kills"
+  end
+
+  # -- the golden corpus (I1, I2) ---------------------------------------------------
+
+  @corpus Path.expand("../../../fixtures/mutate/corpus.txt", __DIR__)
+  @golden Path.expand("../../../fixtures/mutate/corpus.mutants.txt", __DIR__)
+
+  @tag obligation: ["covenant.mutate.I1", "covenant.mutate.I2"]
+  test "a corpus of every construct the operators and skip rules care about yields exactly the recorded mutants" do
+    assert {:ok, ast} = Mutator.parse(File.read!(@corpus), "corpus.ex")
+    lines = fn ast -> ast |> Mutator.unwrap() |> Macro.to_string() |> String.split("\n") end
+    original = lines.(ast)
+
+    # what the mutant changes in the source, as a diff of the rendered code
+    changed = fn mutant ->
+      original
+      |> List.myers_difference(lines.(Mutator.apply(ast, mutant)))
+      |> Enum.flat_map(fn
+        {:eq, _} -> []
+        {:del, ls} -> Enum.map(ls, &("-" <> String.trim(&1)))
+        {:ins, ls} -> Enum.map(ls, &("+" <> String.trim(&1)))
+      end)
+      |> Enum.join(" ¦ ")
+    end
+
+    text =
+      ast
+      |> Mutator.sites(file: "corpus.ex")
+      |> Mutator.numbered()
+      |> Enum.map_join("", fn m ->
+        "#{m.id} #{Mutant.at(m)} #{m.module} #{m.function} #{m.operator} #{Mutant.mutation(m)} => #{changed.(m)}\n"
+      end)
+
+    # a deliberate change to the operators is recorded with
+    # COVENANT_UPDATE_GOLDEN=1 mix test <this file>, and the diff reviewed
+    if System.get_env("COVENANT_UPDATE_GOLDEN"), do: File.write!(@golden, text)
+
+    assert text == File.read!(@golden)
+  end
+
+  @tag obligation: "covenant.mutate.I2"
+  test "a nested skipped form does not end the skipping early, and a source without a file name says nofile" do
+    nested = "def a do\n  quote do\n    quote(do: 1 + 2)\n    3 + 4\n  end\n  5 + 6\nend"
+    assert changes(nested, :arithmetic_swap) == [{"+", "-"}]
+    assert changes(nested, :integer_shift) == [{"5", "6"}, {"5", "4"}, {"6", "7"}, {"6", "5"}]
+
+    assert {:ok, ast} = Mutator.parse("defmodule A do\n  def f, do: 1\nend\n", "a.ex")
+    assert [%Mutant{file: "nofile"} | _] = Mutator.sites(ast)
+  end
+
+  @tag obligation: "covenant.mutate.I3"
+  test "parsing emits no compiler warning" do
+    assert {{:ok, _}, []} =
+             Code.with_diagnostics(fn -> Mutator.parse("def f, do: 'charlist'", "a.ex") end)
+  end
+
+  @tag obligation: "covenant.mutate.I3"
+  test "compile reports an error position as a line, with a column when there is one" do
+    name =
+      Module.concat(
+        Covenant.MutateContractSample,
+        "Positions#{System.unique_integer([:positive])}"
+      )
+
+    ast = parse!("defmodule #{inspect(name)} do\n  def f, do: undefined_thing\nend\n")
+    assert {:error, message} = Mutator.compile(ast, "nofile.ex")
+    assert message =~ ~r/^line 2(:\d+)?: /
+    assert message =~ "undefined"
+    :code.purge(name)
+    :code.delete(name)
+  end
+
+  @tag obligation: "covenant.mutate.I2"
+  test "an attribute read is not a documentation attribute, other attributes are mutated, code outside a module is not" do
+    assert changes("def f, do: @doc <> \"x\"", :string_empty) == [{~s("x"), ~s("")}]
+    assert changes("@foo 1 + 2\ndef a, do: 1", :arithmetic_swap) == [{"+", "-"}]
+
+    source = "x = 1 + 2\ndefmodule Top.Level do\n  def f, do: 1 + 2\nend\nz = 3 + 4\n"
+    ast = parse!(source)
+    assert ast |> Mutator.sites() |> Enum.map(& &1.module) |> Enum.uniq() == ["Top.Level"]
+
+    assert ast |> Mutator.sites(modules: ["Top.Level"]) |> Enum.map(& &1.module) |> Enum.uniq() ==
+             ["Top.Level"]
+
+    assert ast |> Mutator.sites(modules: ["Other"]) == []
+
+    assert ast |> Mutator.sites() |> Enum.filter(&(&1.operator == :arithmetic_swap)) |> length() ==
+             1
+  end
+
+  @tag obligation: "covenant.mutate.I2"
+  test "a module whose name is not an alias or an atom is reported as ?" do
+    assert mutants("def f, do: 1") |> Enum.map(& &1.module) |> Enum.uniq() == ["Sample"]
+
+    ast = parse!("defmodule \"not a module\" do\n  def f, do: 1\nend\n")
+    assert ast |> Mutator.sites() |> Enum.map(& &1.module) |> Enum.uniq() == ["?"]
+  end
+
+  @tag obligation: "covenant.mutate.I3"
+  test "a failure with no diagnostic is reported by its message, one with a line only by its line" do
+    boom = parse!("defmodule Covenant.MutateContractSample.Boom do\n  raise \"boom\"\nend\n")
+    assert {:error, "boom"} = Mutator.compile(boom, "nofile.ex")
+
+    missing =
+      parse!(
+        "defmodule Covenant.MutateContractSample.Missing do\n  @foo 1\n  def f, do: @foo\n  use Nothing.Here\nend\n"
+      )
+
+    assert {:error, message} = Mutator.compile(missing, "nofile.ex")
+    assert message =~ ~r/^line 4: module Nothing.Here is not loaded/
+  end
+
+  @tag obligation: "covenant.mutate.I1"
+  test "a node is described in one line of at most 60 characters" do
+    exactly = {String.to_atom(String.duplicate("a", 60)), [], nil}
+    assert Operators.describe(exactly) == String.duplicate("a", 60)
+
+    longer = {String.to_atom(String.duplicate("a", 61)), [], nil}
+    assert Operators.describe(longer) == String.duplicate("a", 59) <> "…"
+
+    assert Operators.describe(quote(do: foo(1, 2))) == "foo(1, 2)"
+
+    assert Operators.describe(
+             quote(
+               do:
+                 (
+                   a
+                   b
+                 )
+             )
+           ) =~ "a" and
+             not (Operators.describe(
+                    quote(
+                      do:
+                        (
+                          a
+                          b
+                        )
+                    )
+                  ) =~ "\n")
+  end
+
+  @tag obligation: "covenant.mutate.I12"
+  test "the struct defaults of the matrix and of a mutant are the documented ones" do
+    matrix = struct(Matrix)
+    assert {matrix.seed, matrix.timeout, matrix.jobs, matrix.baseline_ms} == {0, 0, 1, 0}
+    assert {matrix.mutants, matrix.tests, matrix.problems, matrix.summary} == {[], [], [], %{}}
+
+    mutant =
+      struct!(Mutant,
+        file: "a",
+        line: 1,
+        column: 1,
+        operator: :boolean_flip,
+        from: "a",
+        to: "b",
+        index: 1
+      )
+
+    assert {mutant.killed_by, mutant.timeouts, mutant.verdict} == {[], [], nil}
+  end
+
+  @tag obligation: "covenant.mutate.I11"
+  test "from_map takes the index when it is given" do
+    assert Mutant.from_map(%{"index" => 7}).index == 7
+    assert Mutant.from_map(%{}).index == 0
+  end
+
+  @tag obligation: "covenant.mutate.I8"
+  test "a YAML error is reported at its own line, a flow list gets line 1", %{tmp_dir: _} do
+    assert {:error, [error]} = Survivors.parse("- a: 1\n- b: [\n- c: 2\n", "s.yml")
+    assert error.line == 3
+    assert error.message =~ "invalid YAML: "
+
+    assert {:ok, [annotation]} =
+             Survivors.parse(
+               "[{at: a.ex:1:1, operator: integer_shift, sort: equivalent, reason: r}]",
+               "f.yml"
+             )
+
+    assert annotation.line == 1
+  end
+
+  @tag obligation: "covenant.mutate.I10"
+  test "the Public surface section alone names the modules to mutate", %{counter: counter} do
+    surface = %Covenant.Contract.Section{
+      title: "Public surface",
+      line: 1,
+      body: "- `Only.InSurface.f/1` — x\n- `Also.There.g/0` — y"
+    }
+
+    component = %{counter | sections: [surface], obligations: []}
+    assert Modules.derive(component) == ["Also.There", "Only.InSurface"]
+
+    scoped = %{
+      counter
+      | sections: [],
+        obligations: Enum.map(counter.obligations, &%{&1 | scope: "`Scoped.Mod.h/2`"})
+    }
+
+    assert Modules.derive(scoped) == ["Scoped.Mod"]
+  end
+
+  # -- exact output of the matrix table (I12) -----------------------------------------
+
+  @tag obligation: "covenant.mutate.I12"
+  test "the matrix table prints exactly the numbers, survivors and blind tests", %{
+    counter: counter
+  } do
+    {matrix, tests} = credited(counter)
+
+    assert Matrix.format(matrix) == """
+           Kill matrix — example.counter (X, Y)
+             6 mutants: 3 killed, 1 survived, 1 timed out, 1 invalid — score 60.0%
+             4 tests, baseline 5 ms, seed 3, timeout 1000 ms
+
+             obligation          killed  unique
+             example.counter.I1       2       1
+             example.counter.I2       2       1
+             example.counter.I3       0       0
+             example.counter.I4       0       0
+             example.counter.I6       0       0
+             example.counter.I7       0       0
+
+           Survivors (2; 2 unsorted)
+             m004 lib/x.ex:4:7 integer_shift `1` → `2`  UNSORTED
+             m005 lib/x.ex:4:7 integer_shift `1` → `2` [timeout]  UNSORTED
+
+           Mutation-blind tests (warn): no mutant only this test catches
+             c (M) — 0 kill(s), 0 unique — declared: shares kills
+             d (M) — 0 kill(s), 0 unique\
+           """
+
+    sorted =
+      Matrix.build(
+        results([hd(tests)], [
+          mutant("m001", :killed, killed_by: ["M:a"]),
+          mutant("m004", :survived)
+        ]),
+        component: counter,
+        annotations: [annotation([])]
+      )
+
+    assert Matrix.format(sorted) == """
+           Kill matrix — example.counter (X, Y)
+             2 mutants: 1 killed, 1 survived, 0 timed out, 0 invalid — score 50.0%
+             1 tests, baseline 5 ms, seed 0, timeout 0 ms
+
+             obligation          killed  unique
+             example.counter.I1       1       1
+             example.counter.I2       0       0
+             example.counter.I3       0       0
+             example.counter.I4       0       0
+             example.counter.I6       0       0
+             example.counter.I7       0       0
+
+           Survivors (1; 0 unsorted)
+             m004 lib/x.ex:4:7 integer_shift `1` → `2`  equivalent — because
+
+           Mutation-blind tests: none (every test has a unique kill)\
+           """
+
+    bare = %{counter | obligations: []}
+    empty = Matrix.build(results([entry("a", [])], []), component: bare)
+
+    assert Matrix.format(empty) == """
+           Kill matrix — example.counter (X, Y)
+             0 mutants: 0 killed, 0 survived, 0 timed out, 0 invalid — score n/a
+             1 tests, baseline 5 ms, seed 0, timeout 0 ms
+
+             obligation  killed  unique
+
+           Survivors: none
+
+           Mutation-blind tests (warn): no mutant only this test catches
+             a (M) — 0 kill(s), 0 unique\
+           """
+
+    short = %{
+      counter
+      | obligations: Enum.map(Enum.take(counter.obligations, 1), &%{&1 | id: "a.I1"})
+    }
+
+    narrow = Matrix.build(results([entry("a", ["a.I1"])], []), component: short)
+
+    assert Matrix.format(narrow) =~
+             "\n  obligation  killed  unique\n  a.I1             0       0\n"
+  end
+
+  @tag obligation: "covenant.mutate.I12"
+  test "an empty matrix has the documented defaults and its problems say where to annotate", %{
+    counter: counter
+  } do
+    assert %Matrix{} == %Matrix{
+             component: nil,
+             modules: [],
+             files: [],
+             seed: 0,
+             timeout: 0,
+             jobs: 1,
+             baseline_ms: 0,
+             tests: [],
+             mutants: [],
+             obligations: %{},
+             test_stats: %{},
+             survivors: [],
+             blind: [],
+             problems: [],
+             summary: %{}
+           }
+
+    matrix =
+      Matrix.build(results([entry("a", ["example.counter.I1"])], [mutant("m001", :survived)]),
+        component: counter
+      )
+
+    assert {matrix.seed, matrix.timeout, matrix.jobs} == {0, 0, 1}
+    assert [%{message: message}] = matrix.problems
+    assert message =~ "or annotate it in the survivors file"
+    assert Matrix.ok?(matrix) === false
+    assert Matrix.ok?(%{matrix | problems: []}) === true
+  end
+
+  @tag obligation: "covenant.mutate.I7"
+  test "the score is rounded to four digits and a kill by an unknown test credits no obligation",
+       %{counter: counter} do
+    mutants = [
+      mutant("m001", :killed, killed_by: ["M:ghost"]),
+      mutant("m002", :survived),
+      mutant("m003", :survived)
+    ]
+
+    matrix =
+      Matrix.build(results([entry("a", ["example.counter.I1"])], mutants), component: counter)
+
+    assert matrix.summary.score == 0.3333
+    assert hd(matrix.mutants).obligations == []
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "an exception on a module or a file sorts the survivors inside it", %{fixture: contract} do
+    greeter = Contract.component(contract, "example.greeter")
+
+    retarget = fn target ->
+      %{
+        greeter
+        | obligations:
+            Enum.map(
+              greeter.obligations,
+              &if(&1.kind == :exception, do: %{&1 | target: target}, else: &1)
+            )
+      }
+    end
+
+    inside =
+      mutant("m001", :survived,
+        module: "Example.Greeter",
+        function: "greet/1",
+        file: "lib/example/greeter.ex"
+      )
+
+    outside = mutant("m002", :survived, module: "Other", function: "f/0", file: "lib/other.ex")
+
+    run = fn component ->
+      Matrix.build(results([entry("a", ["example.greeter.I1"])], [inside, outside]),
+        component: component
+      )
+    end
+
+    by_module = run.(retarget.("Example.Greeter"))
+
+    assert [%{sort: "decision-hole", mutant: %{id: "m001"}}, %{sort: nil, mutant: %{id: "m002"}}] =
+             by_module.survivors
+
+    by_file = run.(retarget.("lib/example/greeter.ex"))
+
+    assert [%{sort: "decision-hole", mutant: %{id: "m001"}}, %{sort: nil, mutant: %{id: "m002"}}] =
+             by_file.survivors
+
+    by_function = run.(retarget.("Example.Greeter.greet/1"))
+    assert [%{sort: "decision-hole"}, %{sort: nil}] = by_function.survivors
+
+    elsewhere = run.(retarget.("Example.Greeter.other/2"))
+    assert [%{sort: nil}, %{sort: nil}] = elsewhere.survivors
+  end
+
+  # -- mutants as data (I3, I11) ---------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I11"
+  test "a mutant survives to_map and from_map, whatever its verdict" do
+    for verdict <- [:killed, :survived, :timeout, :invalid, nil] do
+      original =
+        mutant("m007", verdict,
+          killed_by: ["A:x"],
+          timeouts: ["B:y"],
+          reason: "why",
+          operator: :guard_removal
+        )
+
+      back = original |> Mutant.to_map() |> Mutant.from_map()
+
+      assert Map.take(back, [
+               :id,
+               :file,
+               :line,
+               :column,
+               :operator,
+               :from,
+               :to,
+               :module,
+               :function,
+               :verdict,
+               :killed_by,
+               :timeouts,
+               :reason
+             ]) ==
+               Map.take(original, [
+                 :id,
+                 :file,
+                 :line,
+                 :column,
+                 :operator,
+                 :from,
+                 :to,
+                 :module,
+                 :function,
+                 :verdict,
+                 :killed_by,
+                 :timeouts,
+                 :reason
+               ])
+
+      assert back.index == 0
+    end
+
+    map = Mutant.to_map(mutant("m001", :survived))
+    assert map["at"] == "lib/x.ex:4:7"
+    assert map["verdict"] == "survived"
+    assert Mutant.to_map(mutant("m001", nil))["verdict"] == nil
+
+    for operator <- Mutant.operators() do
+      assert operator
+             |> then(&mutant("m1", :killed, operator: &1))
+             |> Mutant.to_map()
+             |> Mutant.from_map()
+             |> Map.fetch!(:operator) == operator
+    end
+
+    assert Mutant.from_map(%{"verdict" => "weird"}).verdict == nil
+    assert Mutant.from_map(%{}).killed_by == []
+    assert Mutant.from_map(%{}).timeouts == []
+  end
+
+  @tag obligation: "covenant.mutate.I2"
+  test "a mutant needs its location, operator, change and index" do
+    full = [
+      file: "a.ex",
+      line: 1,
+      column: 1,
+      operator: :boolean_flip,
+      from: "true",
+      to: "false",
+      index: 1
+    ]
+
+    assert %Mutant{} = struct!(Mutant, full)
+
+    for key <- Keyword.keys(full) do
+      assert_raise ArgumentError, fn -> struct!(Mutant, Keyword.delete(full, key)) end
+    end
+  end
+
+  @tag obligation: "covenant.mutate.I11"
+  test "every outcome and the defaults of a worker's results survive JSON", %{tmp_dir: dir} do
+    outcomes = [:passed, :failed, :timeout, :invalid, :skipped, :excluded]
+    tests = for outcome <- outcomes, do: entry("t_#{outcome}", ["x.I1"], outcome)
+    result = %{files: [], all: 0, baseline_ms: 1, tests: tests, mutants: []}
+    path = Path.join(dir, "raw.json")
+
+    File.write!(path, Mutate.encode_raw(result, component: "x.y"))
+    assert {:ok, raw} = Mutate.decode_raw(path)
+    assert Enum.map(raw.tests, & &1.outcome) == outcomes
+    assert raw.slice == "1/1"
+    assert raw.modules == []
+    assert raw.ignored == []
+
+    text = path |> File.read!() |> JSON.decode!()
+    assert text["covenant"] == Covenant.version()
+    assert text["slice"] == "1/1"
+
+    File.write!(path, ~s({"tests": [{"key": "a", "outcome": "mystery"}], "mutants": []}))
+
+    assert {:ok, %{tests: [%{outcome: :invalid, obligations: []}], baseline_ms: 0, all: 0}} =
+             Mutate.decode_raw(path)
+
+    File.write!(path, ~s({"tests": [], "mutants": [{"id": "m1"}, {"id": "m2"}]}))
+    assert {:ok, %{all: 2, files: [], modules: []}} = Mutate.decode_raw(path)
+
+    File.write!(path, ~s({"tests": [], "mutants": 5}))
+    assert {:error, message} = Mutate.decode_raw(path)
+    assert message == "#{path}: not a covenant.mutate results file"
+  end
+
+  @tag obligation: "covenant.mutate.I11"
+  test "a component that names no module cannot be planned", %{
+    fixture: contract,
+    counter: counter
+  } do
+    bare = %{counter | obligations: [], sections: []}
+    contract = %{contract | components: Map.put(contract.components, "example.counter", bare)}
+
+    assert {:error, message} =
+             Mutate.plan(contract, "example.counter",
+               root: ContractBuilder.fixture_project(),
+               test_paths: ["test/contract"]
+             )
+
+    assert message ==
+             "`example.counter` names no implementation module: its Public surface and obligation scopes contain no " <>
+               "`Module.function` code span. Declare `modules:` in the front matter of #{counter.file} or pass --module"
+  end
+
+  # -- survivors file edge cases (I8) ----------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I8"
+  test "line endings, empty documents, invalid YAML and a missing sort are handled", %{
+    counter: counter
+  } do
+    entry = fn n ->
+      "- at: a.ex:#{n}:1\r\n  operator: integer_shift\r\n  sort: equivalent\r\n  reason: r\r\n"
+    end
+
+    assert {:ok, [first, second]} = Survivors.parse(entry.(1) <> entry.(2), "crlf.yml")
+    assert {first.line, second.line} == {1, 5}
+
+    assert {:error, [error]} = Survivors.parse("- a: [1\n", "bad.yml")
+    assert error.file == "bad.yml"
+    assert is_integer(error.line)
+    assert error.message =~ "invalid YAML: "
+
+    assert {:error, errors} =
+             Survivors.parse("- at: a.ex:1:1\n  operator: integer_shift\n  reason: r\n", "s.yml")
+
+    assert Enum.map(errors, & &1.message) == ["annotation #1 is missing `sort`"]
+
+    assert {:error, errors} =
+             Survivors.parse(
+               "- at: 5\n  operator: integer_shift\n  sort: equivalent\n  reason: r\n",
+               "s.yml"
+             )
+
+    assert Enum.map(errors, & &1.message) == ["annotation #1 `at` must be a string, got 5"]
+
+    assert Survivors.path("c", counter) == "c/example/counter.survivors.yml"
+  end
+
+  # -- finding modules (I10) --------------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I10"
+  test "located modules come back sorted by name, with every reason spelled out" do
+    root = @root
+
+    assert {:ok, [{Covenant.ContractError, _}, {Covenant.Error, _}], []} =
+             Modules.locate(["Covenant.Error", "Covenant.ContractError"], :flag, root)
+
+    sibling = Path.join(Path.dirname(root), "cov")
+    assert {:error, message} = Modules.locate(["Covenant.Conditions"], :flag, sibling)
+
+    assert message ==
+             "Covenant.Conditions: lives outside the project (#{Path.join(root, "lib/covenant/conditions.ex")})"
+
+    assert {:error, message} =
+             Modules.locate(["Covenant.Conditions", "Nope.One", "Nope.Two"], :flag, root)
+
+    assert message == "Nope.One: is not a loaded module; Nope.Two: is not a loaded module"
+
+    assert {:error, message} = Modules.locate(["Nope.One"], :derived, root)
+
+    assert message ==
+             "no implementation module to mutate; the Public surface and obligation scopes name none under #{root}. Declare `modules:` in the front matter or pass --module"
+
+    name =
+      Module.concat(
+        Covenant.MutateContractSample,
+        "Vanished#{System.unique_integer([:positive])}"
+      )
+
+    Code.compile_string(
+      "defmodule #{inspect(name)} do\n  def f, do: 1\nend\n",
+      "/nonexistent/vanished.ex"
+    )
+
+    on_exit(fn -> :code.purge(name) && :code.delete(name) end)
+
+    assert {:ok, [], [{_, why}]} = locate_ignored(inspect(name), root)
+    assert why == "was compiled from /nonexistent/vanished.ex, which does not exist"
+  end
+
+  defp locate_ignored(name, root) do
+    case Modules.locate([name, "Covenant.Conditions"], :derived, root) do
+      {:ok, [{Covenant.Conditions, _}], ignored} -> {:ok, [], ignored}
+      other -> other
+    end
+  end
+end
+
+defmodule Covenant.MutateWorkdirContractTest do
+  @moduledoc "The working directory is process-wide, so these tests run one at a time."
+
+  use Covenant.Case, component: "covenant.mutate", async: false
+
+  alias Covenant.Mutate.Workdir
+
+  @moduletag :tmp_dir
+
+  setup %{tmp_dir: dir} do
+    root = Path.join(dir, "project")
+    base = Path.join(dir, "farms")
+    File.mkdir_p!(base)
+    File.mkdir_p!(Path.join(root, "lib"))
+    File.mkdir_p!(Path.join(root, "tmp"))
+    File.write!(Path.join(root, "mix.exs"), "mix")
+    File.write!(Path.join(root, "lib/a.ex"), "a")
+    File.write!(Path.join(root, "tmp/theirs.txt"), "theirs")
+    {:ok, root: root, base: base}
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "a worker directory links every root entry but tmp and has a tmp of its own", %{
+    root: root,
+    base: base
+  } do
+    dir = Workdir.build(root, base)
+    assert dir == Path.join(base, "covenant-mutate-#{System.pid()}")
+    assert dir |> File.ls!() |> Enum.sort() == ["lib", "mix.exs", "tmp"]
+    assert File.read!(Path.join(dir, "mix.exs")) == "mix"
+    assert File.read!(Path.join(dir, "lib/a.ex")) == "a"
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "lib"))
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "mix.exs"))
+    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "tmp"))
+    assert File.ls!(Path.join(dir, "tmp")) == []
+
+    # building again starts clean
+    File.write!(Path.join(dir, "tmp/stale.txt"), "stale")
+    assert ^dir = Workdir.build(root, base)
+    assert File.ls!(Path.join(dir, "tmp")) == []
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "removing it deletes the links, never what they point at", %{root: root, base: base} do
+    dir = Workdir.build(root, base)
+    File.write!(Path.join(dir, "tmp/mine.txt"), "mine")
+    File.write!(Path.join(dir, "loose.txt"), "loose")
+
+    assert :ok = Workdir.remove(dir)
+
+    refute File.exists?(dir)
+    assert File.read!(Path.join(root, "lib/a.ex")) == "a"
+    assert File.read!(Path.join(root, "mix.exs")) == "mix"
+    assert File.read!(Path.join(root, "tmp/theirs.txt")) == "theirs"
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "within runs in the directory and restores the previous one, even on a raise", %{
+    root: root,
+    base: base
+  } do
+    dir = Workdir.build(root, base)
+    here = File.cwd!()
+
+    resolved = Workdir.within(dir, fn -> {File.cwd!(), File.read!("mix.exs")} end)
+    assert elem(resolved, 1) == "mix"
+    assert Path.basename(elem(resolved, 0)) == Path.basename(dir)
+    assert File.cwd!() == here
+
+    assert_raise RuntimeError, "boom", fn -> Workdir.within(dir, fn -> raise "boom" end) end
+    assert File.cwd!() == here
+
+    assert Workdir.within(dir, fn -> :value end) == :value
+  end
+end

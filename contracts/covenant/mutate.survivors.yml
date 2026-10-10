@@ -1,0 +1,304 @@
+# Survivor sort for covenant.mutate (`mix covenant.mutate covenant.mutate --test-path test/contract/covenant/mutate/mutate_contract_test.exs`).
+# The Runner, Workdir and Mix task are not in `modules:` (the worker executes them while it swaps mutants), so none of their mutants exist here.
+# Every entry below was read against the code: a guard the AST shape always satisfies, a catch-all no valid source reaches, a falsy nil for false, or a
+# position that only reaches diagnostics. Sorts: equivalent | log-only | dead-code | timeout | evaluation-gap | decision-hole.
+- at: lib/covenant/mutate.ex:159:5
+  operator: element_removal
+  mutation: "`\"invalid\" => :invalid` → `(removed)`"
+  sort: equivalent
+  reason: "decode_raw falls back to :invalid for any unknown outcome name (`Map.get(@outcomes, name, :invalid)`), so the explicit \"invalid\" entry is redundant."
+- at: lib/covenant/mutate.ex:159:5
+  operator: string_empty
+  mutation: "`\"invalid\"` → `\"\"`"
+  sort: equivalent
+  reason: "The key \"\" is never written; an unknown outcome name decodes to :invalid by the Map.get default, which is what \"invalid\" decodes to."
+- at: lib/covenant/mutate/matrix.ex:344:88
+  operator: integer_shift
+  mutation: "`10` → `9`"
+  sort: equivalent
+  reason: "The default width of an empty obligation table is raised to at least 10 by `max(width, 10)` on the next line, so 9 or 10 gives the same header."
+- at: lib/covenant/mutate/modules.ex:69:24
+  operator: string_empty
+  mutation: "`\"\\n\"` → `\"\"`"
+  sort: equivalent
+  reason: "Code spans are delimited by backticks and never cross a line, so joining the Public surface and the scopes with \"\" instead of \"\\n\" tokenises to the same spans."
+- at: lib/covenant/mutate/modules.ex:71:27
+  operator: string_empty
+  mutation: "`\"\\n\"` → `\"\"`"
+  sort: equivalent
+  reason: "Scopes are joined into one text that is scanned for backtick-delimited code spans; \"\\n\" or \"\" between two scopes yields the same spans."
+- at: lib/covenant/mutate/modules.ex:157:13
+  operator: clause_removal
+  mutation: "`case _ ->` → `(removed)`"
+  sort: evaluation-gap
+  reason: "A loaded module whose compile info has no :source (built from forms without a source option) is needed to reach this branch; Elixir-compiled modules always record one and names are resolved under Elixir., so no test module can be built for it."
+- at: lib/covenant/mutate/modules.ex:143:18
+  operator: guard_removal
+  mutation: "`when is_list(source)` → `(no guard)`"
+  sort: evaluation-gap
+  reason: "Same branch as m0500: only a module with a non-list :source reaches the guard's other side."
+- at: lib/covenant/mutate/modules.ex:158:21
+  operator: string_empty
+  mutation: "`\"has no source file\"` → `\"\"`"
+  sort: evaluation-gap
+  reason: "Same branch as m0500: the \"has no source file\" reason needs a module compiled without source information."
+- at: lib/covenant/mutate/mutator.ex:138:22
+  operator: return_nil
+  mutation: "`false` → `nil`"
+  sort: equivalent
+  reason: "The result only feeds a boolean test (`if`, `and`, `Enum.filter/2`), where nil and false behave alike."
+- at: lib/covenant/mutate/mutator.ex:141:40
+  operator: return_nil
+  mutation: "`false` → `nil`"
+  sort: equivalent
+  reason: "The result only feeds a boolean test (`if`, `and`, `Enum.filter/2`), where nil and false behave alike."
+- at: lib/covenant/mutate/mutator.ex:143:26
+  operator: return_nil
+  mutation: "`false` → `nil`"
+  sort: equivalent
+  reason: "The result only feeds a boolean test (`if`, `and`, `Enum.filter/2`), where nil and false behave alike."
+- at: lib/covenant/mutate/mutator.ex:145:59
+  operator: guard_removal
+  mutation: "`when is_binary(outer)` → `(no guard)`"
+  sort: equivalent
+  reason: "The module stack only ever holds strings produced by module_name/2, so the is_binary(outer) guard is always true."
+- at: lib/covenant/mutate/mutator.ex:150:53
+  operator: return_nil
+  mutation: "`inspect(atom)` → `nil`"
+  sort: dead-code
+  reason: "With the literal encoder an atom module name is block-wrapped, so a bare atom never reaches this clause."
+- at: lib/covenant/mutate/mutator.ex:161:33
+  operator: guard_removal
+  mutation: "`when is_atom(name)` → `(no guard)`"
+  sort: equivalent
+  reason: "A head without arguments (`def name`) has an atom name; a non-atom name comes with an argument list and is handled by the clause above."
+- at: lib/covenant/mutate/mutator.ex:164:31
+  operator: guard_removal
+  mutation: "`when is_list(meta)` → `(no guard)`"
+  sort: equivalent
+  reason: "Anchors are AST nodes whose meta is a list, so the is_list(meta) guard is always true."
+- at: lib/covenant/mutate/mutator.ex:165:25
+  operator: return_nil
+  mutation: "`{nil, nil}` → `nil`"
+  sort: dead-code
+  reason: "Every anchor is an AST node with list meta, so the {nil, nil} fallback of position/1 is never used."
+- at: lib/covenant/mutate/mutator.ex:173:9
+  operator: condition_negate
+  mutation: "`if n == index` → `if !(n == index)`"
+  sort: timeout
+  reason: "Negating `n == index` makes apply/2 replace every other node with the replacement, which contains nodes that are then rewritten again; the walk never ends and the tests only time out."
+- at: lib/covenant/mutate/mutator.ex:173:14
+  operator: comparison_swap
+  mutation: "`==` → `!=`"
+  sort: timeout
+  reason: "`n != index` makes apply/2 replace every node but one with the replacement, which the walk then rewrites again forever; the tests only time out."
+- at: lib/covenant/mutate/mutator.ex:202:10
+  operator: statement_removal
+  mutation: "`Code.put_compiler_option(:ignore_module_conflict, true)` → `(removed)`"
+  sort: log-only
+  reason: "Without :ignore_module_conflict the compiler only warns \"redefining module\"; compile/2 collects diagnostics with Code.with_diagnostics/1 and drops them."
+- at: lib/covenant/mutate/mutator.ex:202:55
+  operator: boolean_flip
+  mutation: "`true` → `false`"
+  sort: log-only
+  reason: "Setting :ignore_module_conflict to false only makes the compiler warn \"redefining module\", which compile/2 collects and drops."
+- at: lib/covenant/mutate/mutator.ex:233:32
+  operator: guard_removal
+  mutation: "`when is_integer(line)` → `(no guard)`"
+  sort: evaluation-gap
+  reason: "Needs a compile error whose diagnostic position is neither {line, column} nor an integer line; no source tried produces one, so the catch-all clause's guard is not pinned."
+- at: lib/covenant/mutate/mutator.ex:234:34
+  operator: return_nil
+  mutation: "`\"\"` → `nil`"
+  sort: equivalent
+  reason: "`\"#{nil}#{message}\"` renders exactly like `\"\" <> message`."
+- at: lib/covenant/mutate/operators.ex:95:5
+  operator: element_removal
+  mutation: "`:->` → `(removed)`"
+  sort: equivalent
+  reason: "A `->` clause is an element of the clause list of a case, cond, fn or receive, never a statement of a block, so excluding it from statement removal changes nothing."
+- at: lib/covenant/mutate/operators.ex:158:50
+  operator: guard_removal
+  mutation: "`when is_list(parts)` → `(no guard)`"
+  sort: equivalent
+  reason: "The parts of a `<<>>` node are always a list."
+- at: lib/covenant/mutate/operators.ex:159:43
+  operator: logical_swap
+  mutation: "`and` → `or`"
+  sort: equivalent
+  reason: "A raw binary part occurs only in an interpolated string, which always carries :delimiter; literal segments of a bitstring are block-wrapped by the literal encoder, so `Enum.any?(parts, &is_binary/1)` adds nothing."
+- at: lib/covenant/mutate/operators.ex:191:21
+  operator: element_removal
+  mutation: "`line: meta[:line]` → `(removed)`"
+  sort: equivalent
+  reason: "The node's meta only positions diagnostics; Macro.to_string/1 and the compiled behaviour are the same."
+- at: lib/covenant/mutate/operators.ex:191:40
+  operator: element_removal
+  mutation: "`column: meta[:column]` → `(removed)`"
+  sort: equivalent
+  reason: "The node's meta only positions diagnostics; Macro.to_string/1 and the compiled behaviour are the same."
+- at: lib/covenant/mutate/operators.ex:203:53
+  operator: guard_removal
+  mutation: "`when is_list(exprs) and length(exprs) > 1` → `(no guard)`"
+  sort: equivalent
+  reason: "The exprs of a block are always a list, and a block of a single expression has no non-final statement, so the filter selects nothing either way."
+- at: lib/covenant/mutate/operators.ex:203:73
+  operator: logical_swap
+  mutation: "`and` → `or`"
+  sort: equivalent
+  reason: "`is_list(exprs) or length(exprs) > 1` is true for every block; a block of a single expression has no non-final statement (`i < last` with last = 0), so the result is unchanged."
+- at: lib/covenant/mutate/operators.ex:203:91
+  operator: comparison_swap
+  mutation: "`>` → `>=`"
+  sort: equivalent
+  reason: "`length(exprs) >= 1` only adds blocks of one expression, which have no non-final statement."
+- at: lib/covenant/mutate/operators.ex:203:93
+  operator: integer_shift
+  mutation: "`1` → `0`"
+  sort: equivalent
+  reason: "`length(exprs) > 0` only adds blocks of one expression, which have no non-final statement."
+- at: lib/covenant/mutate/operators.ex:217:47
+  operator: guard_removal
+  mutation: "`when is_list(args)` → `(no guard)`"
+  sort: equivalent
+  reason: "The arguments of a remote call node are always a list."
+- at: lib/covenant/mutate/operators.ex:222:32
+  operator: return_nil
+  mutation: "`false` → `nil`"
+  sort: equivalent
+  reason: "The result only feeds a boolean test (`if`, `and`, `Enum.filter/2`), where nil and false behave alike."
+- at: lib/covenant/mutate/operators.ex:227:11
+  operator: clause_removal
+  mutation: "`case nil ->` → `(removed)`"
+  sort: dead-code
+  reason: "A def or defp whose keyword list has no `do:` key is not a function with a body; no valid source reaches this clause."
+- at: lib/covenant/mutate/operators.ex:260:31
+  operator: return_nil
+  mutation: "`true` → `nil`"
+  sort: dead-code
+  reason: "A raw nil never appears in the encoded AST (literals are block-wrapped), so this clause is never used."
+- at: lib/covenant/mutate/operators.ex:260:31
+  operator: boolean_flip
+  mutation: "`true` → `false`"
+  sort: dead-code
+  reason: "A raw nil never appears in the encoded AST (literals are block-wrapped), so this clause is never used."
+- at: lib/covenant/mutate/operators.ex:262:29
+  operator: return_nil
+  mutation: "`false` → `nil`"
+  sort: equivalent
+  reason: "The result only feeds a boolean test (`if`, `and`, `Enum.filter/2`), where nil and false behave alike."
+- at: lib/covenant/mutate/operators.ex:265:9
+  operator: return_nil
+  mutation: "`{:__block__, Keyword.take(meta, [:line, :column]), [nil]}` → `nil`"
+  sort: equivalent
+  reason: "The node's meta only positions diagnostics; Macro.to_string/1 and the compiled behaviour are the same."
+- at: lib/covenant/mutate/operators.ex:264:31
+  operator: guard_removal
+  mutation: "`when is_list(meta)` → `(no guard)`"
+  sort: equivalent
+  reason: "The meta of an AST node is always a list, so the guard is always true."
+- at: lib/covenant/mutate/operators.ex:265:42
+  operator: element_removal
+  mutation: "`:line` → `(removed)`"
+  sort: equivalent
+  reason: "The node's meta only positions diagnostics; Macro.to_string/1 and the compiled behaviour are the same."
+- at: lib/covenant/mutate/operators.ex:265:49
+  operator: element_removal
+  mutation: "`:column` → `(removed)`"
+  sort: equivalent
+  reason: "The node's meta only positions diagnostics; Macro.to_string/1 and the compiled behaviour are the same."
+- at: lib/covenant/mutate/operators.ex:277:57
+  operator: guard_removal
+  mutation: "`when is_list(blocks)` → `(no guard)`"
+  sort: equivalent
+  reason: "The blocks of a `case` are always a keyword list, so the is_list(blocks) guard is always true."
+- at: lib/covenant/mutate/operators.ex:280:48
+  operator: guard_removal
+  mutation: "`when is_list(blocks)` → `(no guard)`"
+  sort: equivalent
+  reason: "The blocks of a `cond` are always a keyword list, so the is_list(blocks) guard is always true."
+- at: lib/covenant/mutate/operators.ex:296:11
+  operator: clause_removal
+  mutation: "`case nil ->` → `(removed)`"
+  sort: dead-code
+  reason: "A case or cond without a `do:` block does not parse into this shape, so the nil branch is never taken."
+- at: lib/covenant/mutate/operators.ex:315:53
+  operator: guard_removal
+  mutation: "`when is_list(patterns)` → `(no guard)`"
+  sort: equivalent
+  reason: "The patterns of a `->` clause are always a list."
+- at: lib/covenant/mutate/operators.ex:318:36
+  operator: return_nil
+  mutation: "`describe(other)` → `nil`"
+  sort: dead-code
+  reason: "Every clause of a case, cond or fn is a `->` node, so the generic describe/1 fallback is never used."
+- at: lib/covenant/mutate/operators.ex:335:45
+  operator: guard_removal
+  mutation: "`when is_list(pairs) and pairs != []` → `(no guard)`"
+  sort: equivalent
+  reason: "A map node's pairs are always a list, and an empty one yields no mutants whether or not the guard excludes it."
+- at: lib/covenant/mutate/operators.ex:335:65
+  operator: logical_swap
+  mutation: "`and` → `or`"
+  sort: equivalent
+  reason: "`is_list(pairs) or pairs != []` also admits an empty map, which yields no mutants anyway."
+- at: lib/covenant/mutate/operators.ex:351:22
+  operator: return_nil
+  mutation: "`false` → `nil`"
+  sort: equivalent
+  reason: "The result only feeds a boolean test (`if`, `and`, `Enum.filter/2`), where nil and false behave alike."
+- at: lib/covenant/mutate/operators.ex:384:44
+  operator: return_nil
+  mutation: "`key` → `nil`"
+  sort: dead-code
+  reason: "Keyword keys are block-wrapped by the literal encoder, so a bare atom key never reaches this clause."
+- at: lib/covenant/mutate/operators.ex:389:48
+  operator: guard_removal
+  mutation: "`when is_list(node_meta)` → `(no guard)`"
+  sort: dead-code
+  reason: "Every element reaching anchor/2 is a pair or a node with list meta, so the guard is always true and the fallback below is never used."
+- at: lib/covenant/mutate/operators.ex:390:34
+  operator: return_nil
+  mutation: "`{:__block__, meta, [nil]}` → `nil`"
+  sort: dead-code
+  reason: "The catch-all anchor/2 clause is never reached: elements are pairs or nodes with meta."
+- at: lib/covenant/mutate/operators.ex:390:54
+  operator: element_removal
+  mutation: "`nil` → `(removed)`"
+  sort: dead-code
+  reason: "The catch-all anchor/2 clause is never reached: elements are pairs or nodes with meta."
+- at: lib/covenant/mutate/survivors.ex:78:20
+  operator: clause_removal
+  mutation: "`case {:ok, nil} ->` → `(removed)`"
+  sort: dead-code
+  reason: "YamlElixir 2.x answers an empty document with {:ok, %{}} (probed with null, ~, --- and a comment-only file), never {:ok, nil}."
+- at: lib/covenant/mutate/survivors.ex:95:25
+  operator: clause_removal
+  mutation: "`case {:error, error} ->` → `(removed)`"
+  sort: dead-code
+  reason: "YamlElixir.read_from_string/1 reports every error as a ParsingError carrying line and message, which the clause above handles; this generic fallback never runs."
+- at: lib/covenant/mutate/survivors.ex:96:27
+  operator: element_removal
+  mutation: "`Error.new(file, 1, \"invalid YAML: #{Exception.message(error…` → `(removed)`"
+  sort: dead-code
+  reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
+- at: lib/covenant/mutate/survivors.ex:96:37
+  operator: integer_shift
+  mutation: "`1` → `2`"
+  sort: dead-code
+  reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
+- at: lib/covenant/mutate/survivors.ex:96:37
+  operator: integer_shift
+  mutation: "`1` → `0`"
+  sort: dead-code
+  reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
+- at: lib/covenant/mutate/survivors.ex:96:40
+  operator: string_empty
+  mutation: "`\"invalid YAML: #{Exception.message(error)}\"` → `\"\"`"
+  sort: dead-code
+  reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
+- at: lib/covenant/mutate/survivors.ex:110:22
+  operator: element_removal
+  mutation: "`\"\\r\\n\"` → `(removed)`"
+  sort: equivalent
+  reason: "A trailing \\r does not change which lines start with `- `, so splitting on \"\\n\" alone finds the same item lines."

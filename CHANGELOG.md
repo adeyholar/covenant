@@ -51,6 +51,23 @@
 - Obligations `covenant.tasks.I7` (credit independent of `--jobs`) and `I8`
   (the help documents the survivors file); the fixture counter's persisted-form
   test goes through a `:tmp_dir` so the contract test of I7 can observe workers.
+- `covenant.mutate` has a Contract of its own (`contracts/covenant/mutate.obligations.md`,
+  obligations `I1`–`I15`: the operators, deterministic enumeration at reported
+  locations, mutants compiled in memory, invalid mutants, verdicts, the green
+  baseline, credit and unique kills, the survivors file, module resolution, the
+  plan and worker results, the JSON matrix, the exit status, determinism and
+  the worker directory) and tests in `test/contract/covenant/mutate/`: unit
+  tests that call the mutate modules directly, a golden corpus
+  (`test/fixtures/mutate/`, re-recorded with `COVENANT_UPDATE_GOLDEN=1`) and
+  end-to-end tests that run the task in the fixture project.
+- `mix covenant.mutate covenant.mutate --test-path test/contract/covenant/mutate/mutate_contract_test.exs`
+  mutates the module list declared in the obligations' front matter (the
+  Runner, Workdir and Mix task are left out: the worker executes them while it
+  swaps mutants). 1286 mutants, 1090 killed, 60 survivors sorted in
+  `mutate.survivors.yml` (equivalent, dead-code, log-only, timeout,
+  evaluation-gap), score 94.8% over the 1150 compiled mutants.
+- `Covenant.Mutate.Workdir.build/2` takes the directory the worker directory
+  is made under (the system temp directory by default).
 
 ## 0.1.0 (2026-10-09)
 
