@@ -9,6 +9,7 @@ defmodule Mix.Tasks.Covenant.Check do
       mix covenant.check --no-run            # reuse the last results
       mix covenant.check --contracts path    # another contracts directory
       mix covenant.check --test-path apps/core/test/contract --test-path apps/web/test/contract
+      mix covenant.check --static            # read the tests, compile and run nothing
 
   Fails (exit status 1) on:
 
@@ -23,6 +24,24 @@ defmodule Mix.Tasks.Covenant.Check do
   Prints contract coverage per component and per app, and writes
   `<contracts dir>/coverage.json`.
 
+  ## Static mode
+
+  `--static` does not compile or run anything. It parses every contract
+  test file with `Code.string_to_quoted/2` (`Covenant.Static`), reads each
+  `use Covenant.Case, component:` module and the `obligation` tag of every
+  test (`@tag`, `@describetag` and `@moduletag`, strings and lists), and
+  runs every check above that does not need compiled code. It also applies
+  the checks `Covenant.Case` makes at compile time (untagged test, unknown
+  component, another component's obligation, a retired obligation) and
+  reports what only a reader can see (unparsable files, non-literal tags,
+  a second `@tag obligation:` that silently replaces the first). Exception
+  targets naming a module or function and `module` ceiling counters need
+  the code and are listed as skipped, not failed; file targets and `glob`
+  counters are checked against the root (`--root`, default `Covenant.root/0`).
+  Coverage counts obligations with at least one tagged test and is written
+  to `<contracts dir>/coverage.static.json`; `coverage.json` is untouched.
+  Problem paths are printed relative to the root.
+
   The suite is run as `mix test <paths> --formatter Covenant.Formatter
   --formatter ExUnit.CLIFormatter` with `MIX_ENV=test`; results land in
   `Covenant.results_dir/0`. With `--no-run` the last results are read instead,
@@ -33,16 +52,25 @@ defmodule Mix.Tasks.Covenant.Check do
   * `--no-run` — do not run the suite, read the last results;
   * `--contracts DIR` — the contracts directory (default: config, then `contracts`);
   * `--test-path PATH` — a contract test path or glob (repeatable; default: config, then `test/contract`);
-  * `--results-dir DIR` — where results are read from and written to.
+  * `--results-dir DIR` — where results are read from and written to;
+  * `--static` — read the tests instead of running them (see above);
+  * `--root DIR` — with `--static`, the root file targets and globs resolve against.
   """
 
   use Mix.Task
 
-  alias Covenant.{Check, Contract, Coverage, Error, Results}
+  alias Covenant.{Check, Contract, Coverage, Error, Results, Static}
 
   @requirements ["app.config"]
 
-  @switches [run: :boolean, contracts: :string, test_path: :keep, results_dir: :string]
+  @switches [
+    run: :boolean,
+    static: :boolean,
+    root: :string,
+    contracts: :string,
+    test_path: :keep,
+    results_dir: :string
+  ]
 
   @impl true
   def run(args) do
@@ -64,6 +92,14 @@ defmodule Mix.Tasks.Covenant.Check do
     if opts[:contracts], do: Application.put_env(:covenant, :contracts_dir, opts[:contracts])
     if opts[:results_dir], do: Application.put_env(:covenant, :results_dir, results_dir)
 
+    if opts[:static] do
+      static(contracts_dir, test_paths, Path.expand(opts[:root] || Covenant.root()))
+    else
+      check(contracts_dir, test_paths, results_dir, run?)
+    end
+  end
+
+  defp check(contracts_dir, test_paths, results_dir, run?) do
     contract = load_contract(contracts_dir)
     suite_status = if run?, do: run_suite(test_paths, results_dir), else: :ok
     results = read_results(results_dir)
@@ -87,6 +123,51 @@ defmodule Mix.Tasks.Covenant.Check do
       true ->
         Mix.shell().info(IO.ANSI.format([:green, "covenant.check: the Contract holds"]))
         :ok
+    end
+  end
+
+  defp static(contracts_dir, test_paths, root) do
+    contract = load_contract(contracts_dir)
+    scan = Static.scan(test_paths, relative_to: root)
+    results = %Results{apps: ["static"], tests: scan.tests}
+    report = Check.run(contract, results, mode: :static, root: root)
+
+    problems =
+      (scan.problems ++ Static.problems(contract, scan) ++ report.problems)
+      |> Enum.map(fn %Error{file: file} = error ->
+        if file, do: %{error | file: Path.relative_to(Path.expand(file), root)}, else: error
+      end)
+      |> Error.sort()
+
+    Mix.shell().info(
+      "covenant.check --static: read #{length(scan.files)} file(s), " <>
+        "#{length(scan.modules)} contract test module(s), #{length(scan.tests)} tagged test(s) " <>
+        "under #{Enum.join(test_paths, ", ")}; no test was compiled or run"
+    )
+
+    Enum.each(problems, &Mix.shell().error(Error.format(&1)))
+    Mix.shell().info("")
+    Mix.shell().info(Coverage.format(report.coverage))
+
+    if report.skipped != [] do
+      {exceptions, ceilings} = Enum.split_with(report.skipped, &match?({:exception, _}, &1))
+
+      Mix.shell().info(
+        "\nskipped (need compiled code): #{length(exceptions)} exception target(s), " <>
+          "#{length(ceilings)} module ceiling(s): " <>
+          Enum.map_join(report.skipped, ", ", fn {_, name} -> name end)
+      )
+    end
+
+    coverage_path = Path.join(contracts_dir, "coverage.static.json")
+    File.write!(coverage_path, [Covenant.JSON.pretty(Coverage.to_map(report.coverage)), "\n"])
+    Mix.shell().info("\nwrote #{coverage_path}")
+
+    if problems == [] do
+      Mix.shell().info(IO.ANSI.format([:green, "covenant.check: the Contract holds statically"]))
+      :ok
+    else
+      fail("#{length(problems)} problem(s) found in the Contract (static)")
     end
   end
 

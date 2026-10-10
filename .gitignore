@@ -27,3 +27,4 @@ covenant-*.tar
 /test/fixtures/example_project/_build/
 /test/fixtures/example_project/tmp/
 /test/fixtures/example_project/contracts/coverage.json
+/test/fixtures/example_project/contracts/coverage.static.json

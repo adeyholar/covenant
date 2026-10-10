@@ -8,9 +8,12 @@ defmodule Covenant.Results do
   """
 
   defmodule Test do
-    @moduledoc "One obligation-tagged test and how it ended."
+    @moduledoc """
+    One obligation-tagged test and how it ended. `:tagged` is a test read by
+    `Covenant.Static` (seen in the source, never run).
+    """
 
-    @type state :: :passed | :failed | :skipped | :excluded | :invalid
+    @type state :: :passed | :failed | :skipped | :excluded | :invalid | :tagged
 
     @type t :: %__MODULE__{
             module: String.t(),
@@ -30,7 +33,7 @@ defmodule Covenant.Results do
 
   defstruct apps: [], tests: []
 
-  @states ~w(passed failed skipped excluded invalid)
+  @states ~w(passed failed skipped excluded invalid tagged)
 
   @doc "Converts a finished `ExUnit.Test` into a results entry, or `nil` when it carries no obligation tag."
   @spec from_ex_unit(ExUnit.Test.t()) :: Test.t() | nil

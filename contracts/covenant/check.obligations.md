@@ -64,3 +64,10 @@ Contract and a test run it returns every problem and the coverage table.
 - **must:** return no problems and 100% coverage when every active obligation has a passing test, every exception target exists and no ceiling is exceeded
 - **kind:** functional
 - **status:** active
+
+### covenant.check.I10 — Static mode skips only what needs compiled code
+- **scope:** `Covenant.Check.run/3` with `mode: :static`, `Covenant.Coverage.compute/3`
+- **must:** list exception targets naming a module or function and `module` ceiling counters in `Report.skipped` instead of reporting them; still check file targets, `glob` ceilings, dangling references, untested obligations and unknown tags; count an obligation as covered when a test is tagged with it and mark the coverage `mode: :static`
+- **kind:** functional
+- **record:** static-skips-compiled-checks
+- **status:** active

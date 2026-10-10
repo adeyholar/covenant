@@ -151,6 +151,7 @@ ExUnit.start(formatters: [ExUnit.CLIFormatter, Covenant.Formatter])
 | Task | Does |
 |---|---|
 | `mix covenant.check` | Parses the Contract, runs `test/contract` with the formatter, fails on malformed blocks, dangling `record`/`invariant`/`superseded_by`/`depends_on` references, an active obligation without a tagged test, a tag naming an unknown obligation, a failing tagged test, a stale exception, or a scope ceiling exceeded; prints coverage per component and per app; writes `contracts/coverage.json`. `--no-run` reuses the last results; `--contracts DIR`, `--test-path PATH` (repeatable), `--results-dir DIR`. Exit 1 on any problem. |
+| `mix covenant.check --static` | Compiles and runs no test: parses the contract test files (`Code.string_to_quoted/2`), reads every `use Covenant.Case` module's `@tag`/`@describetag`/`@moduletag obligation:` values (strings and lists, merged as ExUnit merges them) and runs every check that needs no compiled code, plus `Covenant.Case`'s compile-time rules. Module/function exception targets and `module` ceiling counters are listed as skipped; file targets and `glob` counters are checked against `--root` (default `Covenant.root/0`). Writes `contracts/coverage.static.json` (`"mode": "static"`), never `coverage.json`. For a Contract written ahead of its implementation. |
 | `mix covenant.conditions` | Evaluates every record condition with a `check` and lists suspect records with the failing premise. `--verbose` prints every outcome. Exit 1 when any record is suspect. |
 | `mix covenant.regen <component>` | Writes a regeneration pack: `PROMPT.md`, the regeneration brief, the convention, the intent (or obligations file) and records, the system intent and records, the component's contract tests and public-surface stubs. The implementation is excluded. `--out DIR` (default `tmp/covenant/regen/<component>`). |
 
@@ -195,6 +196,12 @@ config :covenant,
   test_paths: ["test/contract"],            # default; globs allowed
   results_dir: "_build/covenant/results"    # default, next to the Mix build dir
 ```
+
+`Covenant.root/0` is the directory holding the contracts directory
+(`COVENANT_ROOT`, then `config :covenant, root:`, then the parent of
+`contracts_dir`, found from the working directory upwards when relative).
+Contract tests resolve paths from it so they never depend on the directory
+`mix test` runs in.
 
 In an umbrella, set `contracts_dir` to an absolute path
 (`Path.expand("../contracts", __DIR__)` from `config/config.exs`) and

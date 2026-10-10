@@ -13,6 +13,13 @@ defmodule Covenant.Check do
   * a scope ceiling whose count exceeds its limit.
 
   Malformed blocks are reported earlier, by `Covenant.Contract.load/1`.
+
+  With `mode: :static` (`mix covenant.check --static`, where the code under
+  test is not compiled) the checks that need compiled code are skipped and
+  listed in `Report.skipped` instead of failing: exception targets naming a
+  module or function, and `module` ceiling counters. File targets and `glob`
+  counters are still checked, and `failing/2` finds nothing because static
+  tests never ran.
   """
 
   alias Covenant.Contract
@@ -20,12 +27,20 @@ defmodule Covenant.Check do
   alias Covenant.{Coverage, Error, Results, Target}
 
   defmodule Report do
-    @moduledoc "What a check produced: sorted problems and the coverage table."
+    @moduledoc """
+    What a check produced: sorted problems, the coverage table and (static
+    mode) the checks skipped for want of compiled code, as `{kind, name}`
+    with kind `:exception` or `:ceiling`.
+    """
 
-    @type t :: %__MODULE__{problems: [Covenant.Error.t()], coverage: Covenant.Coverage.t()}
+    @type t :: %__MODULE__{
+            problems: [Covenant.Error.t()],
+            coverage: Covenant.Coverage.t(),
+            skipped: [{:exception | :ceiling, String.t()}]
+          }
 
     @enforce_keys [:problems, :coverage]
-    defstruct [:problems, :coverage]
+    defstruct [:problems, :coverage, skipped: []]
 
     @doc "True when no problem was found."
     @spec ok?(t()) :: boolean()
@@ -37,22 +52,34 @@ defmodule Covenant.Check do
   Runs every check. Options:
 
   * `:root` — the project root that file targets and glob counters resolve
-    against (default: the current directory).
+    against (default: the current directory);
+  * `:mode` — `:run` (default) or `:static`.
   """
   @spec run(Contract.t(), Results.t(), keyword()) :: Report.t()
   def run(%Contract{} = contract, %Results{} = results, opts \\ []) do
     root = Keyword.get(opts, :root, File.cwd!())
+    static? = Keyword.get(opts, :mode, :run) == :static
     by_obligation = Results.by_obligation(results)
+
+    {exceptions, skipped_exceptions} = stale_exceptions(contract, root, static?)
+    {ceilings, skipped_ceilings} = ceilings(contract, root, static?)
 
     problems =
       Validate.dangling(contract) ++
         untested(contract, by_obligation) ++
         unknown_tags(contract, by_obligation) ++
         failing(contract, by_obligation) ++
-        stale_exceptions(contract, root) ++
-        ceilings(contract, root)
+        exceptions ++
+        ceilings
 
-    %Report{problems: Error.sort(problems), coverage: Coverage.compute(contract, results)}
+    coverage =
+      Coverage.compute(contract, results, covered: if(static?, do: :tagged, else: :passing))
+
+    %Report{
+      problems: Error.sort(problems),
+      coverage: coverage,
+      skipped: Enum.sort(skipped_exceptions ++ skipped_ceilings)
+    }
   end
 
   defp untested(contract, by_obligation) do
@@ -85,58 +112,73 @@ defmodule Covenant.Check do
     end
   end
 
-  defp stale_exceptions(contract, root) do
-    for %Component{} = component <- Map.values(contract.components),
-        %Obligation{} = exception <- Component.exceptions(component),
-        problem = stale_exception(exception, root),
-        problem != nil do
-      problem
-    end
+  defp stale_exceptions(contract, root, static?) do
+    results =
+      for %Component{} = component <- Map.values(contract.components),
+          %Obligation{} = exception <- Component.exceptions(component) do
+        stale_exception(exception, root, static?)
+      end
+
+    {for({:problem, p} <- results, do: p), for({:skipped, s} <- results, do: s)}
   end
 
-  defp stale_exception(%Obligation{target: target} = exception, root) do
+  defp stale_exception(%Obligation{target: target} = exception, root, static?) do
     case Target.parse(target || "") do
+      {:ok, {:function, _, _, _}} when static? ->
+        {:skipped, {:exception, exception.id}}
+
+      {:ok, {:module, _}} when static? ->
+        {:skipped, {:exception, exception.id}}
+
       {:ok, parsed} ->
         if Target.exists?(parsed, root) do
           nil
         else
-          Error.new(
-            exception.file,
-            exception.line,
-            "exception `#{exception.id}` targets #{Target.describe(parsed)}, which no longer exists; " <>
-              "retire the exception or point it at the code it now covers"
-          )
+          {:problem,
+           Error.new(
+             exception.file,
+             exception.line,
+             "exception `#{exception.id}` targets #{Target.describe(parsed)}, which no longer exists; " <>
+               "retire the exception or point it at the code it now covers"
+           )}
         end
 
       {:error, reason} ->
-        Error.new(exception.file, exception.line, "exception `#{exception.id}`: #{reason}")
+        {:problem,
+         Error.new(exception.file, exception.line, "exception `#{exception.id}`: #{reason}")}
     end
   end
 
-  defp ceilings(contract, root) do
-    Enum.flat_map(contract.ceilings, fn %Ceiling{} = ceiling ->
-      case Ceiling.count(ceiling, root: root) do
-        {:ok, count} when count > ceiling.ceiling ->
-          [
-            Error.new(
-              ceiling.file,
-              ceiling.line,
-              "scope ceiling `#{ceiling.name}` exceeded: #{count} > #{ceiling.ceiling} (#{Ceiling.describe(ceiling)})"
-            )
-          ]
+  defp ceilings(contract, root, static?) do
+    {skipped, counted} =
+      Enum.split_with(contract.ceilings, &(static? and match?({:module, _, _}, &1.counter)))
 
-        {:ok, _} ->
-          []
+    problems = Enum.flat_map(counted, &ceiling(&1, root))
+    {problems, Enum.map(skipped, &{:ceiling, &1.name})}
+  end
 
-        {:error, reason} ->
-          [
-            Error.new(
-              ceiling.file,
-              ceiling.line,
-              "scope ceiling `#{ceiling.name}` cannot be counted: #{reason}"
-            )
-          ]
-      end
-    end)
+  defp ceiling(%Ceiling{} = ceiling, root) do
+    case Ceiling.count(ceiling, root: root) do
+      {:ok, count} when count > ceiling.ceiling ->
+        [
+          Error.new(
+            ceiling.file,
+            ceiling.line,
+            "scope ceiling `#{ceiling.name}` exceeded: #{count} > #{ceiling.ceiling} (#{Ceiling.describe(ceiling)})"
+          )
+        ]
+
+      {:ok, _} ->
+        []
+
+      {:error, reason} ->
+        [
+          Error.new(
+            ceiling.file,
+            ceiling.line,
+            "scope ceiling `#{ceiling.name}` cannot be counted: #{reason}"
+          )
+        ]
+    end
   end
 end

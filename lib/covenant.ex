@@ -53,6 +53,47 @@ defmodule Covenant do
     end
   end
 
+  @doc """
+  The project root: the directory that holds the contracts directory.
+
+  Contract tests resolve every path from here so they never depend on the
+  directory `mix test` runs in (in an umbrella, `mix test` runs each app
+  from `apps/<app>`). In order:
+
+  1. the `COVENANT_ROOT` environment variable;
+  2. `config :covenant, root: ...`;
+  3. the parent of `contracts_dir/0` when that is absolute;
+  4. the parent of `contracts_dir/0` resolved from the nearest of the
+     current directory and its ancestors where it is a directory;
+  5. the current directory.
+
+  The result is an absolute path.
+  """
+  @spec root() :: Path.t()
+  def root do
+    explicit = System.get_env("COVENANT_ROOT") || Application.get_env(:covenant, :root)
+    contracts = contracts_dir()
+
+    cond do
+      explicit not in [nil, ""] -> Path.expand(explicit)
+      Path.type(contracts) == :absolute -> contracts |> Path.expand() |> Path.dirname()
+      true -> find_root(File.cwd!(), contracts) || File.cwd!()
+    end
+  end
+
+  defp find_root(dir, contracts) do
+    cond do
+      File.dir?(Path.join(dir, contracts)) ->
+        dir |> Path.join(contracts) |> Path.expand() |> Path.dirname()
+
+      Path.dirname(dir) == dir ->
+        nil
+
+      true ->
+        find_root(Path.dirname(dir), contracts)
+    end
+  end
+
   @doc "Where `mix covenant.check` writes coverage (`<contracts_dir>/coverage.json`)."
   @spec coverage_path() :: Path.t()
   def coverage_path, do: Path.join(contracts_dir(), "coverage.json")

@@ -68,7 +68,7 @@ defmodule Covenant.RegenContractTest do
     assert source =~ "defmodule Example.Counter do"
 
     assert source =~
-             ~s|@doc "new(opts) :: t — a counter at zero; `opts[:max]` sets the cap (default 100, record `configurable-max`)."|
+             ~s|@doc "new(opts) :: t — a counter at zero; `opts[:max]` sets the cap (default 100, record `configurable-max`, pinned by `example.counter.I7`)."|
 
     assert source =~ "def increment(_counter, _by) do"
     assert source =~ "def value(_arg1) do"

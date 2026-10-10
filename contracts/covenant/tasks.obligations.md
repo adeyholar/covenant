@@ -38,3 +38,10 @@ they print and their exit status.
 - **must:** write the pack to `--out DIR` (default `tmp/covenant/regen/<component>`), list the files written and exit 0; exit 1 naming the problem for an unknown component
 - **kind:** functional
 - **status:** active
+
+### covenant.tasks.I6 — covenant.check --static reads, never runs
+- **scope:** `mix covenant.check --static`
+- **must:** compile and run no contract test; print the files, modules and tagged tests read, every problem as `file:line: message` relative to the root, the static coverage table and the skipped checks; write `<contracts dir>/coverage.static.json` and leave `coverage.json` untouched; exit 0 when the Contract holds statically and 1 otherwise; honour `--contracts`, `--test-path` (repeatable) and `--root`
+- **kind:** functional
+- **record:** static-coverage-own-file
+- **status:** active

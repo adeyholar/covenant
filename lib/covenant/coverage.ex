@@ -5,6 +5,11 @@ defmodule Covenant.Coverage do
 
   Retired obligations and `kind: exception` declarations are reported but
   excluded from the denominators.
+
+  Static coverage (`compute(contract, results, covered: :tagged)`, used by
+  `mix covenant.check --static`) counts an obligation as covered when at
+  least one test is tagged with it, run or not; its JSON carries
+  `"mode": "static"` so it is never mistaken for a passing run.
   """
 
   alias Covenant.Contract
@@ -34,15 +39,22 @@ defmodule Covenant.Coverage do
   @type t :: %__MODULE__{
           totals: stats(),
           apps: %{String.t() => stats()},
-          components: %{String.t() => component_entry()}
+          components: %{String.t() => component_entry()},
+          mode: :run | :static
         }
 
-  defstruct totals: %{active: 0, covered: 0, ratio: nil}, apps: %{}, components: %{}
+  defstruct totals: %{active: 0, covered: 0, ratio: nil}, apps: %{}, components: %{}, mode: :run
 
-  @doc "Computes coverage from the Contract and a test run."
-  @spec compute(Contract.t(), Results.t()) :: t()
-  def compute(%Contract{} = contract, %Results{} = results) do
+  @doc """
+  Computes coverage from the Contract and a test run. Options:
+
+  * `:covered` — `:passing` (default): an obligation is covered by a passing
+    test; `:tagged`: by any tagged test (static mode).
+  """
+  @spec compute(Contract.t(), Results.t(), keyword()) :: t()
+  def compute(%Contract{} = contract, %Results{} = results, opts \\ []) do
     by_obligation = Results.by_obligation(results)
+    tagged? = Keyword.get(opts, :covered, :passing) == :tagged
 
     components =
       Map.new(contract.components, fn {id, component} ->
@@ -63,7 +75,7 @@ defmodule Covenant.Coverage do
 
         testable = obligations |> Map.values() |> Enum.filter(& &1.testable)
         active = length(testable)
-        covered = Enum.count(testable, &(&1.passing > 0))
+        covered = Enum.count(testable, &if(tagged?, do: &1.tests != [], else: &1.passing > 0))
 
         {id,
          %{
@@ -82,7 +94,12 @@ defmodule Covenant.Coverage do
       |> Enum.group_by(& &1.app)
       |> Map.new(fn {app, entries} -> {app, sum(entries)} end)
 
-    %__MODULE__{totals: sum(Map.values(components)), apps: apps, components: components}
+    %__MODULE__{
+      totals: sum(Map.values(components)),
+      apps: apps,
+      components: components,
+      mode: if(tagged?, do: :static, else: :run)
+    }
   end
 
   defp sum(entries) do
@@ -97,7 +114,9 @@ defmodule Covenant.Coverage do
   @doc "The JSON-ready map written to `contracts/coverage.json`."
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = coverage) do
-    %{
+    mode = if coverage.mode == :static, do: %{"mode" => "static"}, else: %{}
+
+    Map.merge(mode, %{
       "covenant" => Covenant.version(),
       "totals" => stats_map(coverage.totals),
       "apps" => Map.new(coverage.apps, fn {app, stats} -> {app, stats_map(stats)} end),
@@ -124,7 +143,7 @@ defmodule Covenant.Coverage do
                end)
            }}
         end)
-    }
+    })
   end
 
   defp stats_map(stats),
@@ -148,8 +167,17 @@ defmodule Covenant.Coverage do
       ]
       |> Enum.max()
 
+    title =
+      case coverage.mode do
+        :static ->
+          "Static contract coverage (obligations with a tagged test / active obligations)"
+
+        :run ->
+          "Contract coverage (obligations with a passing test / active obligations)"
+      end
+
     lines =
-      ["Contract coverage (obligations with a passing test / active obligations)", ""] ++
+      [title, ""] ++
         Enum.map(rows, fn {id, entry} -> row(id, entry, width) end) ++
         [""] ++
         Enum.map(apps, fn {app, stats} -> row("app " <> app, stats, width + 4) end) ++

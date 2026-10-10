@@ -214,4 +214,52 @@ defmodule Covenant.CheckContractTest do
     assert report.problems == Error.sort(report.problems)
     assert length(report.problems) == 3
   end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.check.I10"
+  test "static mode skips module targets and module counters, checks files, globs and tags", %{
+    dir: dir
+  } do
+    ContractBuilder.write(dir, %{
+      "lib/a.ex" => "",
+      "lib/b.ex" => "",
+      "demo/gadget.obligations.md" => ContractBuilder.light_obligations("Covenant.Nope.gone/1"),
+      "system/scope.yml" => """
+      - name: files
+        ceiling: 1
+        counter: { kind: glob, pattern: "lib/**/*.ex" }
+      - name: kinds
+        ceiling: 3
+        counter: { kind: module, module: Nope.Scope, function: kinds }
+      """
+    })
+
+    tagged = ResultsBuilder.results([{"demo.widget.I1", :tagged}, {"demo.widget.I9", :tagged}])
+    report = Check.run(Contract.load!(dir), tagged, root: dir, mode: :static)
+
+    assert short(report) == [
+             "demo/gadget.obligations.md:7: active obligation `demo.gadget.I1` has no tagged test; add `@tag obligation: \"demo.gadget.I1\"` to the contract test that proves it",
+             "system/scope.yml:1: scope ceiling `files` exceeded: 2 > 1 (glob lib/**/*.ex)",
+             "test/contract/demo_contract_test.exs:2: test demo.widget.I9 #2 is tagged with unknown obligation `demo.widget.I9`"
+           ]
+
+    assert report.skipped == [{:ceiling, "kinds"}, {:exception, "demo.gadget.I2"}]
+    assert report.coverage.mode == :static
+    assert report.coverage.totals == %{active: 2, covered: 1, ratio: 0.5}
+    assert Covenant.Coverage.to_map(report.coverage)["mode"] == "static"
+    assert Covenant.Coverage.format(report.coverage) =~ "obligations with a tagged test"
+
+    ContractBuilder.write(dir, %{
+      "demo/gadget.obligations.md" => ContractBuilder.light_obligations("lib/gone.ex")
+    })
+
+    report = Check.run(Contract.load!(dir), tagged, root: dir, mode: :static)
+    assert Enum.any?(short(report), &(&1 =~ "targets lib/gone.ex, which no longer exists"))
+    assert report.skipped == [{:ceiling, "kinds"}]
+
+    run = Check.run(Contract.load!(dir), ResultsBuilder.results(@all), root: dir)
+    assert run.skipped == []
+    assert run.coverage.mode == :run
+    refute Map.has_key?(Covenant.Coverage.to_map(run.coverage), "mode")
+  end
 end

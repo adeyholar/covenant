@@ -141,3 +141,80 @@
       check: { kind: file, path: lib/covenant.ex }
   expires: When `mix covenant.mutate` lands and the ceiling is re-examined
   source: ["contracts/system/scope.yml"]
+  superseded_by: small-surface-after-mutate
+
+- id: small-surface-after-mutate
+  date: "2026-10-10"
+  decision: Covenant stays under 36 source files in lib/.
+  driver: The `small-surface` ceiling expired when `mix covenant.mutate` landed (nine files, 32 in all); static mode adds one (`Covenant.Static`), 33. The ceiling is re-examined, not dropped, and keeps a little headroom.
+  alternatives:
+    - option: Keep 30 and fold the mutate modules together
+      rejected: The mutate modules are each a separate concern (operators, runner, matrix, survivors); merging them only to meet a number makes them harder to read.
+    - option: No ceiling
+      rejected: The first scope budget Covenant checks should be its own.
+  evidence: 33 files under lib/ after static mode (find lib -name '*.ex').
+  approved_by: contract integrator (workflow pass, 2026-10-10); pending lead review
+  conditions:
+    - text: The source lives under lib/
+      check: { kind: file, path: lib/covenant.ex }
+  expires: When the next subsystem lands in Covenant
+  source: ["contracts/system/scope.yml"]
+
+- id: static-reads-literals
+  date: "2026-10-10"
+  decision: "`Covenant.Static` reads contract tests with `Code.string_to_quoted/2` and accepts only literal component names and literal obligation tags (a string or a list of strings); anything else is a problem at its line, never a guess and never an evaluation."
+  driver: The machina-ex Contract (35 test files, 1046 tests) is written before any implementation exists, so its tests cannot compile; the tag rules still have to hold. Evaluating module attributes or variables would mean running test code.
+  alternatives:
+    - option: Compile the test files against generated stubs
+      rejected: Needs every module the tests name; the stubs would be a second, unreviewed implementation.
+    - option: Regex over the source
+      rejected: Cannot tell `describe` scope, `@moduletag` inheritance or a commented-out tag from a real one.
+  evidence: ExUnit tag merge order read from ExUnit.Case.register_test (moduletag, then describetag, then tag; the last value of a key wins).
+  invariant: [covenant.static.I1, covenant.static.I3]
+  approved_by: contract integrator (workflow pass, 2026-10-10); pending lead review
+  conditions:
+    - text: Elixir is at least 1.18 (Code.string_to_quoted/2 with emit_warnings)
+      check: { kind: elixir, version: ">= 1.18.0" }
+  expires: When contract tests may build tags at compile time
+  source: ["lib/covenant/static.ex"]
+
+- id: static-skips-compiled-checks
+  date: "2026-10-10"
+  decision: In static mode, exception targets naming a module or function and `module` ceiling counters are listed as skipped, not failed; file targets and `glob` counters are still checked against the root.
+  driver: With no compiled code every module target looks stale and every module counter is uncountable; failing them would make the static check permanently red and train people to ignore it.
+  alternatives:
+    - option: Fail them as in a real run
+      rejected: Thirteen of fourteen machina-ex ceilings and five exceptions would fail before a line of implementation exists.
+    - option: Drop them silently
+      rejected: A reader would think they were checked.
+  evidence: "machina-ex contracts/system/scope.yml (13 module counters, 1 glob) and the five `kind: exception` blocks at the first static run."
+  invariant: covenant.check.I10
+  approved_by: contract integrator (workflow pass, 2026-10-10); pending lead review
+  expires: When the code under test exists wherever the check runs
+  source: ["lib/covenant/check.ex"]
+
+- id: static-coverage-own-file
+  date: "2026-10-10"
+  decision: 'Static coverage is written to `<contracts dir>/coverage.static.json`, marked `"mode": "static"`; `coverage.json` stays the record of a real, passing run.'
+  driver: Coverage is defined as obligations with a passing test (IMP R29); a tagged-but-never-run test must not overwrite that number.
+  alternatives:
+    - option: Overwrite coverage.json
+      rejected: A static 100% would read as a passing 100%.
+  evidence: covenant.check.I7 (coverage is passing obligations over active ones).
+  invariant: covenant.tasks.I6
+  approved_by: contract integrator (workflow pass, 2026-10-10); pending lead review
+  expires: Never
+  source: ["lib/mix/tasks/covenant.check.ex"]
+
+- id: root-is-contracts-parent
+  date: "2026-10-10"
+  decision: "`Covenant.root/0` is the directory that holds the contracts directory: `COVENANT_ROOT`, then `config :covenant, root:`, then the parent of `contracts_dir` (absolute, or found from the working directory upwards), then the working directory."
+  driver: machina-ex ruling R11 makes contract tests resolve paths from the repo root; in an umbrella `mix test` runs each app from `apps/<app>`, so the working directory is never the root.
+  alternatives:
+    - option: Walk up to the nearest directory with a .git or mix.exs
+      rejected: Covenant itself lives in a sub-project with its own mix.exs and contracts/; the contracts directory is what the Contract means by root.
+  evidence: machina-ex docs/contract-reconciliation.md R11; contracts/system/intent.md (Test support, Umbrella).
+  invariant: covenant.static.I5
+  approved_by: contract integrator (workflow pass, 2026-10-10); pending lead review
+  expires: Never
+  source: ["lib/covenant.ex"]

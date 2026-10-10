@@ -1,6 +1,6 @@
 # Scope-budget ceilings, checked by `mix covenant.check`.
 - name: lib-files
-  ceiling: 30
+  ceiling: 36
   counter: { kind: glob, pattern: "lib/**/*.ex" }
   why: A contract tool that cannot be read in an afternoon will not be trusted to gate merges.
-  record: small-surface
+  record: small-surface-after-mutate

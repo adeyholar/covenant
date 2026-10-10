@@ -32,14 +32,14 @@ defmodule Covenant.TasksContractTest do
     {output, status} = mix(["covenant.check"])
     assert status == 0, output
     assert output =~ "covenant.check: running mix test test/contract"
-    assert output =~ ~r/6 tests, 0 failures/
-    assert output =~ ~r/example\.counter\s+4\/4\s+100\.0%/
+    assert output =~ ~r/8 tests, 0 failures/
+    assert output =~ ~r/example\.counter\s+6\/6\s+100\.0%/
     assert output =~ ~r/example\.greeter\s+1\/1\s+100\.0%/
-    assert output =~ ~r/total\s+5\/5\s+100\.0%/
+    assert output =~ ~r/total\s+7\/7\s+100\.0%/
     assert output =~ "the Contract holds"
 
     coverage = Path.join(@project, "contracts/coverage.json") |> File.read!() |> JSON.decode!()
-    assert coverage["totals"] == %{"active" => 5, "covered" => 5, "coverage" => 1.0}
+    assert coverage["totals"] == %{"active" => 7, "covered" => 7, "coverage" => 1.0}
 
     assert coverage["components"]["example.counter"]["obligations"]["example.counter.I5"][
              "status"
@@ -70,7 +70,7 @@ defmodule Covenant.TasksContractTest do
     assert status == 1
 
     assert output =~
-             "tmp/corrupt-contracts/example/counter.intent.md:48: obligation `example.counter.I1` is missing `must`"
+             "tmp/corrupt-contracts/example/counter.intent.md:49: obligation `example.counter.I1` is missing `must`"
 
     assert output =~ "could not be parsed (1 problem(s))"
 
@@ -90,7 +90,7 @@ defmodule Covenant.TasksContractTest do
              "greeter.obligations.md:16: exception `example.greeter.I2` targets Example.Greeter.squash/1, which no longer exists"
 
     assert output =~ "covenant.check: 1 problem(s) found in the Contract"
-    assert output =~ ~r/total\s+5\/5\s+100\.0%/
+    assert output =~ ~r/total\s+7\/7\s+100\.0%/
   end
 
   @tag obligation: "covenant.tasks.I3"
@@ -162,5 +162,101 @@ defmodule Covenant.TasksContractTest do
     {output, status} = mix(["covenant.regen", "example.nope"])
     assert status == 1
     assert output =~ "unknown component `example.nope`"
+  end
+
+  @tag obligation: "covenant.tasks.I6"
+  test "mix covenant.check --static reads the tests, runs none and writes only coverage.static.json" do
+    coverage = Path.join(@project, "contracts/coverage.json")
+    static = Path.join(@project, "contracts/coverage.static.json")
+    File.rm(coverage)
+    File.rm(static)
+    on_exit(fn -> File.rm(static) end)
+
+    {output, status} = mix(["covenant.check", "--static"])
+    assert status == 0, output
+
+    assert output =~
+             "covenant.check --static: read 2 file(s), 2 contract test module(s), 8 tagged test(s) under test/contract; no test was compiled or run"
+
+    refute output =~ "Running ExUnit"
+
+    assert output =~
+             "Static contract coverage (obligations with a tagged test / active obligations)"
+
+    assert output =~ ~r/total\s+7\/7\s+100\.0%/
+
+    assert output =~
+             "skipped (need compiled code): 1 exception target(s), 1 module ceiling(s): counter-event-kinds, example.greeter.I2"
+
+    assert output =~ "covenant.check: the Contract holds statically"
+    refute File.exists?(coverage)
+
+    assert %{"mode" => "static", "totals" => %{"covered" => 7}} =
+             static |> File.read!() |> JSON.decode!()
+  end
+
+  @tag obligation: "covenant.tasks.I6"
+  test "mix covenant.check --static passes tests that could not compile and fails bad tags precisely" do
+    tests = Path.join(@project, "tmp/static-tests")
+    File.mkdir_p!(tests)
+
+    File.write!(Path.join(tests, "unbuilt_contract_test.exs"), """
+    defmodule Example.UnbuiltContractTest do
+      use Covenant.Case, component: "example.counter"
+
+      @moduletag obligation: "example.counter.I1"
+
+      test "calls code that does not exist" do
+        assert Example.NotWrittenYet.call!(%{}) == :ok
+      end
+
+      @tag obligation: ["example.counter.I2", "example.counter.I3", "example.counter.I4"]
+      test "more", do: Example.NotWrittenYet.more()
+
+      @tag obligation: ["example.counter.I6", "example.counter.I7"]
+      test "rest", do: Example.NotWrittenYet.rest()
+    end
+
+    defmodule Example.UnbuiltGreeterContractTest do
+      use Covenant.Case, component: "example.greeter"
+
+      @tag obligation: "example.greeter.I1"
+      test "greets", do: Example.NotWrittenYet.greet()
+    end
+    """)
+
+    {output, status} = mix(["covenant.check", "--static", "--test-path", "tmp/static-tests"])
+    assert status == 0, output
+    assert output =~ "read 1 file(s), 2 contract test module(s), 4 tagged test(s)"
+
+    File.write!(Path.join(tests, "bad_contract_test.exs"), """
+    defmodule Example.BadContractTest do
+      use Covenant.Case, component: "example.counter"
+
+      @tag obligation: "example.counter.I99"
+      test "unknown", do: :ok
+
+      @tag obligation: "example.counter.I5"
+      test "retired", do: :ok
+
+      test "untagged", do: :ok
+    end
+    """)
+
+    {output, status} =
+      mix(["covenant.check", "--static", "--test-path", "tmp/static-tests", "--root", "."])
+
+    assert status == 1
+
+    assert output =~
+             "tmp/static-tests/bad_contract_test.exs:5: test unknown is tagged with unknown obligation `example.counter.I99`"
+
+    assert output =~
+             "tmp/static-tests/bad_contract_test.exs:8: test retired is tagged with `example.counter.I5`, which is retired"
+
+    assert output =~
+             "tmp/static-tests/bad_contract_test.exs:10: test untagged has no obligation tag"
+
+    assert output =~ "covenant.check: 3 problem(s) found in the Contract (static)"
   end
 end

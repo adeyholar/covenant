@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased (2026-10-10)
+
+- `mix covenant.check --static` checks a Contract without compiling or
+  running its tests (`Covenant.Static`); static coverage goes to
+  `contracts/coverage.static.json`.
+- `Covenant.root/0`: the directory holding the contracts directory,
+  independent of the working directory.
+- `Covenant.Check.run/3` takes `mode: :static`; `Covenant.Coverage.compute/3`
+  takes `covered: :tagged`.
+
 ## 0.1.0 (2026-10-09)
 
 Initial release: the IMP Contract layer for Elixir.

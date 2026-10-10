@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 41,
+      "active": 48,
       "coverage": 1.0,
-      "covered": 41
+      "covered": 48
     },
     "system": {
       "active": 0,
@@ -83,10 +83,10 @@
       }
     },
     "covenant.check": {
-      "active": 9,
+      "active": 10,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 9,
+      "covered": 10,
       "form": "light",
       "obligations": {
         "covenant.check.I1": {
@@ -97,6 +97,16 @@
           "testable": true,
           "tests": [
             "test an active obligation without a tagged test fails; retired and exception blocks need none"
+          ]
+        },
+        "covenant.check.I10": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test static mode skips module targets and module counters, checks files, globs and tags"
           ]
         },
         "covenant.check.I2": {
@@ -510,11 +520,76 @@
         }
       }
     },
-    "covenant.tasks": {
+    "covenant.static": {
       "active": 5,
       "app": "covenant",
       "coverage": 1.0,
       "covered": 5,
+      "form": "light",
+      "obligations": {
+        "covenant.static.I1": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test reads string and list tags, @moduletag and @describetag, in ExUnit's precedence",
+            "test scan/2 expands directories and globs to *_test.exs files, relative to a root",
+            "test within a level the last obligation tag wins, as in ExUnit"
+          ]
+        },
+        "covenant.static.I2": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test helper modules are ignored and nested modules are read on their own"
+          ]
+        },
+        "covenant.static.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test an unparsable file is a problem at its line, not a crash",
+            "test duplicate test names and literal names inside a comprehension are problems",
+            "test non-literal tags and components, untagged and bodyless tests are problems at their lines"
+          ]
+        },
+        "covenant.static.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test unknown components, other components' and retired obligations are problems; unknown ids are left to Check"
+          ]
+        },
+        "covenant.static.I5": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test Covenant.root/0 an absolute contracts_dir, config :root and COVENANT_ROOT win in that order",
+            "test Covenant.root/0 falls back to the working directory when no contracts directory is found",
+            "test Covenant.root/0 is the parent of the contracts directory from any directory under it"
+          ]
+        }
+      }
+    },
+    "covenant.tasks": {
+      "active": 6,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 6,
       "form": "light",
       "obligations": {
         "covenant.tasks.I1": {
@@ -567,6 +642,17 @@
           "tests": [
             "test mix covenant.regen writes a pack and refuses an unknown component"
           ]
+        },
+        "covenant.tasks.I6": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test mix covenant.check --static passes tests that could not compile and fails bad tags precisely",
+            "test mix covenant.check --static reads the tests, runs none and writes only coverage.static.json"
+          ]
         }
       }
     },
@@ -581,8 +667,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 41,
+    "active": 48,
     "coverage": 1.0,
-    "covered": 41
+    "covered": 48
   }
 }

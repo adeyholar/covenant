@@ -25,7 +25,7 @@ defmodule Covenant.Contract.LoadContractTest do
              "configurable-max"
            ]
 
-    assert Enum.map(counter.obligations, & &1.id) == Enum.map(1..5, &"example.counter.I#{&1}")
+    assert Enum.map(counter.obligations, & &1.id) == Enum.map(1..7, &"example.counter.I#{&1}")
 
     greeter = Contract.component(contract, "example.greeter")
     assert %Component{form: :light, records: [], records_file: nil} = greeter
@@ -56,7 +56,7 @@ defmodule Covenant.Contract.LoadContractTest do
     assert Contract.obligation(contract, "example.greeter.I9") == nil
     assert Contract.obligation(contract, "nope.I1") == nil
     assert Contract.obligation(contract, "garbage") == nil
-    assert Enum.map(Contract.obligations(contract), & &1.id) |> length() == 7
+    assert Enum.map(Contract.obligations(contract), & &1.id) |> length() == 9
   end
 
   @tag :tmp_dir
