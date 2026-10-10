@@ -124,8 +124,14 @@ Started 2026-10-09. Baseline before any change: 120 tests, 0 failures.
 - **Verdicts.** killed = at least one test failed with a non-timeout failure;
   timeout = every failure is `ExUnit.TimeoutError` (a survivor, per IMP E2);
   survived = all green; invalid = the mutant does not compile (excluded from
-  the denominator). Tests run with a fixed seed (default 0) and per-test
-  timeout `--timeout` (default 10 s).
+  the denominator). Tests run with a fixed seed (default 0) and a per-test
+  timeout measured from the baseline (5 x the slowest baseline test, at least
+  1 s; `--timeout` overrides it).
+- **Fail-fast.** `--fail-fast` runs each mutant with `max_failures: 1`: exact
+  verdicts, `credit: partial` kills, totals of exact credit only, no
+  mutation-blind judgment. A run that stopped on a timeout is rerun in full
+  (a timeout counts as a failure to ExUnit, so it can hide the test that
+  kills). It proves kills, not obligation credit.
 - **Credit.** A kill is credited to the obligations tagged on every failing
   test. Per obligation: total kills and unique kills (mutants only its tests
   caught). Per test: kills and unique kills; a test with no unique kill is

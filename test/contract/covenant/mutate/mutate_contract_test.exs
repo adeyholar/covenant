@@ -397,7 +397,8 @@ defmodule Covenant.MutateContractTest do
              line: 7,
              obligations: ["x.I1"],
              mutation_blind: nil,
-             outcome: :passed
+             outcome: :passed,
+             ms: 0
            }
 
     assert Runner.entry(
@@ -419,6 +420,25 @@ defmodule Covenant.MutateContractTest do
     assert Runner.entry(test.({:invalid, Sample}, %{}), "/proj").outcome == :invalid
     assert Runner.entry(test.({:skipped, "no"}, %{}), "/proj").outcome == :skipped
     assert Runner.entry(test.({:excluded, "no"}, %{}), "/proj").outcome == :excluded
+  end
+
+  @tag obligation: "covenant.mutate.I16"
+  test "a finished test reports its duration in milliseconds, rounded up" do
+    finished = fn microseconds ->
+      %ExUnit.Test{
+        name: :"test t",
+        module: Sample.Test,
+        state: nil,
+        tags: %{},
+        time: microseconds
+      }
+    end
+
+    assert Runner.entry(finished.(0), "/proj").ms == 0
+    assert Runner.entry(finished.(1), "/proj").ms == 1
+    assert Runner.entry(finished.(1000), "/proj").ms == 1
+    assert Runner.entry(finished.(1001), "/proj").ms == 2
+    assert Runner.entry(finished.(2_500_000), "/proj").ms == 2500
   end
 
   # -- I7: credit -------------------------------------------------------------------
@@ -891,7 +911,6 @@ defmodule Covenant.MutateContractTest do
 
     assert message =~ "under nowhere, elsewhere"
 
-    assert Mutate.default_timeout() == 10_000
     assert Mutate.default_seed() == 0
     assert Mutate.default_dir("a.b") == "tmp/covenant/mutate/a.b"
   end
@@ -904,11 +923,18 @@ defmodule Covenant.MutateContractTest do
     ]
 
     mutants = [
-      mutant("m002", :killed, killed_by: ["M:b"]),
+      mutant("m002", :killed, killed_by: ["M:b"], credit: :partial),
       mutant("m001", :timeout, timeouts: ["M:a"], reason: nil)
     ]
 
-    result = %{files: ["lib/x.ex"], all: 4, baseline_ms: 12, tests: tests, mutants: mutants}
+    result = %{
+      files: ["lib/x.ex"],
+      all: 4,
+      baseline_ms: 12,
+      timeout_ms: 750,
+      tests: tests,
+      mutants: mutants
+    }
 
     path = Path.join(dir, "raw.json")
 
@@ -930,10 +956,11 @@ defmodule Covenant.MutateContractTest do
     assert raw.files == ["lib/x.ex"]
     assert raw.all == 4
     assert raw.baseline_ms == 12
+    assert raw.timeout_ms == 750
     assert raw.tests == tests
 
-    assert Enum.map(raw.mutants, &{&1.id, &1.verdict, &1.killed_by, &1.timeouts}) ==
-             [{"m002", :killed, ["M:b"], []}, {"m001", :timeout, [], ["M:a"]}]
+    assert Enum.map(raw.mutants, &{&1.id, &1.verdict, &1.killed_by, &1.timeouts, &1.credit}) ==
+             [{"m002", :killed, ["M:b"], [], :partial}, {"m001", :timeout, [], ["M:a"], :exact}]
 
     assert {:error, message} = Mutate.decode_raw(Path.join(dir, "missing.json"))
     assert message =~ "missing.json: no such file or directory"
@@ -944,11 +971,19 @@ defmodule Covenant.MutateContractTest do
     assert String.starts_with?(invalid, "#{path}: invalid JSON: ")
 
     one = %{raw | mutants: [mutant("m003", :killed), mutant("m001", :survived)], all: 4}
-    two = %{raw | mutants: [mutant("m002", :survived), mutant("m004", :survived)], all: 4}
+
+    two = %{
+      raw
+      | mutants: [mutant("m002", :survived), mutant("m004", :survived)],
+        all: 4,
+        timeout_ms: 1200
+    }
 
     assert {:ok, merged} = Mutate.merge([one, two])
     assert Enum.map(merged.mutants, & &1.id) == ["m001", "m002", "m003", "m004"]
     assert merged.tests == tests
+    assert merged.timeout_ms == 1200
+    assert {:ok, %{timeout_ms: 1200}} = Mutate.merge([two, one])
 
     assert {:error, "worker results overlap (the same mutant was run twice)"} ==
              Mutate.merge([one, one])
@@ -967,8 +1002,9 @@ defmodule Covenant.MutateContractTest do
     map = Matrix.to_map(matrix)
 
     assert map |> Map.keys() |> Enum.sort() ==
-             ~w(baseline component covenant files jobs modules mutants obligations problems seed summary survivors tests timeout_ms)
+             ~w(baseline component covenant fail_fast files jobs modules mutants obligations problems seed summary survivors tests timeout_ms)
 
+    assert map["fail_fast"] == false
     assert map["covenant"] == Covenant.version()
     assert map["component"] == "example.counter"
     assert map["modules"] == ["X", "Y"]
@@ -983,6 +1019,7 @@ defmodule Covenant.MutateContractTest do
                "survived" => 1,
                "timeouts" => 1,
                "invalid" => 1,
+               "partial" => 0,
                "score" => 0.6,
                "annotated" => 0,
                "unsorted" => 2
@@ -990,8 +1027,10 @@ defmodule Covenant.MutateContractTest do
 
     assert map["mutants"] |> hd() |> Map.keys() |> Enum.sort() ==
              Enum.sort(
-               ~w(at column file function from id killed_by line module obligations operator reason timeouts to verdict)
+               ~w(at column credit file function from id killed_by line module obligations operator reason timeouts to verdict)
              )
+
+    assert Enum.all?(map["mutants"], &(&1["credit"] == "exact"))
 
     assert hd(map["mutants"])["at"] == "lib/x.ex:4:7"
     assert hd(map["mutants"])["verdict"] == "killed"
@@ -1177,6 +1216,7 @@ defmodule Covenant.MutateContractTest do
   test "the struct defaults of the matrix and of a mutant are the documented ones" do
     matrix = struct(Matrix)
     assert {matrix.seed, matrix.timeout, matrix.jobs, matrix.baseline_ms} == {0, 0, 1, 0}
+    assert matrix.fail_fast === false
     assert {matrix.mutants, matrix.tests, matrix.problems, matrix.summary} == {[], [], [], %{}}
 
     mutant =
@@ -1191,6 +1231,7 @@ defmodule Covenant.MutateContractTest do
       )
 
     assert {mutant.killed_by, mutant.timeouts, mutant.verdict} == {[], [], nil}
+    assert mutant.credit == :exact
   end
 
   @tag obligation: "covenant.mutate.I11"
@@ -1331,6 +1372,7 @@ defmodule Covenant.MutateContractTest do
              seed: 0,
              timeout: 0,
              jobs: 1,
+             fail_fast: false,
              baseline_ms: 0,
              tests: [],
              mutants: [],
@@ -1427,7 +1469,8 @@ defmodule Covenant.MutateContractTest do
           killed_by: ["A:x"],
           timeouts: ["B:y"],
           reason: "why",
-          operator: :guard_removal
+          operator: :guard_removal,
+          credit: Enum.random([:exact, :partial])
         )
 
       back = original |> Mutant.to_map() |> Mutant.from_map()
@@ -1445,7 +1488,8 @@ defmodule Covenant.MutateContractTest do
                :verdict,
                :killed_by,
                :timeouts,
-               :reason
+               :reason,
+               :credit
              ]) ==
                Map.take(original, [
                  :id,
@@ -1460,7 +1504,8 @@ defmodule Covenant.MutateContractTest do
                  :verdict,
                  :killed_by,
                  :timeouts,
-                 :reason
+                 :reason,
+                 :credit
                ])
 
       assert back.index == 0
@@ -1482,6 +1527,13 @@ defmodule Covenant.MutateContractTest do
     assert Mutant.from_map(%{"verdict" => "weird"}).verdict == nil
     assert Mutant.from_map(%{}).killed_by == []
     assert Mutant.from_map(%{}).timeouts == []
+
+    assert Mutant.to_map(mutant("m001", :killed, credit: :partial))["credit"] == "partial"
+    assert Mutant.to_map(mutant("m001", :killed))["credit"] == "exact"
+    assert Mutant.from_map(%{"credit" => "partial"}).credit == :partial
+    assert Mutant.from_map(%{"credit" => "exact"}).credit == :exact
+    assert Mutant.from_map(%{"credit" => "weird"}).credit == :exact
+    assert Mutant.from_map(%{}).credit == :exact
   end
 
   @tag obligation: "covenant.mutate.I2"
@@ -1507,7 +1559,7 @@ defmodule Covenant.MutateContractTest do
   test "every outcome and the defaults of a worker's results survive JSON", %{tmp_dir: dir} do
     outcomes = [:passed, :failed, :timeout, :invalid, :skipped, :excluded]
     tests = for outcome <- outcomes, do: entry("t_#{outcome}", ["x.I1"], outcome)
-    result = %{files: [], all: 0, baseline_ms: 1, tests: tests, mutants: []}
+    result = %{files: [], all: 0, baseline_ms: 1, timeout_ms: 1000, tests: tests, mutants: []}
     path = Path.join(dir, "raw.json")
 
     File.write!(path, Mutate.encode_raw(result, component: "x.y"))
@@ -1516,6 +1568,7 @@ defmodule Covenant.MutateContractTest do
     assert raw.slice == "1/1"
     assert raw.modules == []
     assert raw.ignored == []
+    assert raw.timeout_ms == 1000
 
     text = path |> File.read!() |> JSON.decode!()
     assert text["covenant"] == Covenant.version()
@@ -1523,8 +1576,13 @@ defmodule Covenant.MutateContractTest do
 
     File.write!(path, ~s({"tests": [{"key": "a", "outcome": "mystery"}], "mutants": []}))
 
-    assert {:ok, %{tests: [%{outcome: :invalid, obligations: []}], baseline_ms: 0, all: 0}} =
-             Mutate.decode_raw(path)
+    assert {:ok,
+            %{
+              tests: [%{outcome: :invalid, obligations: []}],
+              baseline_ms: 0,
+              timeout_ms: 0,
+              all: 0
+            }} = Mutate.decode_raw(path)
 
     File.write!(path, ~s({"tests": [], "mutants": [{"id": "m1"}, {"id": "m2"}]}))
     assert {:ok, %{all: 2, files: [], modules: []}} = Mutate.decode_raw(path)
@@ -1634,6 +1692,161 @@ defmodule Covenant.MutateContractTest do
       {:ok, [{Covenant.Conditions, _}], ignored} -> {:ok, [], ignored}
       other -> other
     end
+  end
+
+  # -- I16: the timeout ------------------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I16"
+  test "the default timeout is five times the slowest baseline test, never under a second" do
+    timeout = fn times -> Mutate.default_timeout(Enum.map(times, &%{ms: &1})) end
+
+    assert timeout.([]) == 1000
+    assert timeout.([0, 0]) == 1000
+    assert timeout.([33, 7, 199]) == 1000
+    assert timeout.([200]) == 1000
+    assert timeout.([201]) == 1005
+    assert timeout.([5, 400, 120]) == 2000
+    assert timeout.([7000, 1]) == 35_000
+  end
+
+  # -- I17: --fail-fast -----------------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I17"
+  test "a fail-fast matrix counts exact credit only, judges no test blind and says so", %{
+    counter: counter
+  } do
+    tests = [
+      entry("a", ["example.counter.I1"]),
+      entry("b", ["example.counter.I2"], :passed, mutation_blind: "shares kills"),
+      entry("c", ["example.counter.I3"])
+    ]
+
+    mutants = [
+      mutant("m001", :killed, killed_by: ["M:a"], credit: :partial),
+      mutant("m002", :killed, killed_by: ["M:a"]),
+      mutant("m003", :killed, killed_by: ["M:b"], credit: :partial),
+      mutant("m004", :survived),
+      mutant("m005", :invalid, reason: "line 1: x")
+    ]
+
+    # the same kills, had every test run against each mutant
+    exact = Enum.map(mutants, &%{&1 | credit: :exact})
+    full = Matrix.build(results(tests, exact), component: counter)
+    fast = Matrix.build(results(tests, mutants), component: counter, fail_fast: true)
+
+    assert full.fail_fast === false
+    assert fast.fail_fast === true
+
+    assert %{killed: 2, unique: 2, mutants: ["m001", "m002"]} =
+             full.obligations["example.counter.I1"]
+
+    assert fast.obligations["example.counter.I1"] ==
+             %{killed: 1, unique: 1, mutants: ["m002"], unique_mutants: ["m002"]}
+
+    assert fast.obligations["example.counter.I2"] ==
+             %{killed: 0, unique: 0, mutants: [], unique_mutants: []}
+
+    assert {fast.test_stats["M:a"].kills, fast.test_stats["M:a"].unique_kills} == {1, 1}
+    assert {fast.test_stats["M:b"].kills, fast.test_stats["M:b"].unique_kills} == {0, 0}
+    assert {full.test_stats["M:b"].kills, full.test_stats["M:b"].unique_kills} == {1, 1}
+
+    # the mutant keeps the credit its killers earned: it is the totals that leave it out
+    assert Enum.find(fast.mutants, &(&1.id == "m001")).obligations == ["example.counter.I1"]
+
+    assert Enum.map(full.blind, & &1.test.name) == ["c"]
+    assert fast.blind == []
+
+    assert %{killed: 3, partial: 2, survived: 1, invalid: 1, score: 0.75} = fast.summary
+    assert full.summary.partial == 0
+
+    map = Matrix.to_map(fast)
+    assert map["fail_fast"] == true
+    assert map["summary"]["partial"] == 2
+
+    assert Enum.map(map["mutants"], & &1["credit"]) ==
+             ["partial", "exact", "partial", "exact", "exact"]
+
+    assert map["tests"]["M:c"]["mutation_blind"] == nil
+    assert map["tests"]["M:b"]["mutation_blind"] == "shares kills"
+    assert Matrix.to_map(full)["tests"]["M:c"]["mutation_blind"] == true
+    assert Matrix.to_map(full)["fail_fast"] == false
+
+    table = Matrix.format(fast)
+
+    assert table =~
+             "  --fail-fast: 2 kill(s) carry partial credit; the obligation table below counts exact kills only " <>
+               "(a fail-fast matrix proves kills, not obligation credit)\n"
+
+    assert table =~
+             "\n\nMutation-blind tests: not judged (--fail-fast: a unique kill cannot be told apart)"
+
+    refute Matrix.format(full) =~ "--fail-fast"
+    assert Matrix.format(full) =~ "Mutation-blind tests (warn): no mutant only this test catches"
+  end
+
+  @tag obligation: "covenant.mutate.I17"
+  test "mix help covenant.mutate says a fail-fast matrix proves kills, not obligation credit" do
+    help = Mix.Task.moduledoc(Mix.Tasks.Covenant.Mutate)
+
+    assert help =~ "`--fail-fast`"
+    assert help =~ "`max_failures: 1`"
+    assert help =~ "credit: partial"
+    assert help =~ "A fail-fast matrix proves kills, not obligation credit"
+  end
+
+  # -- I18: progress --------------------------------------------------------------------
+
+  @tag obligation: "covenant.mutate.I18"
+  test "a progress line is due after every 25th mutant but the last" do
+    due = &Mutate.progress_due?(&1, 100)
+
+    assert due.(25)
+    assert due.(50)
+    assert due.(75)
+    refute due.(24)
+    refute due.(26)
+    refute due.(0)
+    refute due.(100)
+    refute Mutate.progress_due?(25, 25)
+    assert Mutate.progress_due?(25, 26)
+    refute Mutate.progress_due?(10, 20)
+  end
+
+  @tag obligation: "covenant.mutate.I18"
+  test "a progress line gives the count, the rate and the time left in the units that fit" do
+    assert Mutate.progress_line(25, 700, 100_000) ==
+             "progress: 25/700 mutants (3.6%), 15.0 mutants/min, ETA 45m 00s"
+
+    # one mutant a second: the time left is the mutants left, in seconds
+    eta = fn total ->
+      total |> then(&Mutate.progress_line(25, &1, 25_000)) |> String.split("ETA ") |> List.last()
+    end
+
+    assert eta.(50) == "25s"
+    assert eta.(84) == "59s"
+    assert eta.(85) == "1m 00s"
+    assert eta.(3624) == "59m 59s"
+    assert eta.(3625) == "1h 00m"
+    assert eta.(10_025) == "2h 46m"
+    assert eta.(26) == "1s"
+
+    assert Mutate.progress_line(50, 100, 50_000) =~ "50/100 mutants (50.0%), 60.0 mutants/min"
+
+    # no time has passed yet: it counts as one millisecond, so the pace is finite
+    assert Mutate.progress_line(25, 50, 0) ==
+             "progress: 25/50 mutants (50.0%), 1500000.0 mutants/min, ETA 0s"
+  end
+
+  @tag obligation: "covenant.mutate.I18"
+  test "the time left is rounded to the nearest second" do
+    # 25 mutants in 12 475 ms (and 12 500 ms), one left: 499 ms (and 500 ms) to go
+    assert Mutate.progress_line(25, 26, 12_475) =~ "ETA 0s"
+    assert Mutate.progress_line(25, 26, 12_500) =~ "ETA 1s"
+  end
+
+  @tag obligation: "covenant.mutate.I18"
+  test "mix help covenant.mutate says progress is reported every 25 mutants" do
+    assert Mix.Task.moduledoc(Mix.Tasks.Covenant.Mutate) =~ "every 25 mutants"
   end
 end
 

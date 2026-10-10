@@ -20,6 +20,13 @@ defmodule Covenant.Mutate.Matrix do
     `kind: exception` is sorted `decision-hole` automatically: the Contract
     already records that hole. Every other survivor needs an annotation.
 
+  **Fail-fast.** A mutant killed by a `--fail-fast` run has `credit: :partial`:
+  the verdict is exact, but `killed_by` names only the tests that failed before
+  the run stopped. Obligation and test totals (`killed`, `unique`, `kills`,
+  `unique_kills`) therefore count the mutants with `:exact` credit only, and no
+  test is judged mutation-blind (a unique kill cannot be told from a test that
+  merely ran first). A fail-fast matrix proves kills, not obligation credit.
+
   `problems` lists what fails the task: unsorted survivors and annotations
   that match no survivor (stale). The mutation score is
   `killed / (killed + survived + timeouts)`; invalid mutants are excluded.
@@ -40,6 +47,7 @@ defmodule Covenant.Mutate.Matrix do
           seed: non_neg_integer(),
           timeout: pos_integer(),
           jobs: pos_integer(),
+          fail_fast: boolean(),
           baseline_ms: non_neg_integer(),
           tests: [map()],
           mutants: [Mutant.t()],
@@ -57,6 +65,7 @@ defmodule Covenant.Mutate.Matrix do
             seed: 0,
             timeout: 0,
             jobs: 1,
+            fail_fast: false,
             baseline_ms: 0,
             tests: [],
             mutants: [],
@@ -74,7 +83,8 @@ defmodule Covenant.Mutate.Matrix do
   * `:component` — the `Covenant.Contract.Component` (its testable obligations
     are all listed, and its active exceptions auto-sort survivors);
   * `:annotations` — the parsed survivors file;
-  * `:seed`, `:timeout`, `:jobs` — recorded for the report.
+  * `:seed`, `:timeout`, `:jobs` — recorded for the report;
+  * `:fail_fast` — the run was a `--fail-fast` one (default `false`).
   """
   @spec build(map(), keyword()) :: t()
   def build(results, opts) do
@@ -84,12 +94,15 @@ defmodule Covenant.Mutate.Matrix do
     mutants = Enum.sort_by(results.mutants, & &1.id)
     by_key = Map.new(tests, &{&1.key, &1})
 
+    fail_fast = Keyword.get(opts, :fail_fast, false)
+
     credited = Enum.map(mutants, &credit(&1, by_key))
-    obligations = obligation_stats(component, credited)
-    test_stats = test_stats(tests, credited)
+    exact = Enum.filter(credited, &(&1.credit == :exact))
+    obligations = obligation_stats(component, exact)
+    test_stats = test_stats(tests, exact)
     survivors = survivors(credited, annotations, component, results.files)
     stale = stale(annotations, credited)
-    blind = blind(tests, test_stats)
+    blind = if fail_fast, do: [], else: blind(tests, test_stats)
 
     unsorted =
       for %{mutant: m, sort: nil} <- survivors do
@@ -108,6 +121,7 @@ defmodule Covenant.Mutate.Matrix do
       seed: Keyword.get(opts, :seed, 0),
       timeout: Keyword.get(opts, :timeout, 0),
       jobs: Keyword.get(opts, :jobs, 1),
+      fail_fast: fail_fast,
       baseline_ms: results.baseline_ms,
       tests: tests,
       mutants: credited,
@@ -239,6 +253,7 @@ defmodule Covenant.Mutate.Matrix do
     survived = count.(:survived)
     timeouts = count.(:timeout)
     invalid = count.(:invalid)
+    partial = Enum.count(mutants, &(&1.verdict == :killed and &1.credit == :partial))
     denominator = killed + survived + timeouts
 
     %{
@@ -247,6 +262,7 @@ defmodule Covenant.Mutate.Matrix do
       survived: survived,
       timeouts: timeouts,
       invalid: invalid,
+      partial: partial,
       score: if(denominator == 0, do: nil, else: Float.round(killed / denominator, 4)),
       annotated: Enum.count(survivors, &(&1.sort != nil)),
       unsorted: Enum.count(survivors, &(&1.sort == nil))
@@ -269,6 +285,7 @@ defmodule Covenant.Mutate.Matrix do
       "seed" => matrix.seed,
       "timeout_ms" => matrix.timeout,
       "jobs" => matrix.jobs,
+      "fail_fast" => matrix.fail_fast,
       "baseline" => %{"tests" => length(matrix.tests), "ms" => matrix.baseline_ms},
       "summary" => Map.new(matrix.summary, fn {k, v} -> {Atom.to_string(k), v} end),
       "mutants" =>
@@ -300,7 +317,7 @@ defmodule Covenant.Mutate.Matrix do
              "unique_kills" => stats.unique_kills,
              "mutants" => stats.mutants,
              "unique_mutants" => stats.unique_mutants,
-             "mutation_blind" => blind_value(test, stats)
+             "mutation_blind" => blind_value(matrix, test, stats)
            }}
         end),
       "survivors" =>
@@ -319,9 +336,11 @@ defmodule Covenant.Mutate.Matrix do
     }
   end
 
-  defp blind_value(test, stats) do
+  # null: a fail-fast matrix cannot tell
+  defp blind_value(matrix, test, stats) do
     cond do
       test.mutation_blind -> test.mutation_blind
+      matrix.fail_fast -> nil
       stats.unique_kills == 0 and test.outcome == :passed -> true
       true -> false
     end
@@ -332,13 +351,14 @@ defmodule Covenant.Mutate.Matrix do
   def format(%__MODULE__{} = matrix) do
     s = matrix.summary
 
-    header = [
-      "Kill matrix — #{matrix.component} (#{Enum.join(matrix.modules, ", ")})",
-      "  #{s.mutants} mutants: #{s.killed} killed, #{s.survived} survived, " <>
-        "#{s.timeouts} timed out, #{s.invalid} invalid — score #{percent(s.score)}",
-      "  #{length(matrix.tests)} tests, baseline #{matrix.baseline_ms} ms, seed #{matrix.seed}, timeout #{matrix.timeout} ms",
-      ""
-    ]
+    header =
+      [
+        "Kill matrix — #{matrix.component} (#{Enum.join(matrix.modules, ", ")})",
+        "  #{s.mutants} mutants: #{s.killed} killed, #{s.survived} survived, " <>
+          "#{s.timeouts} timed out, #{s.invalid} invalid — score #{percent(s.score)}",
+        "  #{length(matrix.tests)} tests, baseline #{matrix.baseline_ms} ms, seed #{matrix.seed}, timeout #{matrix.timeout} ms"
+      ] ++
+        fail_fast_header(matrix) ++ [""]
 
     width =
       matrix.obligations |> Map.keys() |> Enum.map(&String.length/1) |> Enum.max(fn -> 10 end)
@@ -370,6 +390,12 @@ defmodule Covenant.Mutate.Matrix do
 
     blind =
       case matrix.blind do
+        [] when matrix.fail_fast ->
+          [
+            "",
+            "Mutation-blind tests: not judged (--fail-fast: a unique kill cannot be told apart)"
+          ]
+
         [] ->
           ["", "Mutation-blind tests: none (every test has a unique kill)"]
 
@@ -383,6 +409,14 @@ defmodule Covenant.Mutate.Matrix do
 
     Enum.join(header ++ obligations ++ survivors ++ blind, "\n")
   end
+
+  defp fail_fast_header(%__MODULE__{fail_fast: false}), do: []
+
+  defp fail_fast_header(%__MODULE__{summary: %{partial: partial}}),
+    do: [
+      "  --fail-fast: #{partial} kill(s) carry partial credit; the obligation table below counts " <>
+        "exact kills only (a fail-fast matrix proves kills, not obligation credit)"
+    ]
 
   defp percent(nil), do: "n/a"
   defp percent(ratio), do: :io_lib.format("~.1f%", [ratio * 100]) |> IO.iodata_to_binary()

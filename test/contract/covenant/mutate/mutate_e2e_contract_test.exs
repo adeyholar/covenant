@@ -86,13 +86,16 @@ defmodule Covenant.MutateE2EContractTest do
     output: output
   } do
     assert matrix |> Map.keys() |> Enum.sort() ==
-             ~w(baseline component covenant files jobs modules mutants obligations problems seed summary survivors tests timeout_ms)
+             ~w(baseline component covenant fail_fast files jobs modules mutants obligations problems seed summary survivors tests timeout_ms)
 
     assert matrix["covenant"] == Covenant.version()
     assert matrix["component"] == "example.counter"
     assert matrix["modules"] == ["Example.Counter"]
     assert matrix["files"] == ["lib/example/counter.ex"]
-    assert {matrix["seed"], matrix["timeout_ms"], matrix["jobs"]} == {0, 10_000, 1}
+    assert {matrix["seed"], matrix["jobs"], matrix["fail_fast"]} == {0, 1, false}
+    # measured from the baseline: five times its slowest test, at least a second
+    assert matrix["timeout_ms"] >= 1000
+    assert output =~ "per-test timeout #{matrix["timeout_ms"]} ms"
     assert %{"tests" => 7, "ms" => ms} = matrix["baseline"]
     assert is_integer(ms)
     assert matrix["problems"] == []
@@ -253,5 +256,193 @@ defmodule Covenant.MutateE2EContractTest do
 
     assert output =~ "could not be parsed"
     refute output =~ "m001"
+  end
+
+  defp verdicts(matrix), do: Map.new(matrix["mutants"], &{&1["id"], &1["verdict"]})
+
+  @tag obligation: "covenant.mutate.I17"
+  test "--fail-fast gives the verdicts of a full run, partial credit to its kills and no unique kills",
+       %{first: full} do
+    {output, 0} = mutate("example.counter", ["--fail-fast", "--out", "tmp/mutate-fast.json"])
+    fast = read_matrix("tmp/mutate-fast.json")
+
+    assert fast["fail_fast"] == true
+    assert verdicts(fast) == verdicts(full)
+    assert fast["survivors"] == full["survivors"]
+    assert fast["problems"] == []
+
+    killed = Enum.filter(fast["mutants"], &(&1["verdict"] == "killed"))
+    assert killed != []
+    assert Enum.all?(killed, &(&1["credit"] == "partial"))
+    assert Enum.all?(fast["mutants"] -- killed, &(&1["credit"] == "exact"))
+    assert fast["summary"]["partial"] == length(killed)
+
+    # what stopped the run is one of the tests that fail against the mutant in a full run
+    full_killers = Map.new(full["mutants"], &{&1["id"], &1["killed_by"]})
+
+    for mutant <- killed do
+      assert [_ | _] = mutant["killed_by"]
+      assert mutant["killed_by"] -- full_killers[mutant["id"]] == []
+    end
+
+    assert Enum.all?(fast["obligations"], fn {_, stats} ->
+             {stats["killed"], stats["unique"]} == {0, 0}
+           end)
+
+    assert Enum.all?(fast["tests"], fn {_, test} ->
+             {test["kills"], test["unique_kills"]} == {0, 0} and test["mutation_blind"] in [nil]
+           end)
+
+    assert output =~
+             "covenant.mutate: --fail-fast: verdicts are exact, kills carry partial credit"
+
+    assert output =~ "  --fail-fast: #{length(killed)} kill(s) carry partial credit"
+    assert output =~ "Mutation-blind tests: not judged"
+  end
+
+  @tag obligation: "covenant.mutate.I18"
+  test "a progress line with the pace and the ETA follows every 25th mutant", %{
+    first: matrix,
+    output: output
+  } do
+    total = matrix["summary"]["mutants"]
+    assert total > 25
+
+    lines =
+      Regex.scan(
+        ~r/^progress: (\d+)\/(\d+) mutants \(.*%\), [\d.]+ mutants\/min, ETA .+$/m,
+        output
+      )
+
+    assert Enum.map(lines, fn [_, done, of] ->
+             {String.to_integer(done), String.to_integer(of)}
+           end) ==
+             for(done <- 25..total//25, done < total, do: {done, total})
+
+    # the line comes right after the 25th mutant's own line
+    assert output =~ ~r/\n  m025 [^\n]*\nprogress: 25\/#{total} mutants/
+  end
+
+  describe "a mutant that loops" do
+    @spin_lib Path.join(@project, "lib/example/spin.ex")
+    @spin_dir Path.join(@project, "tmp/spin")
+
+    setup do
+      File.mkdir_p!(Path.join(@spin_dir, "tests"))
+      File.mkdir_p!(Path.join(@spin_dir, "contracts/example"))
+
+      File.write!(@spin_lib, """
+      defmodule Example.Spin do
+        @moduledoc false
+
+        # a count drains by twos to zero or one; a mutant that stops it draining may never end
+        def drain(n) do
+          if n > 1, do: drain(n - 2), else: n
+        end
+      end
+      """)
+
+      File.write!(Path.join(@spin_dir, "contracts/example/spin.obligations.md"), """
+      ---
+      modules: [Example.Spin]
+      ---
+      # example.spin
+
+      ## Purpose
+
+      Drains counts: the fixture of the mutants that never end.
+
+      ## Obligations
+
+      ### example.spin.I1 — A count drains to its parity
+      - **scope:** `Example.Spin.drain/1`
+      - **must:** return 1 for an odd count and 0 for an even one
+      - **kind:** functional
+      - **status:** active
+      """)
+
+      File.write!(Path.join(@spin_dir, "tests/spin_contract_test.exs"), """
+      defmodule Example.SpinContractTest do
+        use Covenant.Case, component: "example.spin", async: false
+
+        @tag obligation: "example.spin.I1"
+        test "one drains to one" do
+          Process.sleep(210)
+          assert Example.Spin.drain(1) == 1
+        end
+
+        @tag obligation: "example.spin.I1"
+        test "five drains to one" do
+          assert Example.Spin.drain(5) == 1
+        end
+      end
+      """)
+
+      on_exit(fn ->
+        File.rm(@spin_lib)
+        File.rm_rf(@spin_dir)
+      end)
+
+      :ok
+    end
+
+    defp spin(extra, out) do
+      args = ["--contracts", "tmp/spin/contracts", "--test-path", "tmp/spin/tests", "--out", out]
+      {output, status} = mutate("example.spin", args ++ extra)
+      {output, status, read_matrix(out)}
+    end
+
+    defp spin_mutant(matrix, operator, from) do
+      Enum.find(matrix["mutants"], &(&1["operator"] == operator and &1["from"] == from))
+    end
+
+    @tag obligation: ["covenant.mutate.I16", "covenant.mutate.I17"]
+    test "the timeout is measured from the baseline, --timeout wins, and --fail-fast judges a timeout by the whole suite" do
+      # the first test sleeps 210 ms, so the measured timeout is over five times that
+      {output, 1, full} = spin([], "tmp/spin/full.json")
+      assert full["timeout_ms"] >= 1050
+      assert output =~ "per-test timeout #{full["timeout_ms"]} ms"
+
+      one = "Example.SpinContractTest:test one drains to one"
+      five = "Example.SpinContractTest:test five drains to one"
+
+      # `n > 1` becomes `!(n > 1)`: drain(1) never ends, drain(5) answers 5
+      negated = spin_mutant(full, "condition_negate", "if n > 1")
+
+      assert {negated["verdict"], negated["killed_by"], negated["timeouts"]} ==
+               {"killed", [five], [one]}
+
+      # `n - 2` becomes `n + 2`: drain(5) never ends and nothing else fails, so it only times out
+      grown = spin_mutant(full, "arithmetic_swap", "-")
+      assert {grown["verdict"], grown["killed_by"], grown["timeouts"]} == {"timeout", [], [five]}
+
+      {output, 1, fast} = spin(["--fail-fast", "--timeout", "300"], "tmp/spin/fast.json")
+      assert fast["timeout_ms"] == 300
+      assert output =~ "per-test timeout 300 ms"
+      assert verdicts(fast) == verdicts(full)
+
+      # the run that stopped on a timeout was run again in full: same killers, exact credit
+      negated = spin_mutant(fast, "condition_negate", "if n > 1")
+
+      assert {negated["verdict"], negated["killed_by"], negated["credit"]} ==
+               {"killed", [five], "exact"}
+
+      assert spin_mutant(fast, "arithmetic_swap", "-")["verdict"] == "timeout"
+
+      # a kill is exact only when its first failure was a timeout and the whole suite judged it
+      full_by_id = Map.new(full["mutants"], &{&1["id"], &1})
+      killed = Enum.filter(fast["mutants"], &(&1["verdict"] == "killed"))
+
+      for mutant <- killed, mutant["credit"] == "exact" do
+        assert full_by_id[mutant["id"]]["timeouts"] != []
+        assert mutant["killed_by"] == full_by_id[mutant["id"]]["killed_by"]
+      end
+
+      for mutant <- killed, full_by_id[mutant["id"]]["timeouts"] == [] do
+        assert mutant["credit"] == "partial"
+      end
+
+      assert Enum.any?(killed, &(&1["credit"] == "partial"))
+    end
   end
 end

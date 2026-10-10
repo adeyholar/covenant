@@ -9,6 +9,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
       mix covenant.mutate example.counter
       mix covenant.mutate example.counter --module Example.Counter --module Example.Counter.Log
       mix covenant.mutate example.counter --timeout 5000 --seed 42 --jobs 2
+      mix covenant.mutate example.counter --fail-fast
       mix covenant.mutate example.counter --out tmp/kill_matrix.json
 
   The modules under mutation are, in order of precedence, the `--module`
@@ -22,9 +23,10 @@ defmodule Mix.Tasks.Covenant.Mutate do
   no file is written by a mutant. The baseline must be green. A mutant whose
   only failures are test timeouts is a **survivor**, never a kill.
 
-  Prints a progress line per mutant, the kill matrix (per obligation: mutants
-  killed in total and uniquely), the survivors with their sort, and the
-  mutation-blind tests (warn-only). Writes the matrix as JSON.
+  Prints a progress line per mutant and, every 25 mutants, how many are done,
+  the rate and the ETA (per worker, with `--jobs`); then the kill matrix (per
+  obligation: mutants killed in total and uniquely), the survivors with their
+  sort, and the mutation-blind tests (warn-only). Writes the matrix as JSON.
 
   Exit status 0 when the baseline is green and every survivor is annotated in
   `contracts/<app>/<component>.survivors.yml`; 1 when the baseline is red, a
@@ -34,7 +36,20 @@ defmodule Mix.Tasks.Covenant.Mutate do
   ## Options
 
   * `--module MOD` — an implementation module (repeatable; overrides the Contract);
-  * `--timeout MS` — per-test timeout for mutant runs (default #{Covenant.Mutate.default_timeout()});
+  * `--timeout MS` — per-test timeout for mutant runs. Without it the baseline is
+    measured and the timeout is five times the slowest baseline test, never under
+    1000 ms, so a mutant that loops forever is cut off quickly instead of holding
+    each test for a flat ceiling (each worker measures its own baseline; a test or
+    module with its own `@tag timeout:` keeps it);
+  * `--fail-fast` — stop a mutant's run at its first failing test (ExUnit
+    `max_failures: 1`). The verdict (killed or survived) is exact, so the
+    survivors and the exit status are the same, but the credit is **partial**: a
+    killed mutant is marked `credit: partial`, its `killed_by` names only the
+    tests that failed before the stop, and the obligation and test totals count
+    only mutants with exact credit (a survivor ran every test; a run that only
+    timed out is run again in full). Unique kills and mutation-blind tests are
+    not judged. A fail-fast matrix proves kills, not obligation credit: use it
+    to sort survivors fast on a slow suite, and a full run to credit;
   * `--seed N` — ExUnit seed (default #{Covenant.Mutate.default_seed()}: definition order);
   * `--jobs N` — worker processes (default 1; mutants are split round-robin).
     With N > 1 each worker runs the tests from a private working directory
@@ -92,6 +107,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
   @switches [
     module: :keep,
     timeout: :integer,
+    fail_fast: :boolean,
     seed: :integer,
     jobs: :integer,
     out: :string,
@@ -124,7 +140,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
     settings = %{
       component: component_id,
       modules: Keyword.get_values(opts, :module),
-      timeout: opts[:timeout] || Mutate.default_timeout(),
+      timeout: opts[:timeout],
+      fail_fast: opts[:fail_fast] || false,
       seed: opts[:seed] || Mutate.default_seed(),
       jobs: max(opts[:jobs] || 1, 1),
       contracts: opts[:contracts] || Covenant.contracts_dir(),
@@ -166,6 +183,12 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     Mix.shell().info("covenant.mutate: tests: #{Enum.join(plan.test_files, ", ")}")
 
+    if settings.fail_fast do
+      Mix.shell().info(
+        "covenant.mutate: --fail-fast: verdicts are exact, kills carry partial credit"
+      )
+    end
+
     dir = Mutate.default_dir(settings.component)
     File.mkdir_p!(dir)
     dir |> Path.join("raw-*.json") |> Path.wildcard() |> Enum.each(&File.rm!/1)
@@ -197,8 +220,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
         annotations: annotations,
         survivors_path: survivors_path,
         seed: settings.seed,
-        timeout: settings.timeout,
-        jobs: settings.jobs
+        timeout: results.timeout_ms,
+        jobs: settings.jobs,
+        fail_fast: settings.fail_fast
       )
 
     Mix.shell().info("")
@@ -241,12 +265,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
         "--slice",
         "#{i}/#{settings.jobs}"
       ] ++
-        [
-          "--timeout",
-          Integer.to_string(settings.timeout),
-          "--seed",
-          Integer.to_string(settings.seed)
-        ] ++
+        ["--seed", Integer.to_string(settings.seed)] ++
+        if(settings.timeout, do: ["--timeout", Integer.to_string(settings.timeout)], else: []) ++
+        if(settings.fail_fast, do: ["--fail-fast"], else: []) ++
         ["--contracts", settings.contracts] ++
         Enum.flat_map(plan.names, &["--module", &1]) ++
         Enum.flat_map(settings.test_paths, &["--test-path", &1])
@@ -302,16 +323,18 @@ defmodule Mix.Tasks.Covenant.Mutate do
       root: File.cwd!(),
       seed: settings.seed,
       timeout: settings.timeout,
+      fail_fast: settings.fail_fast,
       slice: {i, n},
       isolate: n > 1,
-      on_progress: &Mix.shell().info(prefix <> progress(&1))
+      on_progress: &Mix.shell().info(prefix <> progress(&1)),
+      on_eta: &Mix.shell().info(prefix <> eta(&1))
     }
 
     case Runner.run(runner_plan) do
       {:ok, result} ->
         Mix.shell().info(
           "#{prefix}covenant.mutate: baseline #{length(result.tests)} test(s) green in #{result.baseline_ms} ms; " <>
-            "#{length(result.mutants)} of #{result.all} mutant(s) run"
+            "#{length(result.mutants)} of #{result.all} mutant(s) run, per-test timeout #{result.timeout_ms} ms"
         )
 
         File.mkdir_p!(Path.dirname(raw_path))
@@ -344,6 +367,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     "  #{m.id} #{Mutant.at(m)} #{m.operator} #{Mutant.mutation(m)}  #{verdict}"
   end
+
+  defp eta(%{done: done, total: total, elapsed_ms: elapsed_ms}),
+    do: Mutate.progress_line(done, total, elapsed_ms)
 
   defp parse_slice(slice) do
     with [i, n] <- String.split(slice, "/"),

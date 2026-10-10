@@ -2,6 +2,25 @@
 
 ## Unreleased (2026-10-10)
 
+- `mix covenant.mutate --fail-fast` stops a mutant's run at its first failing test
+  (ExUnit `max_failures: 1`). Killed/survived verdicts are exact, so the survivors, their
+  sort and the exit status are those of a full run; the credit is partial: a killed mutant is
+  marked `credit: partial` (`Covenant.Mutate.Mutant` has a `credit` field, in the JSON and
+  the raw worker results), the obligation and test totals (`killed`, `unique`, `kills`,
+  `unique_kills`) count only exact-credit mutants, no test is judged mutation-blind
+  (`mutation_blind` is `null`), and the JSON has `fail_fast` and `summary.partial`. A mutant
+  whose fail-fast run failed on timeouts alone is run again in full, since a timeout counts
+  as a failure and can end the run before the test that kills. A fail-fast matrix proves
+  kills, not obligation credit. Obligation `covenant.mutate.I17`.
+- The default per-test timeout of a mutant run is measured from the baseline: five times
+  the slowest baseline test, never under 1000 ms (`Covenant.Mutate.default_timeout/1`),
+  where it was a flat 10 s, so a mutant that loops forever dies quickly. `--timeout MS` still overrides it; `timeout_ms` in the matrix is the
+  timeout used (the largest of the workers'). `Covenant.Mutate.default_timeout/0` is gone.
+  Obligation `covenant.mutate.I16`.
+- `mix covenant.mutate` prints a progress line with the mutants done, the rate and an ETA after
+  every 25th mutant (per worker with `--jobs`). Obligation `covenant.mutate.I18`.
+- `Covenant.Mutate.Runner.entry/2` reports the test's duration as `ms`.
+
 - `mix covenant.conditions` resolves `file` conditions and `mix.lock` against
   `Covenant.root/0` instead of the working directory (as the other tasks resolve
   their paths, covenant.tasks.I9). Run from `apps/<app>` of an umbrella it used to

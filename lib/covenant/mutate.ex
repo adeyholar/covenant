@@ -25,12 +25,53 @@ defmodule Covenant.Mutate do
   alias Covenant.Mutate.{Modules, Mutant}
   alias Covenant.Regen
 
-  @default_timeout 10_000
+  @timeout_floor_ms 1_000
+  @timeout_factor 5
+  @progress_every 25
   @default_seed 0
 
-  @doc "The default per-test timeout for mutant runs, in milliseconds."
-  @spec default_timeout() :: pos_integer()
-  def default_timeout, do: @default_timeout
+  @doc """
+  The default per-test timeout for mutant runs, in milliseconds: five times the
+  slowest baseline test, and never under one second. `tests` are the baseline's
+  finished tests (`Covenant.Mutate.Runner.entry/2`, each with its `:ms`).
+
+  A flat ceiling is either too long (a mutant that loops forever holds the run
+  for the whole ceiling, test after test) or too short for a slow suite; the
+  baseline says how long this suite's tests take.
+  """
+  @spec default_timeout([%{required(:ms) => non_neg_integer()}]) :: pos_integer()
+  def default_timeout(tests),
+    do: Enum.max([@timeout_floor_ms | Enum.map(tests, &(@timeout_factor * &1.ms))])
+
+  @doc "Whether a progress line is due after `done` of `total` mutants: every 25th, but not the last."
+  @spec progress_due?(non_neg_integer(), non_neg_integer()) :: boolean()
+  def progress_due?(done, total),
+    do: done >= @progress_every and rem(done, @progress_every) == 0 and done < total
+
+  @doc """
+  The progress line after `done` of `total` mutants in `elapsed_ms`:
+  `progress: 25/700 mutants (3.6%), 14.8 mutants/min, ETA 45m 36s`.
+  """
+  @spec progress_line(pos_integer(), pos_integer(), non_neg_integer()) :: String.t()
+  def progress_line(done, total, elapsed_ms) do
+    per_ms = done / max(elapsed_ms, 1)
+    eta_ms = round((total - done) / per_ms)
+
+    "progress: #{done}/#{total} mutants (#{:erlang.float_to_binary(done * 100 / total, decimals: 1)}%), " <>
+      "#{:erlang.float_to_binary(per_ms * 60_000, decimals: 1)} mutants/min, ETA #{duration(eta_ms)}"
+  end
+
+  defp duration(ms) do
+    seconds = div(ms + 500, 1000)
+    {hours, rest} = {div(seconds, 3600), rem(seconds, 3600)}
+    {minutes, seconds} = {div(rest, 60), rem(rest, 60)}
+
+    cond do
+      hours > 0 -> "#{hours}h #{String.pad_leading("#{minutes}", 2, "0")}m"
+      minutes > 0 -> "#{minutes}m #{String.pad_leading("#{seconds}", 2, "0")}s"
+      true -> "#{seconds}s"
+    end
+  end
 
   @doc "The default ExUnit seed for mutant runs (0: definition order)."
   @spec default_seed() :: non_neg_integer()
@@ -97,6 +138,7 @@ defmodule Covenant.Mutate do
       "files" => result.files,
       "all" => result.all,
       "baseline_ms" => result.baseline_ms,
+      "timeout_ms" => result.timeout_ms,
       "tests" =>
         Enum.map(result.tests, fn test ->
           %{
@@ -129,6 +171,7 @@ defmodule Covenant.Mutate do
          files: List.wrap(raw["files"]),
          all: raw["all"] || length(mutants),
          baseline_ms: raw["baseline_ms"] || 0,
+         timeout_ms: raw["timeout_ms"] || 0,
          tests: Enum.map(tests, &decode_test/1),
          mutants: Enum.map(mutants, &Mutant.from_map/1)
        }}
@@ -166,7 +209,8 @@ defmodule Covenant.Mutate do
   @doc """
   Merges the raw results of every worker: tests, modules and files come from
   the first (every worker sees the same suite), mutants are concatenated and
-  sorted by id.
+  sorted by id, and `timeout_ms` is the largest timeout any worker used (each
+  measures its own baseline).
   """
   @spec merge([map()]) :: {:ok, map()} | {:error, String.t()}
   def merge([]), do: {:error, "no worker results to merge"}
@@ -184,7 +228,8 @@ defmodule Covenant.Mutate do
          "worker results are incomplete: #{length(ids)} of #{first.all} mutants have a verdict"}
 
       true ->
-        {:ok, %{first | mutants: mutants}}
+        {:ok,
+         %{first | mutants: mutants, timeout_ms: raws |> Enum.map(& &1.timeout_ms) |> Enum.max()}}
     end
   end
 end

@@ -54,7 +54,7 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I7 — Kills are credited to obligations, uniquely and in total
 - **scope:** `Covenant.Mutate.Matrix.build/2`
-- **must:** credit a killed mutant to the obligations tagged on every test that failed against it; count per testable obligation the mutants killed and the mutants only that obligation's tests killed (its unique kills), listing an obligation with no kill too, and count the same per test; list a passing test with no unique kill as mutation-blind, with its declared reason when it has one, as a warning and never a failure; score `killed / (killed + survived + timed out)` with invalid mutants excluded, and no score for no mutants
+- **must:** credit a killed mutant to the obligations tagged on every test that failed against it; count per testable obligation the mutants killed and the mutants only that obligation's tests killed (its unique kills), listing an obligation with no kill too, and count the same per test, counting only the mutants whose credit is exact (a mutant a `--fail-fast` run killed has partial credit, I17); list a passing test with no unique kill as mutation-blind, with its declared reason when it has one, as a warning and never a failure; score `killed / (killed + survived + timed out)` with invalid mutants excluded, and no score for no mutants
 - **kind:** functional
 - **status:** active
 
@@ -78,13 +78,13 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I11 — The plan and the worker results
 - **scope:** `Covenant.Mutate.plan/3`, `Covenant.Mutate.encode_raw/2`, `Covenant.Mutate.decode_raw/1`, `Covenant.Mutate.merge/1`
-- **must:** resolve a component to its module names and its contract test files, or fail naming the problem (an unknown component, with the known ones; no module; no contract test file); carry a worker's results through JSON and back unchanged; merge the workers' results by concatenating their mutants sorted by id, refusing results that overlap or leave a mutant without a verdict
+- **must:** resolve a component to its module names and its contract test files, or fail naming the problem (an unknown component, with the known ones; no module; no contract test file); carry a worker's results, the per-test timeout it used (`timeout_ms`) and each mutant's credit through JSON and back unchanged; merge the workers' results by concatenating their mutants sorted by id and keeping the largest `timeout_ms`, refusing results that overlap or leave a mutant without a verdict
 - **kind:** functional
 - **status:** active
 
 ### covenant.mutate.I12 — The kill matrix is JSON of a fixed shape
 - **scope:** `Covenant.Mutate.Matrix.to_map/1`, `mix covenant.mutate`
-- **must:** write to `--out` a JSON object with the covenant version, `component`, `modules`, `files`, `seed`, `timeout_ms`, `jobs`, `baseline` (`tests`, `ms`), `summary` (`mutants`, `killed`, `survived`, `timeouts`, `invalid`, `score`, `annotated`, `unsorted`), `mutants` (each with `id`, `at`, `file`, `line`, `column`, `operator`, `from`, `to`, `module`, `function`, `verdict`, `killed_by`, `timeouts`, `reason`, `obligations`), `obligations` (`killed`, `unique`, `mutants`, `unique_mutants`), `tests` (`kills`, `unique_kills`, `mutants`, `unique_mutants`, `mutation_blind`, with the test's identity and tags), `survivors` (`id`, `at`, `operator`, `mutation`, `verdict`, `sort`, `reason`) and `problems`; print the table of the same numbers
+- **must:** write to `--out` a JSON object with the covenant version, `component`, `modules`, `files`, `seed`, `timeout_ms`, `jobs`, `fail_fast`, `baseline` (`tests`, `ms`), `summary` (`mutants`, `killed`, `survived`, `timeouts`, `invalid`, `partial`, `score`, `annotated`, `unsorted`), `mutants` (each with `id`, `at`, `file`, `line`, `column`, `operator`, `from`, `to`, `module`, `function`, `verdict`, `killed_by`, `timeouts`, `reason`, `credit`, `obligations`), `obligations` (`killed`, `unique`, `mutants`, `unique_mutants`), `tests` (`kills`, `unique_kills`, `mutants`, `unique_mutants`, `mutation_blind`, with the test's identity and tags), `survivors` (`id`, `at`, `operator`, `mutation`, `verdict`, `sort`, `reason`) and `problems`; print the table of the same numbers
 - **kind:** functional
 - **status:** active
 
@@ -96,12 +96,32 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I14 — The same sources and seed give the same matrix
 - **scope:** `mix covenant.mutate`
-- **must:** give two runs over unchanged sources with the same seed the same mutants, ids, verdicts and `killed_by` lists
+- **must:** give two runs over unchanged sources with the same seed the same mutants, ids, verdicts and `killed_by` lists (with `--fail-fast` the same mutants, ids and verdicts: which test fails first is not pinned)
 - **kind:** functional
 - **status:** active
 
 ### covenant.mutate.I15 — Parallel workers get a directory of their own
 - **scope:** `Covenant.Mutate.Workdir.build/2`, `Covenant.Mutate.Workdir.remove/1`, `Covenant.Mutate.Workdir.within/2`
 - **must:** build, under the given base directory (the system temp directory by default), a directory named after the OS process that holds a symlink to every entry of the project root except `tmp`, and a real empty `tmp`; remove it with the symlinks, never what they point at; run a function with it as the working directory and restore the previous one even when the function raises
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I16 — The per-test timeout of a mutant run is measured from the baseline
+- **scope:** `Covenant.Mutate.default_timeout/1`, `mix covenant.mutate`
+- **must:** without `--timeout` give the mutants' tests a timeout of five times the slowest baseline test, in milliseconds, and never under 1000 (`default_timeout/1`; a baseline of no test measures 1000), each worker measuring its own baseline and the matrix recording the largest as `timeout_ms`, and run the baseline itself under the ExUnit default of 60 seconds; with `--timeout MS` give them exactly MS; leave a test that sets its own `@tag timeout:` with it
+- **why:** a flat ceiling holds every test a mutant that loops forever reaches for the whole ceiling, so a database-backed suite spent about a minute per mutant (half a day for a module of 700), and it is too short for a suite whose tests are slow
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I17 — --fail-fast stops a run at its first failure and says the credit is partial
+- **scope:** `mix covenant.mutate`, `Covenant.Mutate.Matrix.build/2`
+- **must:** with `--fail-fast` stop each mutant's run at its first failing test (ExUnit `max_failures: 1`) and give every mutant the verdict a full run gives; mark a mutant such a run killed `credit: partial` (its `killed_by` names only the tests that failed before the stop) and every other mutant `exact` (a survivor ran every test, an invalid mutant none); run a mutant again in full when its fail-fast run failed on timeouts alone, since a timeout is a failure to ExUnit and ends the run before a test that would kill the mutant; count in an obligation's `killed` and `unique` and a test's `kills` and `unique_kills` the mutants with exact credit only; judge no test mutation-blind (`mutation_blind` is null unless the test declares a reason); write `fail_fast` and the number of partial kills (`summary.partial`) to the JSON and say in the table's header that the credit is partial; document in `mix help covenant.mutate` that a fail-fast matrix proves kills, not obligation credit
+- **why:** the verdict of a kill does not depend on which test caught it, but its credit does: a unique kill cannot be told from a test that merely ran first, so a fast run that credited it would reward the order of the tests
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I18 — Progress reports its pace and its ETA
+- **scope:** `Covenant.Mutate.progress_due?/2`, `Covenant.Mutate.progress_line/3`, `mix covenant.mutate`
+- **must:** after every 25th mutant of a worker's slice, but not after its last, print `progress: <done>/<total> mutants (<percent>%), <rate> mutants/min, ETA <time>`, the rate being the mutants done over the time since the first of them started and the time left the mutants remaining at that rate, written as hours and minutes from an hour, minutes and seconds from a minute and seconds below; with `--jobs N` each worker prints its own, prefixed `[i/N]`
 - **kind:** functional
 - **status:** active

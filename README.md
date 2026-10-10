@@ -189,7 +189,7 @@ ExUnit.start(formatters: [ExUnit.CLIFormatter, Covenant.Formatter])
 | `mix covenant.check --static` | Compiles and runs no test: parses the contract test files (`Code.string_to_quoted/2`), reads every `use Covenant.Case` module's `@tag`/`@describetag`/`@moduletag obligation:` values (strings and lists, merged as ExUnit merges them) and runs every check that needs no compiled code, plus `Covenant.Case`'s compile-time rules. Module/function exception targets and `module` ceiling counters are listed as skipped; file targets and `glob` counters are checked against `--root` (default `Covenant.root/0`). Writes `contracts/coverage.static.json` (`"mode": "static"`), never `coverage.json`. For a Contract written ahead of its implementation. |
 | `mix covenant.conditions` | Evaluates every record condition with a `check` (a `value` check runs in the project's VM) and lists suspect records with the failing premise. `--verbose` prints every outcome and why a condition was not checked. Exit 1 when any record is suspect; a condition that cannot be checked in this VM is counted, not failed. |
 | `mix covenant.regen <component>` | Writes a regeneration pack: `PROMPT.md`, the regeneration brief, the convention, the intent (or obligations file) and records, the system intent and records, the component's contract tests and public-surface stubs. The implementation is excluded. `--out DIR` (default `tmp/covenant/regen/<component>`). |
-| `mix covenant.mutate <component>` | Mutates the component's implementation, runs its contract tests against every mutant and credits each kill to the obligations tagged on the tests that caught it; writes the kill matrix. See [Mutation testing](#mutation-testing). `--jobs N`, `--seed N`, `--timeout MS`, `--module MOD` (repeatable), `--out PATH`. Exit 1 on a red baseline, an unannotated survivor or a stale annotation. |
+| `mix covenant.mutate <component>` | Mutates the component's implementation, runs its contract tests against every mutant and credits each kill to the obligations tagged on the tests that caught it; writes the kill matrix. See [Mutation testing](#mutation-testing). `--jobs N`, `--seed N`, `--timeout MS`, `--fail-fast`, `--module MOD` (repeatable), `--out PATH`. Exit 1 on a red baseline, an unannotated survivor or a stale annotation. |
 
 ```
 $ mix covenant.check
@@ -402,9 +402,60 @@ Contract or the survivors file does not parse, or a worker fails.
 
 ### Options and `--jobs`
 
-`--module MOD` (repeatable), `--timeout MS` (per test, default 10000),
-`--seed N` (the ExUnit seed; the default 0 runs in definition order),
-`--jobs N`, `--out PATH`, `--contracts DIR`, `--test-path PATH` (repeatable).
+`--module MOD` (repeatable), `--timeout MS` (per test, measured by default),
+`--fail-fast`, `--seed N` (the ExUnit seed; the default 0 runs in definition
+order), `--jobs N`, `--out PATH`, `--contracts DIR`, `--test-path PATH`
+(repeatable).
+
+#### A timeout measured from the baseline
+
+Every mutant runs the whole suite, so a mutant that makes a test loop forever
+costs the per-test timeout for each test it reaches. A flat ceiling is either
+long (a database-backed suite spent about a minute per mutant) or short enough to
+cut off a slow suite's honest tests. Without `--timeout` the baseline run is
+timed per test and the mutants' tests get **five times the slowest baseline test,
+never under 1000 ms**: a 33 ms suite runs its mutants under 1 s, a suite with a
+7 s test under 35 s. The matrix records the timeout used as `timeout_ms` (with
+`--jobs`, each worker measures its own baseline and the largest is recorded).
+`--timeout MS` overrides it, and a test or module with its own `@tag timeout:`
+keeps that.
+
+#### `--fail-fast`: kills without the credit
+
+`--fail-fast` stops a mutant's run at its first failing test (ExUnit
+`max_failures: 1`), so a killed mutant costs one failure instead of the whole
+suite. The **verdict** is the same as a full run's, mutant for mutant: a mutant
+fails some test or none, and the survivors, the sort and the exit status do not
+change. The **credit** is not: only the tests that failed before the stop are in
+`killed_by`, so the matrix marks every such kill `credit: partial` (a survivor ran
+every test and is `exact`, and so is an invalid mutant, which ran none).
+
+* The obligation totals (`killed`, `unique`) and the per-test `kills` and
+  `unique_kills` count only mutants with **exact** credit, so in a fail-fast matrix
+  they are mostly zero: that is the absence of a judgment, not of coverage.
+* No test is judged mutation-blind (`mutation_blind` is `null` in the JSON unless
+  the test declares a reason), and the table says so.
+* `fail_fast: true` and `summary.partial` (the partial kills) are in the JSON.
+* A timeout is a failure to ExUnit and can end the run before a later test that
+  would kill the mutant, so a mutant whose fail-fast run failed on timeouts alone is
+  run again in full; it is the one case in which a fail-fast run reports exact
+  credit for a kill.
+
+A fail-fast matrix **proves kills, not obligation credit**. Use it to sort the
+survivors of a slow suite quickly, and a full run when the question is which
+obligation's tests caught what.
+
+#### Progress
+
+After every 25th mutant the task prints how far it is and how long is left:
+
+```
+progress: 250/700 mutants (35.7%), 14.8 mutants/min, ETA 30m 20s
+```
+
+The rate is the mutants done over the time since the first one started, the ETA
+the mutants left at that rate. With `--jobs N` each worker prints its own line,
+prefixed `[i/N]`, for its own slice.
 
 `--jobs N` splits the mutants round-robin over N worker OS processes. ExUnit
 creates a test's `:tmp_dir` at `tmp/<module>/<test>` under the *process's*

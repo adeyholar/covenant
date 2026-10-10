@@ -14,11 +14,22 @@ defmodule Covenant.Mutate.Runner do
   their beam files. No file is written by a mutant.
 
   The baseline (unmutated) run must be green; otherwise nothing is mutated.
-  Every test runs with the plan's `timeout`, and a failure that is only an
-  `ExUnit.TimeoutError` never counts as a kill (record `timeouts-are-survivors`).
+  Every test runs with the plan's `timeout` — or, when the plan gives none,
+  with `Covenant.Mutate.default_timeout/1` of the baseline's own durations —
+  and a failure that is only an `ExUnit.TimeoutError` never counts as a kill
+  (record `timeouts-are-survivors`).
+
+  With `fail_fast: true` a mutant's run stops at its first failing test
+  (`max_failures: 1`): the verdict is the same, the credit is `:partial`. A
+  timeout counts as a failure to ExUnit, so a run that stopped on nothing but a
+  timeout says nothing about the tests it skipped, and is run again in full.
   """
 
+  alias Covenant.Mutate
   alias Covenant.Mutate.{Mutant, Mutator, Workdir}
+
+  # what the baseline runs under when the plan gives no timeout: ExUnit's own default
+  @baseline_timeout 60_000
 
   defmodule Collector do
     @moduledoc """
@@ -61,7 +72,8 @@ defmodule Covenant.Mutate.Runner do
           line: pos_integer() | nil,
           obligations: [String.t()],
           mutation_blind: String.t() | nil,
-          outcome: :passed | :failed | :timeout | :invalid | :skipped | :excluded
+          outcome: :passed | :failed | :timeout | :invalid | :skipped | :excluded,
+          ms: non_neg_integer()
         }
 
   @typedoc """
@@ -71,9 +83,15 @@ defmodule Covenant.Mutate.Runner do
   * `:modules` — `{module, source file}` pairs (`Covenant.Mutate.Modules.locate/3`);
   * `:test_files` — the component's contract test files;
   * `:root` — the project root (files are reported relative to it);
-  * `:seed`, `:timeout` — ExUnit seed and per-test timeout in ms;
+  * `:seed` — the ExUnit seed;
+  * `:timeout` — per-test timeout in ms for the mutant runs, or `nil` to
+    measure it from the baseline (`Covenant.Mutate.default_timeout/1`);
   * `:slice` — `{i, n}`: run every n-th mutant starting at the i-th (1-based);
   * `:on_progress` — called with each mutant once it has a verdict;
+  * `:on_eta` — (optional) called with `%{done: d, total: t, elapsed_ms: ms}`
+    after every 25th mutant of the slice (`Covenant.Mutate.progress_due?/2`);
+  * `:fail_fast` — (optional, default `false`) stop each mutant's run at its
+    first failing test: exact verdict, `credit: :partial` on a kill;
   * `:isolate` — (optional, default `false`) run the tests from a private
     working directory (`Covenant.Mutate.Workdir`), so that parallel workers
     never share ExUnit's `:tmp_dir` paths.
@@ -84,9 +102,11 @@ defmodule Covenant.Mutate.Runner do
           required(:test_files) => [Path.t()],
           required(:root) => Path.t(),
           required(:seed) => non_neg_integer(),
-          required(:timeout) => pos_integer(),
+          required(:timeout) => pos_integer() | nil,
           required(:slice) => {pos_integer(), pos_integer()},
           required(:on_progress) => (Mutant.t() -> any()),
+          optional(:on_eta) => (map() -> any()),
+          optional(:fail_fast) => boolean(),
           optional(:isolate) => boolean()
         }
 
@@ -95,6 +115,7 @@ defmodule Covenant.Mutate.Runner do
           mutants: [Mutant.t()],
           all: non_neg_integer(),
           baseline_ms: non_neg_integer(),
+          timeout_ms: pos_integer(),
           files: [Path.t()]
         }
 
@@ -109,17 +130,27 @@ defmodule Covenant.Mutate.Runner do
 
   defp run_suite(plan, files, modules) do
     with {:ok, tests, baseline_ms} <- baseline(modules) do
+      timeout = plan.timeout || Mutate.default_timeout(tests)
+      ExUnit.configure(timeout: timeout)
+
       mutants = files |> Enum.flat_map(& &1.mutants) |> Mutator.numbered()
       {i, n} = plan.slice
 
-      verdicts =
+      slice =
         mutants
         |> Enum.with_index()
         |> Enum.filter(fn {_, position} -> rem(position, n) == i - 1 end)
-        |> Enum.map(fn {mutant, _} ->
+
+      started = System.monotonic_time(:millisecond)
+
+      verdicts =
+        slice
+        |> Enum.with_index(1)
+        |> Enum.map(fn {{mutant, _}, done} ->
           file = Enum.find(files, &(&1.relative == mutant.file))
-          mutant = run_mutant(mutant, file, modules)
+          mutant = run_mutant(mutant, file, modules, Map.get(plan, :fail_fast, false))
           plan.on_progress.(mutant)
+          eta(plan, done, length(slice), started)
           mutant
         end)
 
@@ -129,10 +160,23 @@ defmodule Covenant.Mutate.Runner do
          mutants: verdicts,
          all: length(mutants),
          baseline_ms: baseline_ms,
+         timeout_ms: timeout,
          files: Enum.map(files, & &1.relative)
        }}
     end
   end
+
+  defp eta(%{on_eta: on_eta}, done, total, started) do
+    if Mutate.progress_due?(done, total) do
+      on_eta.(%{
+        done: done,
+        total: total,
+        elapsed_ms: System.monotonic_time(:millisecond) - started
+      })
+    end
+  end
+
+  defp eta(_plan, _done, _total, _started), do: :ok
 
   # ExUnit puts a test's `:tmp_dir` under `tmp/` in the OS process's working
   # directory, so workers running side by side must not share it. The suite is
@@ -232,7 +276,7 @@ defmodule Covenant.Mutate.Runner do
       covenant_sink: self(),
       covenant_root: Path.expand(plan.root),
       seed: plan.seed,
-      timeout: plan.timeout,
+      timeout: plan.timeout || @baseline_timeout,
       capture_log: true,
       max_failures: :infinity,
       colors: [enabled: false]
@@ -278,8 +322,9 @@ defmodule Covenant.Mutate.Runner do
   end
 
   @doc false
-  @spec run_tests([module()]) :: [entry()]
-  def run_tests(modules) do
+  @spec run_tests([module()], pos_integer() | :infinity) :: [entry()]
+  def run_tests(modules, max_failures \\ :infinity) do
+    ExUnit.configure(max_failures: max_failures)
     ExUnit.run(modules)
 
     receive do
@@ -291,17 +336,30 @@ defmodule Covenant.Mutate.Runner do
 
   # -- mutants ----------------------------------------------------------------
 
-  defp run_mutant(mutant, file, modules) do
+  defp run_mutant(mutant, file, modules, fail_fast) do
     purge(file.originals)
 
     result =
       case Mutator.compile(Mutator.apply(file.ast, mutant), file.file) do
         {:error, reason} -> %{mutant | verdict: :invalid, reason: reason}
-        {:ok, _} -> verdict(mutant, run_tests(modules))
+        {:ok, _} -> judge(mutant, modules, fail_fast)
       end
 
     restore(file.originals)
     %{result | replacement: nil}
+  end
+
+  defp judge(mutant, modules, false), do: verdict(mutant, run_tests(modules))
+
+  # Stopping at the first failure leaves a kill's credit partial; a survivor ran every test.
+  # A timeout is a failure to ExUnit, so a run that stopped on one proves nothing about the
+  # tests it skipped (a later one may kill the mutant): the whole suite settles it.
+  defp judge(mutant, modules, true) do
+    case verdict(mutant, run_tests(modules, 1)) do
+      %Mutant{verdict: :killed} = killed -> %{killed | credit: :partial}
+      %Mutant{verdict: :timeout} -> verdict(mutant, run_tests(modules))
+      survived -> survived
+    end
   end
 
   @doc "The verdict of a mutant given the tests that ran against it."
@@ -320,7 +378,10 @@ defmodule Covenant.Mutate.Runner do
     %{mutant | verdict: verdict, killed_by: killers, timeouts: timeouts}
   end
 
-  @doc "The identity, obligations and outcome of a finished `ExUnit.Test`; files are relative to `root`."
+  @doc """
+  The identity, obligations, outcome and duration (`ms`, rounded up) of a finished
+  `ExUnit.Test`; files are relative to `root`.
+  """
   @spec entry(ExUnit.Test.t(), Path.t()) :: entry()
   def entry(%ExUnit.Test{tags: tags} = test, root) do
     module = inspect(test.module)
@@ -334,7 +395,8 @@ defmodule Covenant.Mutate.Runner do
       line: tags[:line],
       obligations: tags[:obligation] |> List.wrap() |> Enum.map(&to_string/1),
       mutation_blind: tags[:mutation_blind] && to_string(tags[:mutation_blind]),
-      outcome: outcome(test.state)
+      outcome: outcome(test.state),
+      ms: div(test.time + 999, 1000)
     }
   end
 

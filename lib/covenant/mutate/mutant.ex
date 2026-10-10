@@ -16,6 +16,14 @@ defmodule Covenant.Mutate.Mutant do
   * `:timeout` — the only failures were `ExUnit.TimeoutError`s; counted as a
     survivor, never as a kill (record `timeouts-are-survivors`);
   * `:invalid` — the mutant does not compile; excluded from the denominator.
+
+  ## Credit
+
+  `credit` says how much of `killed_by` can be trusted. `:exact` (the default):
+  the whole suite ran against the mutant, so `killed_by` lists every test that
+  caught it. `:partial`: the run stopped at its first failing test
+  (`--fail-fast`), so the verdict is exact but `killed_by` names only the tests
+  that failed before the stop.
   """
 
   @type operator ::
@@ -35,6 +43,8 @@ defmodule Covenant.Mutate.Mutant do
 
   @type verdict :: :killed | :survived | :timeout | :invalid
 
+  @type credit :: :exact | :partial
+
   @type t :: %__MODULE__{
           id: String.t() | nil,
           file: Path.t(),
@@ -50,7 +60,8 @@ defmodule Covenant.Mutate.Mutant do
           verdict: verdict() | nil,
           killed_by: [String.t()],
           timeouts: [String.t()],
-          reason: String.t() | nil
+          reason: String.t() | nil,
+          credit: credit()
         }
 
   @enforce_keys [:file, :line, :column, :operator, :from, :to, :index]
@@ -69,7 +80,8 @@ defmodule Covenant.Mutate.Mutant do
     :verdict,
     :reason,
     killed_by: [],
-    timeouts: []
+    timeouts: [],
+    credit: :exact
   ]
 
   @operators ~w(boolean_flip comparison_swap arithmetic_swap logical_swap condition_negate
@@ -105,7 +117,8 @@ defmodule Covenant.Mutate.Mutant do
       "verdict" => mutant.verdict && Atom.to_string(mutant.verdict),
       "killed_by" => mutant.killed_by,
       "timeouts" => mutant.timeouts,
-      "reason" => mutant.reason
+      "reason" => mutant.reason,
+      "credit" => Atom.to_string(mutant.credit)
     }
   end
 
@@ -114,6 +127,9 @@ defmodule Covenant.Mutate.Mutant do
   defp verdict("timeout"), do: :timeout
   defp verdict("invalid"), do: :invalid
   defp verdict(_), do: nil
+
+  defp credit("partial"), do: :partial
+  defp credit(_), do: :exact
 
   @doc "Rebuilds a mutant from `to_map/1` output (without its replacement AST)."
   @spec from_map(map()) :: t()
@@ -132,7 +148,8 @@ defmodule Covenant.Mutate.Mutant do
       verdict: verdict(map["verdict"]),
       killed_by: List.wrap(map["killed_by"]),
       timeouts: List.wrap(map["timeouts"]),
-      reason: map["reason"]
+      reason: map["reason"],
+      credit: credit(map["credit"])
     }
   end
 end
