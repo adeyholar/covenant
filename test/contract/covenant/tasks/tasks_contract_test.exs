@@ -70,7 +70,7 @@ defmodule Covenant.TasksContractTest do
     assert status == 1
 
     assert output =~
-             "tmp/corrupt-contracts/example/counter.intent.md:49: obligation `example.counter.I1` is missing `must`"
+             "tmp/corrupt-contracts/example/counter.intent.md:53: obligation `example.counter.I1` is missing `must`"
 
     assert output =~ "could not be parsed (1 problem(s))"
 
@@ -162,6 +162,37 @@ defmodule Covenant.TasksContractTest do
     {output, status} = mix(["covenant.regen", "example.nope"])
     assert status == 1
     assert output =~ "unknown component `example.nope`"
+  end
+
+  @tag obligation: "covenant.tasks.I5"
+  test "mix covenant.regen skips references to modules the component does not own" do
+    contracts = Path.join(@project, "tmp/skipping-contracts")
+    File.rm_rf!(contracts)
+
+    surface =
+      "- `Demo.Widget.size/1` — its size; an empty one calls `System.halt(1)` and `Scope.put/1`."
+
+    ContractBuilder.demo_contracts(contracts, surface, "")
+
+    {output, status} =
+      mix([
+        "covenant.regen",
+        "demo.widget",
+        "--contracts",
+        contracts,
+        "--test-path",
+        Path.join(@project, "test/*"),
+        "--out",
+        "tmp/skipping-pack"
+      ])
+
+    assert status == 0, output
+
+    assert output =~
+             "covenant.regen: skipped 2 references to modules the component does not own: Scope, System"
+
+    refute File.exists?(Path.join(@project, "tmp/skipping-pack/stubs/lib/system.ex"))
+    assert File.exists?(Path.join(@project, "tmp/skipping-pack/stubs/lib/demo/widget.ex"))
   end
 
   @tag obligation: "covenant.tasks.I6"

@@ -142,6 +142,22 @@ defmodule Covenant.ContractBuilder do
     """
   end
 
+  @doc """
+  The demo contracts under `dir`, with `demo.widget`'s Public surface lines
+  after `Demo.Widget.build/1` replaced by `surface` and `front_matter` (the
+  whole `---` block, or "") opening its intent.
+  """
+  @spec demo_contracts(Path.t(), String.t(), String.t()) :: Path.t()
+  def demo_contracts(dir, surface, front_matter) do
+    demo_contracts(dir)
+
+    write(dir, %{
+      "demo/widget.intent.md" =>
+        front_matter <>
+          String.replace(heavy_intent(), "- `Demo.Widget.size/1` — its size.", surface)
+    })
+  end
+
   @doc "A complete, valid demo contracts directory written under `dir`."
   @spec demo_contracts(Path.t()) :: Path.t()
   def demo_contracts(dir) do

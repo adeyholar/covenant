@@ -35,7 +35,7 @@ they print and their exit status.
 
 ### covenant.tasks.I5 — covenant.regen writes a pack
 - **scope:** `mix covenant.regen <component>`
-- **must:** write the pack to `--out DIR` (default `tmp/covenant/regen/<component>`), list the files written and exit 0; exit 1 naming the problem for an unknown component
+- **must:** write the pack to `--out DIR` (default `tmp/covenant/regen/<component>`), list the files written, say how many Public surface references it skipped as belonging to modules the component does not own, and exit 0; exit 1 naming the problem for an unknown component
 - **kind:** functional
 - **status:** active
 

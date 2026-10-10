@@ -188,6 +188,16 @@ section and renders one stub module per public module:
 - `Example.Counter.value/1` — the current value.
 ```
 
+The doc keeps the line's inline code verbatim; only the signature spans that
+open the line are removed. A reference to a module the component does not own
+(`System.halt(1)` in prose) gets no stub: a module is skipped when
+`Code.ensure_loaded?/1` finds it in the VM running the task, unless the
+intent's front matter lists it under `modules:`. A bare alias such as
+`Scope.put/1` is merged into the one declared or stubbed module ending in
+`Scope`, and dropped when none or several do. The task prints one line with
+the number and modules of the skipped references. Run inside the project being
+regenerated, its own modules are loadable too: list them under `modules:`.
+
 ## Configuration
 
 ```elixir

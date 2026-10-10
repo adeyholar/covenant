@@ -12,25 +12,42 @@ defmodule Covenant.Regen do
     contracts/<app>/<name>.decisions.yml
     contracts/system/intent.md        # when present
     contracts/system/decisions.yml    # when present
-    test/contract/...                 # the component's contract tests, verbatim
+    <test path relative to the root>  # the component's contract tests, verbatim
+                                      # (e.g. test/contract/... or apps/<app>/test/contract/...)
     stubs/lib/<module path>.ex        # public-surface stubs (heavy form)
   ```
 
   The old implementation is deliberately excluded (IMP R17): if the rebuilt
   component diverges, the Contract was missing a sentence.
+
+  ## Modules the component does not own
+
+  A Public surface line may mention `System.halt(1)` or `Scope.put/1` in
+  prose. A stub for a module that is already loadable would shadow the real
+  one, so `stubs/1` never stubs a module for which `Code.ensure_loaded?/1` is
+  true **in the VM that runs the regeneration** — unless the intent's front
+  matter lists it under `modules:`. A bare alias (`Scope`) is merged into the
+  one declared or stubbed module whose last segment matches (`Machina.Scope`)
+  and dropped when none or several match. Dropped references come back in the
+  pack's `:skipped` list. The check reads the running VM: when the task runs
+  inside the project being regenerated its own modules are loadable too, so
+  list them in `modules:`.
   """
 
   alias Covenant.Contract
   alias Covenant.Contract.Component
+  alias Covenant.Static
 
-  @type pack :: %{dir: Path.t(), files: [Path.t()]}
+  @type pack :: %{dir: Path.t(), files: [Path.t()], skipped: [signature()]}
 
   @doc """
   Writes the pack for `component_id`. Options:
 
   * `:out` — the pack directory (default `tmp/covenant/regen/<component id>`);
-  * `:test_paths` — contract test paths or globs to search (default `Covenant.test_paths/0`);
-  * `:root` — the project root the test paths are relative to (default: current directory).
+  * `:test_paths` — contract test paths or globs to search, absolute or relative to `:root`
+    (default `Covenant.test_paths/0`);
+  * `:root` — the project root the test paths are relative to, and the root the tests' paths in
+    the pack are relative to (default: the directory that holds the contracts directory).
   """
   @spec write_pack(Contract.t(), String.t(), keyword()) :: {:ok, pack()} | {:error, String.t()}
   def write_pack(%Contract{} = contract, component_id, opts \\ []) do
@@ -40,7 +57,7 @@ defmodule Covenant.Regen do
          "unknown component `#{component_id}`; known: #{Enum.join(Contract.component_ids(contract), ", ")}"}
 
       %Component{} = component ->
-        root = Keyword.get(opts, :root, File.cwd!())
+        root = Path.expand(Keyword.get(opts, :root) || Path.dirname(contract.dir))
         out = Keyword.get(opts, :out, Path.join(["tmp", "covenant", "regen", component_id]))
         test_paths = Keyword.get(opts, :test_paths, Covenant.test_paths())
         tests = find_tests(component_id, test_paths, root)
@@ -54,21 +71,29 @@ defmodule Covenant.Regen do
             stub_files(component, out) ++
             [brief_file(component, out), prompt_file(component, tests, out)]
 
-        {:ok, %{dir: out, files: files |> Enum.reject(&is_nil/1) |> Enum.sort()}}
+        {:ok,
+         %{
+           dir: out,
+           files: files |> Enum.reject(&is_nil/1) |> Enum.sort(),
+           skipped: surface(component).skipped
+         }}
     end
   end
 
-  @doc "Contract test files that declare `use Covenant.Case, component: \"<id>\"`."
+  @doc """
+  Contract test files that declare `use Covenant.Case, component: "<id>"`, as paths relative to
+  `root`. `test_paths` entries (files, directories or globs, absolute or relative to `root`) are
+  expanded as `Covenant.Static.expand/1` does for `mix covenant.check --static`.
+  """
   @spec find_tests(String.t(), [Path.t()], Path.t()) :: [Path.t()]
   def find_tests(component_id, test_paths, root) do
     pattern = ~r/use\s+Covenant\.Case\s*,[^\n]*component:\s*"#{Regex.escape(component_id)}"/
+    root = Path.expand(root)
 
     test_paths
-    |> Enum.flat_map(&Path.wildcard(Path.join(root, &1)))
-    |> Enum.flat_map(fn path ->
-      if File.dir?(path), do: Path.wildcard(Path.join(path, "**/*_test.exs")), else: [path]
-    end)
-    |> Enum.uniq()
+    |> List.wrap()
+    |> Enum.map(&Path.expand(&1, root))
+    |> Static.expand()
     |> Enum.filter(fn file ->
       case File.read(file) do
         {:ok, source} -> Regex.match?(pattern, source)
@@ -112,7 +137,7 @@ defmodule Covenant.Regen do
   end
 
   defp test_files(tests, root, out) do
-    Enum.map(tests, fn relative -> copy(Path.join(root, relative), Path.join(out, relative)) end)
+    Enum.map(tests, fn relative -> copy(Path.expand(relative, root), Path.join(out, relative)) end)
   end
 
   defp copy(source, target) do
@@ -145,6 +170,8 @@ defmodule Covenant.Regen do
         section.body
         |> String.split("\n")
         |> Enum.flat_map(fn line ->
+          doc = line_doc(line)
+
           @signature
           |> Regex.scan(line)
           |> Enum.map(fn match ->
@@ -155,10 +182,7 @@ defmodule Covenant.Regen do
               function: function,
               args: args(args, arity),
               return: if(return == "", do: nil, else: String.trim(return)),
-              doc:
-                line
-                |> String.replace(@signature, "")
-                |> String.replace(~r/^[\s\-—–:*]+|[\s\-—–:*]+$/u, "")
+              doc: doc
             }
           end)
         end)
@@ -168,6 +192,30 @@ defmodule Covenant.Regen do
 
   # Regex.scan omits trailing optional groups that did not match.
   defp pad(list, n), do: list ++ List.duplicate("", n - length(list))
+
+  # The doc is the line's prose with the signature spans that open the line
+  # (the ones it defines) removed; every other code span, signature-shaped or
+  # not, stays verbatim.
+  defp line_doc(line) do
+    line
+    |> strip_leading_signatures()
+    |> String.replace(~r/^[\s\-—–:*]+|[\s\-—–:*]+$/u, "")
+  end
+
+  defp strip_leading_signatures(line) do
+    rest = String.replace(line, ~r/^[\s\-*|>]+/, "")
+
+    case Regex.run(@signature, rest, return: :index) do
+      [{0, length} | _] ->
+        rest
+        |> binary_part(length, byte_size(rest) - length)
+        |> String.replace(~r/^(?:[\s,&\/]|and\b)+/, "")
+        |> strip_leading_signatures()
+
+      _ ->
+        line
+    end
+  end
 
   defp args("", ""), do: []
   defp args("", arity), do: Enum.map(1..String.to_integer(arity)//1, &"arg#{&1}")
@@ -184,11 +232,56 @@ defmodule Covenant.Regen do
     end)
   end
 
-  @doc "Renders one stub module per public-surface module."
+  @doc """
+  Splits `signatures/1` into the ones to stub and the references to skip: modules the component
+  does not own (see "Modules the component does not own" in the module docs). A kept signature
+  may have its bare-alias module rewritten to the module it resolves to.
+  """
+  @spec surface(Component.t()) :: %{stub: [signature()], skipped: [signature()]}
+  def surface(%Component{} = component) do
+    declared = Component.declared_modules(component)
+    sigs = signatures(component)
+
+    {qualified, bare} = Enum.split_with(sigs, &String.contains?(&1.module, "."))
+
+    {kept, skipped} =
+      Enum.split_with(qualified, &(&1.module in declared or not loadable?(&1.module)))
+
+    known = Enum.uniq(declared ++ Enum.map(kept, & &1.module))
+    {bare_kept, bare_skipped} = resolve_aliases(bare, known, declared)
+
+    %{
+      stub: Enum.uniq_by(kept ++ bare_kept, &{&1.module, &1.function, length(&1.args)}),
+      skipped: skipped ++ bare_skipped
+    }
+  end
+
+  defp loadable?(module), do: Code.ensure_loaded?(Module.concat([module]))
+
+  # A bare alias names the one known module whose last segment it is; a bare
+  # name that is itself loadable (`System`) is never an alias.
+  defp resolve_aliases(sigs, known, declared) do
+    resolved =
+      Enum.map(sigs, fn sig ->
+        matches = Enum.filter(known, &(List.last(String.split(&1, ".")) == sig.module))
+
+        cond do
+          sig.module in declared -> {:keep, sig}
+          loadable?(sig.module) -> {:skip, sig}
+          match?([_], matches) -> {:keep, %{sig | module: hd(matches)}}
+          true -> {:skip, sig}
+        end
+      end)
+
+    {for({:keep, sig} <- resolved, do: sig), for({:skip, sig} <- resolved, do: sig)}
+  end
+
+  @doc "Renders one stub module per public-surface module the component owns."
   @spec stubs(Component.t()) :: [{String.t(), String.t()}]
   def stubs(%Component{} = component) do
     component
-    |> signatures()
+    |> surface()
+    |> Map.fetch!(:stub)
     |> Enum.group_by(& &1.module)
     |> Enum.sort()
     |> Enum.map(fn {module, sigs} -> {module, render_stub(component, module, sigs)} end)
@@ -204,7 +297,7 @@ defmodule Covenant.Regen do
         doc = if sig.doc == "", do: signature <> spec, else: "#{signature}#{spec} — #{sig.doc}"
 
         """
-          @doc #{inspect(doc)}
+          @doc #{inspect(doc, printable_limit: :infinity)}
           def #{head} do
             raise "#{component.id}: #{module}.#{sig.function}/#{arity} is not implemented yet"
           end
@@ -322,11 +415,11 @@ defmodule Covenant.Regen do
 
     ## How to work
 
-    1. Copy the stubs into `lib/` and the contract tests into `test/contract/`
-       of a fresh project that depends on `covenant`.
-    2. Implement until `mix test test/contract` is green, then run
-       `mix covenant.check`: every active obligation must have a passing test
-       and every `kind: exception` target must exist.
+    1. Copy the stubs into `lib/` and the contract tests, at the paths listed
+       above, into a fresh project that depends on `covenant`.
+    2. Implement until those contract tests are green (`mix test` over their
+       paths), then run `mix covenant.check`: every active obligation must have
+       a passing test and every `kind: exception` target must exist.
     3. Keep the public surface exactly as listed; persisted formats are pinned
        literally by the tests and must not be renamed.
     4. Code comments cite decision records by id (`record <id>`) instead of

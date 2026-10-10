@@ -30,3 +30,21 @@ component from its Contract, with the implementation excluded.
 - **must:** find contract tests by their `use Covenant.Case, component: "<id>"` declaration through the configured paths or globs, refuse an unknown component naming the known ones, and replace any existing pack directory entirely
 - **kind:** functional
 - **status:** active
+
+### covenant.regen.I5 — Test paths are expanded as static mode expands them
+- **scope:** `Covenant.Regen.find_tests/3`, `Covenant.Regen.write_pack/3`
+- **must:** expand every test path, absolute or relative to the root, as `Covenant.Static.expand/1` does (files, directories and globs, never an absolute path joined onto the root), and lay each found test out in the pack at its path relative to the root, which defaults to the directory holding the contracts directory
+- **kind:** functional
+- **status:** active
+
+### covenant.regen.I6 — Stubs are made only for modules the component owns
+- **scope:** `Covenant.Regen.surface/1`, `Covenant.Regen.stubs/1`, `Covenant.Regen.write_pack/3`
+- **must:** never stub a module that `Code.ensure_loaded?/1` finds in the running VM unless the intent's front matter lists it under `modules:`; merge a bare alias (no dot) into the one declared or stubbed module whose last segment matches and drop it when none or several match; return every dropped reference in the pack's `skipped` list, and `mix covenant.regen` prints one line with their count and modules
+- **kind:** functional
+- **status:** active
+
+### covenant.regen.I7 — Stub docs keep the line's inline code
+- **scope:** `Covenant.Regen.signatures/1`, `Covenant.Regen.stubs/1`
+- **must:** keep every inline code span of the Public surface line verbatim, backticks included, in the stub's `@doc`, removing only the signature spans that open the line; write the doc as a string literal that compiles whatever it holds (quotes, `"""`, interpolation, lines of any length)
+- **kind:** functional
+- **status:** active

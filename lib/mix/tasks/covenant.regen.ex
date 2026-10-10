@@ -12,13 +12,19 @@ defmodule Mix.Tasks.Covenant.Regen do
   The pack holds the intent (or obligations file), the decision records, the
   system intent and records, the component's contract tests, public-surface
   stubs, the regeneration brief and a `PROMPT.md` for the regenerating agent.
-  See `Covenant.Regen` for the layout.
+  See `Covenant.Regen` for the layout. Contract tests keep their path relative
+  to the directory that holds the contracts directory.
+
+  A Public surface reference to a module the component does not own (one that
+  is already loadable, or a bare alias that matches no declared module) gets no
+  stub; the task says how many it skipped.
 
   ## Options
 
   * `--out DIR` — the pack directory (default `tmp/covenant/regen/<component>`);
   * `--contracts DIR` — the contracts directory;
-  * `--test-path PATH` — a contract test path or glob to search (repeatable).
+  * `--test-path PATH` — a contract test path or glob to search, relative to the
+    current directory or absolute (repeatable).
   """
 
   use Mix.Task
@@ -48,6 +54,7 @@ defmodule Mix.Tasks.Covenant.Regen do
     test_paths =
       Keyword.get_values(opts, :test_path)
       |> then(&if(&1 == [], do: Covenant.test_paths(), else: &1))
+      |> Enum.map(&Path.expand/1)
 
     contract =
       case Contract.load(contracts_dir) do
@@ -62,8 +69,18 @@ defmodule Mix.Tasks.Covenant.Regen do
     regen_opts = [test_paths: test_paths] ++ if(opts[:out], do: [out: opts[:out]], else: [])
 
     case Regen.write_pack(contract, component_id, regen_opts) do
-      {:ok, %{dir: dir, files: files}} ->
+      {:ok, %{dir: dir, files: files, skipped: skipped}} ->
         Enum.each(files, &Mix.shell().info("  #{Path.relative_to(&1, dir)}"))
+
+        if skipped != [] do
+          modules = skipped |> Enum.map(& &1.module) |> Enum.uniq() |> Enum.sort()
+
+          Mix.shell().info(
+            "covenant.regen: skipped #{length(skipped)} references to modules the component does not own: " <>
+              Enum.join(modules, ", ")
+          )
+        end
+
         Mix.shell().info("covenant.regen: wrote #{length(files)} file(s) to #{dir}")
         :ok
 

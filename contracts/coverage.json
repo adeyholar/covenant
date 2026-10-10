@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 48,
+      "active": 51,
       "coverage": 1.0,
-      "covered": 48
+      "covered": 51
     },
     "system": {
       "active": 0,
@@ -415,10 +415,10 @@
       }
     },
     "covenant.regen": {
-      "active": 4,
+      "active": 7,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 4,
+      "covered": 7,
       "form": "light",
       "obligations": {
         "covenant.regen.I1": {
@@ -463,6 +463,37 @@
             "test an unknown component is an error listing the known ones",
             "test find_tests matches on the component declaration, through globs",
             "test rewrites an existing pack directory from scratch"
+          ]
+        },
+        "covenant.regen.I5": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test an absolute glob finds tests under an umbrella app and the pack keeps their path"
+          ]
+        },
+        "covenant.regen.I6": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a module that is not loadable in the running VM keeps its stub",
+            "test stubs only modules the component owns and reports what it skipped"
+          ]
+        },
+        "covenant.regen.I7": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test stub docs keep inline code verbatim and compile whatever the line holds"
           ]
         }
       }
@@ -636,10 +667,11 @@
         "covenant.tasks.I5": {
           "failing": 0,
           "kind": "functional",
-          "passing": 1,
+          "passing": 2,
           "status": "active",
           "testable": true,
           "tests": [
+            "test mix covenant.regen skips references to modules the component does not own",
             "test mix covenant.regen writes a pack and refuses an unknown component"
           ]
         },
@@ -667,8 +699,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 48,
+    "active": 51,
     "coverage": 1.0,
-    "covered": 48
+    "covered": 51
   }
 }

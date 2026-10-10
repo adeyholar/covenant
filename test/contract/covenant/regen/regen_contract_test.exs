@@ -174,6 +174,160 @@ defmodule Covenant.RegenContractTest do
   end
 
   @tag :tmp_dir
+  @tag obligation: "covenant.regen.I5"
+  test "an absolute glob finds tests under an umbrella app and the pack keeps their path", %{
+    tmp_dir: dir
+  } do
+    contracts = ContractBuilder.copy_fixture_contracts(Path.join(dir, "contracts"))
+    tests = Path.join(dir, "apps/shop/test/contract")
+    File.mkdir_p!(tests)
+    File.cp_r!(Path.join(ContractBuilder.fixture_project(), "test/contract"), tests)
+
+    glob = Path.join(dir, "apps/*/test/contract")
+    relative = "apps/shop/test/contract/example/counter_contract_test.exs"
+
+    assert Regen.find_tests("example.counter", [glob], dir) == [relative]
+    assert Regen.find_tests("example.counter", ["apps/*/test/contract"], dir) == [relative]
+
+    out = Path.join(dir, "pack")
+    contract = Contract.load!(contracts)
+
+    # no :root — it is the directory that holds the contracts directory
+    assert {:ok, %{files: files}} =
+             Regen.write_pack(contract, "example.counter", out: out, test_paths: [glob])
+
+    assert relative in Enum.map(files, &Path.relative_to(&1, out))
+
+    assert File.read!(Path.join(out, relative)) ==
+             File.read!(Path.join(tests, "example/counter_contract_test.exs"))
+
+    assert File.read!(Path.join(out, "PROMPT.md")) =~ "- `#{relative}`"
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.regen.I6"
+  test "stubs only modules the component owns and reports what it skipped", %{tmp_dir: dir} do
+    surface =
+      Enum.join(
+        [
+          "- `Demo.Widget.size/1` — its size.",
+          "- `Demo.Widget.paint(widget, color)` — paints; at the end it calls `System.halt(1)`.",
+          "- `Mix.raise/1` — mentioned in prose only.",
+          "- `Mix.Project.config/0` — qualified, loadable, mentioned in prose only.",
+          "- `Widget.reset/1` — a short alias of `Demo.Widget`.",
+          "- `Demo.Dial.read/0` — a dial.",
+          "- `Other.Dial.tick/0` — another dial.",
+          "- `Dial.turn/0` — ambiguous: two modules end in `Dial`.",
+          "- `Ghost.vanish/0` — no module ends in `Ghost`.",
+          "- `Covenant.Error.format/1` — loadable, but declared in the front matter."
+        ],
+        "\n"
+      )
+
+    front_matter = "---\nmodules:\n  - Covenant.Error\n---\n"
+    contract = Contract.load!(ContractBuilder.demo_contracts(dir, surface, front_matter))
+    component = Contract.component(contract, "demo.widget")
+
+    assert Enum.map(Regen.stubs(component), &elem(&1, 0)) ==
+             ["Covenant.Error", "Demo.Dial", "Demo.Widget", "Other.Dial"]
+
+    {_, widget} = List.keyfind(Regen.stubs(component), "Demo.Widget", 0)
+    assert widget =~ "def reset(_arg1) do"
+    assert widget =~ "def paint(_widget, _color) do"
+
+    %{stub: stub, skipped: skipped} = Regen.surface(component)
+
+    assert Enum.map(skipped, &{&1.module, &1.function}) ==
+             [
+               {"Mix.Project", "config"},
+               {"System", "halt"},
+               {"Mix", "raise"},
+               {"Dial", "turn"},
+               {"Ghost", "vanish"}
+             ]
+
+    assert Enum.all?(stub, &(&1.module != "Widget"))
+
+    out = Path.join(dir, "pack")
+
+    assert {:ok, %{files: files, skipped: ^skipped}} =
+             Regen.write_pack(contract, "demo.widget", out: out, root: dir, test_paths: [])
+
+    stubs =
+      for file <- Enum.map(files, &Path.relative_to(&1, out)),
+          String.starts_with?(file, "stubs/"),
+          do: file
+
+    assert stubs == [
+             "stubs/lib/covenant/error.ex",
+             "stubs/lib/demo/dial.ex",
+             "stubs/lib/demo/widget.ex",
+             "stubs/lib/other/dial.ex"
+           ]
+  end
+
+  @tag obligation: "covenant.regen.I6"
+  test "a module that is not loadable in the running VM keeps its stub", %{
+    contract: contract
+  } do
+    refute Code.ensure_loaded?(Example.Counter)
+    assert [{"Example.Counter", _}] = Regen.stubs(Contract.component(contract, "example.counter"))
+    assert %{skipped: []} = Regen.surface(Contract.component(contract, "example.counter"))
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.regen.I7"
+  test "stub docs keep inline code verbatim and compile whatever the line holds", %{tmp_dir: dir} do
+    long = String.duplicate("word ", 1_000)
+
+    surface =
+      Enum.join(
+        [
+          "- `Demo.Widget.size/1` — its size.",
+          "- `Demo.Widget.paint(widget, color)` — paints with `color`, then calls `System.halt(1)` when `\#{boom}` or \"\"\" shows.",
+          "- `Demo.Widget.width/1`, `Demo.Widget.height/1` — the dimensions, also see `Demo.Widget.size/1`.",
+          "- `Demo.Widget.note/0` — #{long}end."
+        ],
+        "\n"
+      )
+
+    contract = Contract.load!(ContractBuilder.demo_contracts(dir, surface, ""))
+    component = Contract.component(contract, "demo.widget")
+
+    sigs = Map.new(Regen.signatures(component), &{&1.function, &1.doc})
+
+    assert sigs["paint"] ==
+             "paints with `color`, then calls `System.halt(1)` when `\#{boom}` or \"\"\" shows."
+
+    assert sigs["width"] == "the dimensions, also see `Demo.Widget.size/1`."
+    assert sigs["height"] == sigs["width"]
+
+    {"Demo.Widget", source} = List.keyfind(Regen.stubs(component), "Demo.Widget", 0)
+
+    doc = fn function ->
+      [_, literal] = Regex.run(~r/@doc (".*")\n  def #{function}\(/, source)
+      {doc, _} = Code.eval_string(literal)
+      doc
+    end
+
+    assert doc.("paint") ==
+             "paint(widget, color) — " <> sigs["paint"]
+
+    assert doc.("note") == "note() — " <> sigs["note"]
+    assert String.ends_with?(doc.("note"), "end.")
+
+    renamed =
+      String.replace(
+        source,
+        "defmodule Demo.Widget do",
+        "defmodule Covenant.RegenDocTest.Stub do"
+      )
+
+    assert [{module, _}] = Code.compile_string(renamed)
+    assert_raise RuntimeError, ~r/not implemented yet/, fn -> module.paint(1, 2) end
+  end
+
+  @tag :tmp_dir
   @tag obligation: "covenant.regen.I4"
   test "rewrites an existing pack directory from scratch", %{contract: contract, tmp_dir: dir} do
     out = Path.join(dir, "pack")
