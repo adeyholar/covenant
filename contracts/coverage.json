@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 52,
+      "active": 54,
       "coverage": 1.0,
-      "covered": 52
+      "covered": 54
     },
     "system": {
       "active": 0,
@@ -630,10 +630,10 @@
       }
     },
     "covenant.tasks": {
-      "active": 6,
+      "active": 8,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 6,
+      "covered": 8,
       "form": "light",
       "obligations": {
         "covenant.tasks.I1": {
@@ -698,6 +698,26 @@
             "test mix covenant.check --static passes tests that could not compile and fails bad tags precisely",
             "test mix covenant.check --static reads the tests, runs none and writes only coverage.static.json"
           ]
+        },
+        "covenant.tasks.I7": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test mix covenant.mutate credits every mutant the same with --jobs 1 and --jobs 4, each worker on a tmp_dir of its own"
+          ]
+        },
+        "covenant.tasks.I8": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test mix help covenant.mutate documents the survivors file: location, keys, every sort and the exit status"
+          ]
         }
       }
     },
@@ -712,8 +732,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 52,
+    "active": 54,
     "coverage": 1.0,
-    "covered": 52
+    "covered": 54
   }
 }

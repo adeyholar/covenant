@@ -15,7 +15,7 @@ defmodule Covenant.TasksContractTest do
 
   defp mix(args, opts \\ []) do
     mix = System.find_executable("mix") || raise "mix not on PATH"
-    env = [{"MIX_ENV", "dev"}, {"COVENANT_RESULTS_DIR", nil}]
+    env = [{"MIX_ENV", "dev"}, {"COVENANT_RESULTS_DIR", nil}] ++ Keyword.get(opts, :env, [])
     {output, status} = System.cmd(mix, args, cd: @project, env: env, stderr_to_stdout: true)
     if opts[:print], do: IO.puts(output)
     {output, status}
@@ -295,5 +295,80 @@ defmodule Covenant.TasksContractTest do
              "tmp/static-tests/bad_contract_test.exs:10: test untagged has no obligation tag"
 
     assert output =~ "covenant.check: 3 problem(s) found in the Contract (static)"
+  end
+
+  @tag obligation: "covenant.tasks.I7"
+  test "mix covenant.mutate credits every mutant the same with --jobs 1 and --jobs 4, each worker on a tmp_dir of its own" do
+    File.mkdir_p!(Path.join(@project, "tmp"))
+
+    # The fixture's counter test appends "<os pid> <tmp_dir>" to this file.
+    mutate = fn jobs ->
+      log = Path.join(@project, "tmp/tmp-dirs-jobs-#{jobs}.log")
+      out = "tmp/mutate-jobs-#{jobs}.json"
+      File.rm(log)
+
+      {output, status} =
+        mix(["covenant.mutate", "example.counter", "--jobs", "#{jobs}", "--out", out],
+          env: [{"COVENANT_TMPDIR_LOG", log}]
+        )
+
+      assert status == 0, output
+      matrix = Path.join(@project, out) |> File.read!() |> JSON.decode!()
+
+      credit =
+        for m <- matrix["mutants"],
+            into: %{},
+            do: {m["id"], {m["verdict"], Enum.sort(m["killed_by"])}}
+
+      used =
+        log
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.uniq()
+        |> Enum.map(&List.to_tuple(String.split(&1, " ", parts: 2)))
+
+      {credit, used}
+    end
+
+    {serial, _} = mutate.(1)
+    {parallel, used} = mutate.(4)
+
+    assert Enum.any?(serial, fn {_, {verdict, killers}} ->
+             verdict == "killed" and killers != []
+           end)
+
+    assert parallel == serial
+
+    pids = used |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+    assert length(pids) == 4, "expected 4 workers to report, got #{inspect(used)}"
+
+    for {dir, users} <- Enum.group_by(used, &elem(&1, 1), &elem(&1, 0)) do
+      assert length(users) == 1, "workers #{inspect(users)} shared the tmp_dir #{dir}"
+
+      refute String.starts_with?(dir, Path.join(@project, "tmp")),
+             "#{dir} is the project's own tmp"
+    end
+
+    for pid <- pids do
+      refute File.exists?(Path.join(System.tmp_dir!(), "covenant-mutate-#{pid}")),
+             "worker #{pid} left its working directory behind"
+    end
+  end
+
+  @tag obligation: "covenant.tasks.I8"
+  test "mix help covenant.mutate documents the survivors file: location, keys, every sort and the exit status" do
+    help = Mix.Task.moduledoc(Mix.Tasks.Covenant.Mutate)
+
+    assert help =~ "contracts/<app>/<component>.survivors.yml"
+
+    for key <- ~w(at operator mutation sort reason),
+        do: assert(help =~ "`#{key}`" or help =~ "#{key}:")
+
+    for sort <- Covenant.Mutate.Survivors.sorts() do
+      assert help =~ "* `#{sort}` — ", "the help does not explain the sort #{sort}"
+    end
+
+    assert help =~ "Exit status 0 when"
+    assert help =~ "keep `--jobs 1`"
   end
 end

@@ -27,10 +27,25 @@ defmodule Example.CounterContractTest do
     assert Counter.events(counter) == [{:incremented, 3}]
   end
 
+  # Persists through a file in ExUnit's :tmp_dir, which covenant.tasks.I7 uses
+  # to check that parallel `mix covenant.mutate` workers never share one: when
+  # COVENANT_TMPDIR_LOG names a file, the test appends "<os pid> <tmp_dir>" to it.
   @tag obligation: "example.counter.I3"
-  test "the persisted form has exactly the keys value and max" do
+  @tag :tmp_dir
+  test "the persisted form has exactly the keys value and max", %{tmp_dir: dir} do
+    if log = System.get_env("COVENANT_TMPDIR_LOG") do
+      File.write!(log, "#{System.pid()} #{dir}\n", [:append])
+    end
+
+    file = Path.join(dir, "counter.term")
+
     for start <- @starts, max <- [1, 100, 1_000] do
-      map = Counter.new(max: max) |> step(start) |> Counter.to_map()
+      File.write!(
+        file,
+        Counter.new(max: max) |> step(start) |> Counter.to_map() |> :erlang.term_to_binary()
+      )
+
+      map = file |> File.read!() |> :erlang.binary_to_term()
       assert Map.keys(map) |> Enum.sort() == ["max", "value"]
       assert map["max"] == max
       assert map["value"] == min(start, max)

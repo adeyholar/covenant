@@ -26,20 +26,57 @@ defmodule Mix.Tasks.Covenant.Mutate do
   killed in total and uniquely), the survivors with their sort, and the
   mutation-blind tests (warn-only). Writes the matrix as JSON.
 
-  Exit status 1 when the baseline is red, a survivor has no annotation in
-  `contracts/<app>/<component>.survivors.yml`, or an annotation is stale.
+  Exit status 0 when the baseline is green and every survivor is annotated in
+  `contracts/<app>/<component>.survivors.yml`; 1 when the baseline is red, a
+  survivor has no annotation, an annotation is stale, the Contract or the
+  survivors file does not parse, or a worker fails.
 
   ## Options
 
   * `--module MOD` — an implementation module (repeatable; overrides the Contract);
   * `--timeout MS` — per-test timeout for mutant runs (default #{Covenant.Mutate.default_timeout()});
   * `--seed N` — ExUnit seed (default #{Covenant.Mutate.default_seed()}: definition order);
-  * `--jobs N` — worker processes (default 1; mutants are split round-robin);
+  * `--jobs N` — worker processes (default 1; mutants are split round-robin).
+    With N > 1 each worker runs the tests from a private working directory
+    (symlinks to the project root, a `tmp/` of its own), so ExUnit's `:tmp_dir`
+    paths never collide and the kill credit is the same as with `--jobs 1`.
+    Whatever else the tests share between OS processes (a fixed path under the
+    system temp directory, a database, a port) is still shared: keep `--jobs 1`
+    for such a suite;
   * `--out PATH` — the kill matrix JSON (default `tmp/covenant/mutate/<component>/kill_matrix.json`);
   * `--contracts DIR` — the contracts directory;
   * `--test-path PATH` — a contract test path or glob (repeatable).
 
   `--raw PATH --slice I/N` are the worker's own flags; the task sets them.
+
+  ## The survivors file
+
+  A mutant no test kills is a survivor, and every survivor needs a judgment in
+  `contracts/<app>/<component>.survivors.yml`: a YAML list with one entry per
+  survivor. The task prints a skeleton for each unsorted survivor.
+
+      - at: lib/example/counter.ex:29:17
+        operator: element_removal
+        mutation: "`value: 0` → `(removed)`"
+        sort: equivalent
+        reason: The struct default for value is already 0.
+
+  `at` is `file:line:column`, `operator` the mutation operator and `reason`
+  free text that says why this survivor may live. `mutation` is optional:
+  without it the entry covers every mutant with that `at` and `operator`, so
+  give it when two mutants share both and need different judgments. `sort` is
+  one of:
+
+  * `equivalent` — the mutant behaves exactly like the original;
+  * `log-only` — it changes only a message or a log line nobody pins;
+  * `dead-code` — the mutated code is never reached, or its value never read;
+  * `timeout` — the tests only timed out against it (a timeout is never a kill);
+  * `evaluation-gap` — the behaviour matters but no test pins it yet;
+  * `decision-hole` — the Contract leaves the behaviour deliberately undecided
+    (a mutant inside the target of an active exception is sorted so for you).
+
+  An entry matching no surviving mutant is stale and fails the task, like a
+  stale `kind: exception` fails `mix covenant.check`.
   """
 
   use Mix.Task
@@ -262,6 +299,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
       seed: settings.seed,
       timeout: settings.timeout,
       slice: {i, n},
+      isolate: n > 1,
       on_progress: &Mix.shell().info(prefix <> progress(&1))
     }
 

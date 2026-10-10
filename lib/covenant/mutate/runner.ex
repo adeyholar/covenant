@@ -18,7 +18,7 @@ defmodule Covenant.Mutate.Runner do
   `ExUnit.TimeoutError` never counts as a kill (record `timeouts-are-survivors`).
   """
 
-  alias Covenant.Mutate.{Mutant, Mutator}
+  alias Covenant.Mutate.{Mutant, Mutator, Workdir}
 
   defmodule Collector do
     @moduledoc """
@@ -29,11 +29,20 @@ defmodule Covenant.Mutate.Runner do
     use GenServer
 
     @impl true
-    def init(opts), do: {:ok, %{sink: Keyword.fetch!(opts, :covenant_sink), finished: []}}
+    def init(opts) do
+      {:ok,
+       %{
+         sink: Keyword.fetch!(opts, :covenant_sink),
+         root: Keyword.fetch!(opts, :covenant_root),
+         finished: []
+       }}
+    end
 
     @impl true
     def handle_cast({:test_finished, %ExUnit.Test{} = test}, state),
-      do: {:noreply, %{state | finished: [Covenant.Mutate.Runner.entry(test) | state.finished]}}
+      do:
+        {:noreply,
+         %{state | finished: [Covenant.Mutate.Runner.entry(test, state.root) | state.finished]}}
 
     def handle_cast({:suite_finished, _}, state) do
       send(state.sink, {:covenant_mutate_run, Enum.reverse(state.finished)})
@@ -64,17 +73,21 @@ defmodule Covenant.Mutate.Runner do
   * `:root` — the project root (files are reported relative to it);
   * `:seed`, `:timeout` — ExUnit seed and per-test timeout in ms;
   * `:slice` — `{i, n}`: run every n-th mutant starting at the i-th (1-based);
-  * `:on_progress` — called with each mutant once it has a verdict.
+  * `:on_progress` — called with each mutant once it has a verdict;
+  * `:isolate` — (optional, default `false`) run the tests from a private
+    working directory (`Covenant.Mutate.Workdir`), so that parallel workers
+    never share ExUnit's `:tmp_dir` paths.
   """
   @type plan :: %{
-          component: String.t(),
-          modules: [{module(), Path.t()}],
-          test_files: [Path.t()],
-          root: Path.t(),
-          seed: non_neg_integer(),
-          timeout: pos_integer(),
-          slice: {pos_integer(), pos_integer()},
-          on_progress: (Mutant.t() -> any())
+          required(:component) => String.t(),
+          required(:modules) => [{module(), Path.t()}],
+          required(:test_files) => [Path.t()],
+          required(:root) => Path.t(),
+          required(:seed) => non_neg_integer(),
+          required(:timeout) => pos_integer(),
+          required(:slice) => {pos_integer(), pos_integer()},
+          required(:on_progress) => (Mutant.t() -> any()),
+          optional(:isolate) => boolean()
         }
 
   @type result :: %{
@@ -89,8 +102,13 @@ defmodule Covenant.Mutate.Runner do
   @spec run(plan()) :: {:ok, result()} | {:error, String.t()}
   def run(plan) do
     with {:ok, files} <- prepare_files(plan),
-         {:ok, modules} <- boot_suite(plan),
-         {:ok, tests, baseline_ms} <- baseline(modules) do
+         {:ok, modules} <- boot_suite(plan) do
+      isolated(plan, fn -> run_suite(plan, files, modules) end)
+    end
+  end
+
+  defp run_suite(plan, files, modules) do
+    with {:ok, tests, baseline_ms} <- baseline(modules) do
       mutants = files |> Enum.flat_map(& &1.mutants) |> Mutator.numbered()
       {i, n} = plan.slice
 
@@ -115,6 +133,22 @@ defmodule Covenant.Mutate.Runner do
        }}
     end
   end
+
+  # ExUnit puts a test's `:tmp_dir` under `tmp/` in the OS process's working
+  # directory, so workers running side by side must not share it. The suite is
+  # already compiled and loaded, so only what the tests do at run time sees the
+  # private directory.
+  defp isolated(%{isolate: true, root: root}, fun) do
+    workdir = Workdir.build(root)
+
+    try do
+      Workdir.within(workdir, fun)
+    after
+      Workdir.remove(workdir)
+    end
+  end
+
+  defp isolated(_plan, fun), do: fun.()
 
   # -- files ------------------------------------------------------------------
 
@@ -196,6 +230,7 @@ defmodule Covenant.Mutate.Runner do
       autorun: false,
       formatters: [Collector],
       covenant_sink: self(),
+      covenant_root: Path.expand(plan.root),
       seed: plan.seed,
       timeout: plan.timeout,
       capture_log: true,
@@ -285,9 +320,9 @@ defmodule Covenant.Mutate.Runner do
     %{mutant | verdict: verdict, killed_by: killers, timeouts: timeouts}
   end
 
-  @doc "The identity, obligations and outcome of a finished `ExUnit.Test`."
-  @spec entry(ExUnit.Test.t()) :: entry()
-  def entry(%ExUnit.Test{tags: tags} = test) do
+  @doc "The identity, obligations and outcome of a finished `ExUnit.Test`; files are relative to `root`."
+  @spec entry(ExUnit.Test.t(), Path.t()) :: entry()
+  def entry(%ExUnit.Test{tags: tags} = test, root) do
     module = inspect(test.module)
     name = Atom.to_string(test.name)
 
@@ -295,7 +330,7 @@ defmodule Covenant.Mutate.Runner do
       key: module <> ":" <> name,
       module: module,
       name: name,
-      file: tags[:file] && Path.relative_to_cwd(tags[:file]),
+      file: tags[:file] && Path.relative_to(tags[:file], root),
       line: tags[:line],
       obligations: tags[:obligation] |> List.wrap() |> Enum.map(&to_string/1),
       mutation_blind: tags[:mutation_blind] && to_string(tags[:mutation_blind]),

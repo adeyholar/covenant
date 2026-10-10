@@ -154,6 +154,7 @@ ExUnit.start(formatters: [ExUnit.CLIFormatter, Covenant.Formatter])
 | `mix covenant.check --static` | Compiles and runs no test: parses the contract test files (`Code.string_to_quoted/2`), reads every `use Covenant.Case` module's `@tag`/`@describetag`/`@moduletag obligation:` values (strings and lists, merged as ExUnit merges them) and runs every check that needs no compiled code, plus `Covenant.Case`'s compile-time rules. Module/function exception targets and `module` ceiling counters are listed as skipped; file targets and `glob` counters are checked against `--root` (default `Covenant.root/0`). Writes `contracts/coverage.static.json` (`"mode": "static"`), never `coverage.json`. For a Contract written ahead of its implementation. |
 | `mix covenant.conditions` | Evaluates every record condition with a `check` and lists suspect records with the failing premise. `--verbose` prints every outcome. Exit 1 when any record is suspect. |
 | `mix covenant.regen <component>` | Writes a regeneration pack: `PROMPT.md`, the regeneration brief, the convention, the intent (or obligations file) and records, the system intent and records, the component's contract tests and public-surface stubs. The implementation is excluded. `--out DIR` (default `tmp/covenant/regen/<component>`). |
+| `mix covenant.mutate <component>` | Mutates the component's implementation, runs its contract tests against every mutant and credits each kill to the obligations tagged on the tests that caught it; writes the kill matrix. See [Mutation testing](#mutation-testing). `--jobs N`, `--seed N`, `--timeout MS`, `--module MOD` (repeatable), `--out PATH`. Exit 1 on a red baseline, an unannotated survivor or a stale annotation. |
 
 ```
 $ mix covenant.check
@@ -211,6 +212,144 @@ A reference to a module the component does not own (`System.halt(1)` or
 A bare alias such as `Scope.put/1` is merged into the one owned module ending
 in `Scope`, and dropped when none or several do. The task prints one line with
 the number and modules of the skipped references.
+
+## Mutation testing
+
+Obligations say what must hold; the contract tests claim to prove it. `mix
+covenant.mutate <component>` (for example `mix covenant.mutate example.counter`)
+checks that claim by breaking the implementation on purpose and seeing which
+tests notice (IMP R26: every test proves it is worth keeping).
+
+**What it mutates.** The component's implementation modules, in this order of
+precedence: the `--module` flags, the `modules:` list in the front matter of
+its intent or obligations file, the modules named in its `## Public surface`
+and in the `scope` of its obligations. The source is parsed to an AST
+(`Code.string_to_quoted/2` with positions), one change is applied at a time and
+the result is compiled **in memory**: no file is written. A change is made by an
+operator; each mutant is one change at one place.
+
+| Operator | Change |
+|---|---|
+| `boolean_flip` | `true` ↔ `false` |
+| `comparison_swap` | `==` ↔ `!=`, `===` ↔ `!==`, `<` → `<=` and `>=`, and so on |
+| `arithmetic_swap` | `+` ↔ `-`, `*` ↔ `/` |
+| `logical_swap` | `and` ↔ `or`, `&&` ↔ `\|\|` |
+| `condition_negate` | `if c` → `if !c`, `unless c` → `unless !c` |
+| `statement_removal` | drop a non-final function call from a block |
+| `return_nil` | the last expression of a `def`/`defp` body becomes `nil` |
+| `integer_shift` | `n` → `n + 1` and `n - 1` |
+| `string_empty` | a non-empty string becomes `""` |
+| `guard_removal` | drop the `when` guard of a clause |
+| `clause_removal` | drop one clause of a `case`, `cond` or multi-clause `fn` |
+| `element_removal` | drop one element of a list or one pair of a map |
+| `ecto_where_removal` | drop a `\|> where(...)` stage or a `where:` key of `from` |
+
+Docs, specs, types, compiler attributes, `defmacro`/`defguard`, `use`/`import`/
+`alias`/`require`, sigils and `quote` are never mutated. The set and order of
+mutants (`m001`, `m002`, ...) is a pure function of the source.
+
+**What it runs.** The component's contract tests: the files under the
+configured test paths that declare `use Covenant.Case, component: "<id>"`. The
+suite runs in a worker with `MIX_ENV=test`, which boots once and hot-swaps each
+mutant. The baseline (the unmutated suite) must be green or nothing is mutated.
+
+**Verdicts.**
+
+| Verdict | Meaning |
+|---|---|
+| killed | at least one test failed, for a reason other than a timeout |
+| survived | every test passed |
+| timeout | the only failures were test timeouts: a **survivor**, never a kill |
+| invalid | the mutant does not compile; excluded from the score |
+
+The score is `killed / (killed + survived + timed out)`.
+
+**Credit.** A kill is credited to the obligations tagged on *every* test that
+failed. The kill matrix lists, per obligation, the mutants killed in total and
+the mutants **only** that obligation's tests killed (the *unique* kills): an
+obligation with no unique kill caught nothing the other obligations' tests did
+not also catch. It does the same per test. A test no mutant needs, whose kills
+are all shared with another test, is **mutation-blind**: it is listed as a
+warning (never a failure) and is a candidate for deletion or sharpening. A test
+that is deliberately redundant says why with `@tag mutation_blind: "reason"`,
+and the warning then carries the reason.
+
+```
+Kill matrix — covenant.conditions (Covenant.Conditions)
+  127 mutants: 106 killed, 2 survived, 0 timed out, 19 invalid — score 98.2%
+
+  obligation              killed  unique
+  covenant.conditions.I1      57      25
+  covenant.conditions.I2      16      13
+  ...
+```
+
+The matrix is also written as JSON (`--out PATH`, default
+`tmp/covenant/mutate/<component>/kill_matrix.json`): the summary, one record
+per mutant with its verdict and `killed_by`, per-obligation and per-test
+credit, and the survivors with their sort.
+
+### The survivors file
+
+A survivor is either a test not yet written or a mutant that does not matter.
+Telling them apart is a judgment, and it lives in
+`contracts/<app>/<component>.survivors.yml`, one entry per survivor. The task
+prints a skeleton for each unsorted survivor.
+
+```yaml
+- at: lib/example/counter.ex:29:17
+  operator: element_removal
+  mutation: "`value: 0` → `(removed)`"   # optional
+  sort: equivalent
+  reason: The struct default for value is already 0.
+```
+
+`at` is `file:line:column` and `operator` an operator from the table. Without
+`mutation` the entry covers every mutant with that `at` and `operator`; give it
+when two mutants share both and need different judgments. `reason` is required
+and should say something specific. `sort` is one of:
+
+| Sort | The survivor is |
+|---|---|
+| `equivalent` | a mutant that behaves exactly like the original |
+| `log-only` | a change to a message or a log line nobody pins |
+| `dead-code` | in code that is never reached, or whose value is never read |
+| `timeout` | a mutant the tests only timed out against |
+| `evaluation-gap` | a behaviour that matters but no test pins yet |
+| `decision-hole` | a behaviour the Contract leaves deliberately undecided |
+
+A mutant inside the target of an active `kind: exception` obligation is sorted
+`decision-hole` without an entry. Prefer a test to an annotation: use a sort
+only with a reason a reviewer can check, and never weaken the mutation or the
+implementation to dodge a mutant.
+
+### Exit status
+
+0 when the baseline is green and every survivor has an annotation. 1 when the
+baseline is red, a survivor has no annotation, an annotation is **stale** (it
+matches no survivor, because the mutant is now killed or the code moved), the
+Contract or the survivors file does not parse, or a worker fails.
+
+### Options and `--jobs`
+
+`--module MOD` (repeatable), `--timeout MS` (per test, default 10000),
+`--seed N` (the ExUnit seed; the default 0 runs in definition order),
+`--jobs N`, `--out PATH`, `--contracts DIR`, `--test-path PATH` (repeatable).
+
+`--jobs N` splits the mutants round-robin over N worker OS processes. ExUnit
+creates a test's `:tmp_dir` at `tmp/<module>/<test>` under the *process's*
+working directory and offers no way to move it, so workers sharing the project
+would clear and rewrite each other's files and the failures that follow would
+be credited as kills. With N > 1 each worker therefore runs its tests from a
+private directory under the system temp directory: a symlink to every entry of
+the project root (relative paths in the tests resolve as usual) and a `tmp/` of
+its own, removed when the worker ends. The kill credit is the same as with
+`--jobs 1`, which the contract tests of `mix covenant.mutate` check.
+
+Isolation covers `:tmp_dir` and anything a test writes below `tmp/`. What the
+tests share otherwise stays shared between workers: a fixed path under the
+system temp directory, a database, a port, a named process on a distributed
+node. A suite that depends on such a resource must run with `--jobs 1`.
 
 ## Configuration
 

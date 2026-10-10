@@ -2,9 +2,9 @@
 
 ## Purpose
 
-The Mix tasks a project runs: `mix covenant.check`, `mix covenant.conditions`
-and `mix covenant.regen`. Their contract is what a CI step can rely on: what
-they print and their exit status.
+The Mix tasks a project runs: `mix covenant.check`, `mix covenant.conditions`,
+`mix covenant.regen` and `mix covenant.mutate`. Their contract is what a CI
+step can rely on: what they print and their exit status.
 
 ## Obligations
 
@@ -44,4 +44,17 @@ they print and their exit status.
 - **must:** compile and run no contract test; print the files, modules and tagged tests read, every problem as `file:line: message` relative to the root, the static coverage table and the skipped checks; write `<contracts dir>/coverage.static.json` and leave `coverage.json` untouched; exit 0 when the Contract holds statically and 1 otherwise; honour `--contracts`, `--test-path` (repeatable) and `--root`
 - **kind:** functional
 - **record:** static-coverage-own-file
+- **status:** active
+
+### covenant.tasks.I7 — covenant.mutate credits kills the same whatever --jobs
+- **scope:** `mix covenant.mutate`
+- **must:** give every mutant the same verdict and the same killing tests with `--jobs 1` and `--jobs N`; with N > 1 each worker runs the tests from a private working directory (a symlinked view of the project root with a `tmp/` of its own, removed when the worker ends), so ExUnit's `:tmp_dir` paths are never shared between workers
+- **why:** a `:tmp_dir` is created at `tmp/<module>/<test>` under the working directory of the OS process, so workers sharing the project clear and rewrite each other's files, and the failures that follow would be credited as kills
+- **kind:** functional
+- **status:** active
+
+### covenant.tasks.I8 — covenant.mutate documents the survivors file
+- **scope:** `mix help covenant.mutate`
+- **must:** describe the survivors file: where it lives, the keys of an entry, every sort and what it means, and the exit status
+- **kind:** functional
 - **status:** active

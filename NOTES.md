@@ -107,7 +107,12 @@ Started 2026-10-09. Baseline before any change: 120 tests, 0 failures.
   baseline (must be green), then per mutant: purge -> compile mutant in memory
   -> `ExUnit.run(modules)` with a collecting formatter -> purge -> reload
   original. No files are written by mutation. Jobs > 1 = N workers over
-  index slices (default 1; shared resources make parallel runs lie — IMP E2).
+  index slices (default 1). Workers share the project, and ExUnit's `:tmp_dir` is
+  `tmp/<module>/<test>` under the OS process's cwd with no setting to move it, so
+  with N > 1 each worker runs the suite from a private cwd (`Mutate.Workdir`:
+  symlinks to the root's entries + its own `tmp/`), entered after the suite is
+  compiled (the collector reports files relative to the root, not the cwd). Other
+  shared resources still make parallel runs lie — IMP E2.
 - **AST level.** `Code.string_to_quoted(columns: true, token_metadata: true,
   literal_encoder: &{:ok, {:__block__, &2, [&1]}})` gives every literal a
   position; before compiling, every single-element `__block__` is unwrapped
@@ -124,7 +129,7 @@ Started 2026-10-09. Baseline before any change: 120 tests, 0 failures.
 - **Credit.** A kill is credited to the obligations tagged on every failing
   test. Per obligation: total kills and unique kills (mutants only its tests
   caught). Per test: kills and unique kills; a test with no unique kill is
-  `mutation_blind` (warn only; `@tag mutation_blind: "reason"` silences).
+  `mutation_blind` (warn only; `@tag mutation_blind: "reason"` is printed with the warning, which stays).
 - **Survivor sort.** `contracts/<app>/<component>.survivors.yml` annotates
   survivors by `at` (file:line:column) + `operator` (+ `mutation` when two
   mutants share a site) with `sort` in equivalent | log-only | dead-code |

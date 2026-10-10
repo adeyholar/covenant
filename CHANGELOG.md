@@ -34,6 +34,23 @@
   on the line used to be (`calls  when ...`). Docs longer than 4096 bytes are
   no longer truncated.
 - Obligations `covenant.regen.I5`–`I8` pin these fixes.
+- `mix covenant.mutate --jobs N` no longer corrupts the kill credit. ExUnit
+  creates a test's `:tmp_dir` at `tmp/<module>/<test>` under the OS process's
+  working directory, so N workers shared it, cleared and rewrote each other's
+  files, and the spurious failures were credited as kills (up to a dozen
+  mutants credited differently from the serial run, and a red baseline in a
+  worker). With N > 1 each worker now runs its tests from a private directory
+  (`Covenant.Mutate.Workdir`: symlinks to every entry of the project root and a
+  `tmp/` of its own, removed at the end); the credit equals `--jobs 1`.
+  `Covenant.Mutate.Runner.run/1` takes `isolate: true` for it and
+  `Runner.entry/2` takes the root files are reported relative to.
+- `mix help covenant.mutate` documents the survivors file (location, entry keys,
+  every sort and its meaning), the exit status and what `--jobs` isolates.
+- README: a "Mutation testing" section (operators, verdicts, credit, unique and
+  mutation-blind, the survivors file, exit status, `--jobs`).
+- Obligations `covenant.tasks.I7` (credit independent of `--jobs`) and `I8`
+  (the help documents the survivors file); the fixture counter's persisted-form
+  test goes through a `:tmp_dir` so the contract test of I7 can observe workers.
 
 ## 0.1.0 (2026-10-09)
 
