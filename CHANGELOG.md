@@ -15,18 +15,25 @@
   joined onto the root). A test is laid out in the pack at its path relative
   to the root, which defaults to the directory holding the contracts
   directory (so `apps/<app>/test/contract/...` in an umbrella).
-- `mix covenant.regen` no longer stubs modules the component does not own: a
-  Public surface reference to a module that `Code.ensure_loaded?/1` finds in
-  the running VM (`System`, `Mix`, ...) is skipped unless the front matter
-  lists it under `modules:`, and a bare alias (`Scope`) is merged into the
-  declared or stubbed module whose last segment matches, or dropped. The pack
-  map has a `:skipped` list (`Covenant.Regen.surface/1`) and the task prints
-  one line naming the count and modules.
+- `mix covenant.regen` no longer stubs modules the component does not own
+  (`Covenant.Regen.Ownership`). A `#### Modules` paragraph in the Public
+  surface (or the front matter's `modules:`) is authoritative: exactly those
+  modules are stubbed. Without one, a loadable module is foreign when its beam
+  lies under OTP, Elixir or a dependency's build path and owned when it lies
+  in the running project's apps (umbrella children included), and a module
+  that is not loadable is foreign when its first segment is a dependency's
+  namespace. A module it cannot place is stubbed and returned as
+  `:possibly_foreign`. A bare alias (`Scope`) is merged into the owned module
+  whose last segment matches, or dropped. The pack map has `:skipped` and
+  `:possibly_foreign` (`Covenant.Regen.surface/2`) and the task prints a
+  count line and a `possibly_foreign:` line.
+- `Covenant.Mutate.Modules.references/1` reads module names out of the code
+  spans of any text.
 - `mix covenant.regen` keeps inline code in stub `@doc` strings: only the
   signature spans that open the line are removed, where every signature span
   on the line used to be (`calls  when ...`). Docs longer than 4096 bytes are
   no longer truncated.
-- Obligations `covenant.regen.I5`–`I7` pin the three fixes.
+- Obligations `covenant.regen.I5`–`I8` pin these fixes.
 
 ## 0.1.0 (2026-10-09)
 

@@ -68,7 +68,13 @@ defmodule Covenant.Mutate.Modules do
       |> Component.testable_obligations()
       |> Enum.map_join("\n", fn %Obligation{scope: scope} -> scope || "" end)
 
-    (surface <> "\n" <> scopes)
+    references(surface <> "\n" <> scopes)
+  end
+
+  @doc "The module names in the inline code spans of `text` (fenced blocks ignored), sorted and unique."
+  @spec references(String.t()) :: [String.t()]
+  def references(text) do
+    text
     |> String.replace(@fence, "")
     |> then(&Regex.scan(@code_span, &1))
     |> Enum.flat_map(fn [_, span] -> Regex.scan(@module_ref, span) end)

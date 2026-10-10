@@ -37,14 +37,20 @@ component from its Contract, with the implementation excluded.
 - **kind:** functional
 - **status:** active
 
-### covenant.regen.I6 — Stubs are made only for modules the component owns
-- **scope:** `Covenant.Regen.surface/1`, `Covenant.Regen.stubs/1`, `Covenant.Regen.write_pack/3`
-- **must:** never stub a module that `Code.ensure_loaded?/1` finds in the running VM unless the intent's front matter lists it under `modules:`; merge a bare alias (no dot) into the one declared or stubbed module whose last segment matches and drop it when none or several match; return every dropped reference in the pack's `skipped` list, and `mix covenant.regen` prints one line with their count and modules
+### covenant.regen.I6 — A listed set of modules is authoritative
+- **scope:** `Covenant.Regen.surface/2`, `Covenant.Regen.stubs/2`, `Covenant.Regen.Ownership.listed/1`, `Covenant.Regen.Ownership.partition/3`
+- **must:** when the Public surface has a `#### Modules` paragraph, or the front matter has `modules:`, stub exactly those modules and skip every other reference, loadable or not; read from the paragraph only the backticked names outside parentheses; merge a bare alias (no dot) into the one listed module whose last segment matches and drop it when none or several match; return every dropped reference in the pack's `skipped` list, and `mix covenant.regen` prints one line with their count and modules
 - **kind:** functional
 - **status:** active
 
 ### covenant.regen.I7 — Stub docs keep the line's inline code
 - **scope:** `Covenant.Regen.signatures/1`, `Covenant.Regen.stubs/1`
 - **must:** keep every inline code span of the Public surface line verbatim, backticks included, in the stub's `@doc`, removing only the signature spans that open the line; write the doc as a string literal that compiles whatever it holds (quotes, `"""`, interpolation, lines of any length)
+- **kind:** functional
+- **status:** active
+
+### covenant.regen.I8 — Without a list, ownership follows where a module lives
+- **scope:** `Covenant.Regen.Ownership.classify/3`, `Covenant.Regen.Ownership.classify_beam/2`, `Covenant.Regen.Ownership.environment/1`, `Covenant.Regen.write_pack/3`
+- **must:** treat a loadable module as foreign when its beam lies under the OTP or Elixir installation or a dependency's build path and as owned when it lies in an app of the running Mix project (umbrella children and `in_umbrella` dependencies included); treat a module that is not loadable as foreign when its first segment is a dependency's namespace and as owned otherwise; stub a module it cannot place (a beam anywhere else, or a first segment that none of the component's obligation scopes use) and return it in the pack's `possibly_foreign` list, which `mix covenant.regen` prints on a `possibly_foreign:` line; never treat a bare name that is a foreign module (`System`) as an alias
 - **kind:** functional
 - **status:** active

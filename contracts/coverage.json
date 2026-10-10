@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 51,
+      "active": 52,
       "coverage": 1.0,
-      "covered": 51
+      "covered": 52
     },
     "system": {
       "active": 0,
@@ -415,10 +415,10 @@
       }
     },
     "covenant.regen": {
-      "active": 7,
+      "active": 8,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 7,
+      "covered": 8,
       "form": "light",
       "obligations": {
         "covenant.regen.I1": {
@@ -482,8 +482,8 @@
           "status": "active",
           "testable": true,
           "tests": [
-            "test a module that is not loadable in the running VM keeps its stub",
-            "test stubs only modules the component owns and reports what it skipped"
+            "test a listed set is authoritative: exactly those modules are stubbed",
+            "test the Modules paragraph lists top-level names only and joins the front matter"
           ]
         },
         "covenant.regen.I7": {
@@ -494,6 +494,19 @@
           "testable": true,
           "tests": [
             "test stub docs keep inline code verbatim and compile whatever the line holds"
+          ]
+        },
+        "covenant.regen.I8": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a beam is classified by the directory it lies in, umbrella apps included",
+            "test a module that is not loadable is foreign in a dependency's namespace, else stubbed",
+            "test the in_umbrella dependencies are read from a deps list",
+            "test without a list, ownership follows where a module lives"
           ]
         }
       }
@@ -699,8 +712,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 51,
+    "active": 52,
     "coverage": 1.0,
-    "covered": 51
+    "covered": 52
   }
 }

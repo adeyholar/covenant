@@ -23,22 +23,28 @@ defmodule Covenant.Regen do
   ## Modules the component does not own
 
   A Public surface line may mention `System.halt(1)` or `Scope.put/1` in
-  prose. A stub for a module that is already loadable would shadow the real
-  one, so `stubs/1` never stubs a module for which `Code.ensure_loaded?/1` is
-  true **in the VM that runs the regeneration** — unless the intent's front
-  matter lists it under `modules:`. A bare alias (`Scope`) is merged into the
-  one declared or stubbed module whose last segment matches (`Machina.Scope`)
-  and dropped when none or several match. Dropped references come back in the
-  pack's `:skipped` list. The check reads the running VM: when the task runs
-  inside the project being regenerated its own modules are loadable too, so
-  list them in `modules:`.
+  prose, and a stub for a module the component does not own would shadow the
+  real one. `Covenant.Regen.Ownership` decides: a `#### Modules` paragraph in
+  the Public surface (or the front matter's `modules:`) is the authoritative
+  list; without one, a module is foreign when it lives in OTP, Elixir or a
+  dependency, and owned when it lives in one of the running project's apps.
+  What it cannot tell is stubbed and reported as `:possibly_foreign`;
+  references it dropped come back in `:skipped`. A bare alias (`Scope`) is
+  merged into the one owned module whose last segment matches
+  (`Machina.Scope`) and dropped when none or several match.
   """
 
   alias Covenant.Contract
   alias Covenant.Contract.Component
+  alias Covenant.Regen.Ownership
   alias Covenant.Static
 
-  @type pack :: %{dir: Path.t(), files: [Path.t()], skipped: [signature()]}
+  @type pack :: %{
+          dir: Path.t(),
+          files: [Path.t()],
+          skipped: [signature()],
+          possibly_foreign: [String.t()]
+        }
 
   @doc """
   Writes the pack for `component_id`. Options:
@@ -47,7 +53,10 @@ defmodule Covenant.Regen do
   * `:test_paths` — contract test paths or globs to search, absolute or relative to `:root`
     (default `Covenant.test_paths/0`);
   * `:root` — the project root the test paths are relative to, and the root the tests' paths in
-    the pack are relative to (default: the directory that holds the contracts directory).
+    the pack are relative to (default: the directory that holds the contracts directory);
+  * `:environment` — where OTP, Elixir, the dependencies and the project's apps live, to tell
+    which modules the component owns (default `Covenant.Regen.Ownership.environment/0`, the
+    running VM).
   """
   @spec write_pack(Contract.t(), String.t(), keyword()) :: {:ok, pack()} | {:error, String.t()}
   def write_pack(%Contract{} = contract, component_id, opts \\ []) do
@@ -62,20 +71,24 @@ defmodule Covenant.Regen do
         test_paths = Keyword.get(opts, :test_paths, Covenant.test_paths())
         tests = find_tests(component_id, test_paths, root)
 
+        stub_opts = Keyword.take(opts, [:environment])
+        %{skipped: skipped, possibly_foreign: possibly_foreign} = surface(component, stub_opts)
+
         File.rm_rf!(out)
         File.mkdir_p!(out)
 
         files =
           contract_files(contract, component, out) ++
             test_files(tests, root, out) ++
-            stub_files(component, out) ++
-            [brief_file(component, out), prompt_file(component, tests, out)]
+            stub_files(component, out, stub_opts) ++
+            [brief_file(component, out), prompt_file(component, tests, out, stub_opts)]
 
         {:ok,
          %{
            dir: out,
            files: files |> Enum.reject(&is_nil/1) |> Enum.sort(),
-           skipped: surface(component).skipped
+           skipped: skipped,
+           possibly_foreign: possibly_foreign
          }}
     end
   end
@@ -234,53 +247,28 @@ defmodule Covenant.Regen do
 
   @doc """
   Splits `signatures/1` into the ones to stub and the references to skip: modules the component
-  does not own (see "Modules the component does not own" in the module docs). A kept signature
-  may have its bare-alias module rewritten to the module it resolves to.
+  does not own (see "Modules the component does not own" in the module docs), plus the modules
+  it stubbed but could not be sure it owns (`:possibly_foreign`). A stubbed bare alias has its
+  module rewritten to the one it resolves to. `opts[:environment]` replaces the running VM
+  (`Covenant.Regen.Ownership.environment/0`).
   """
-  @spec surface(Component.t()) :: %{stub: [signature()], skipped: [signature()]}
-  def surface(%Component{} = component) do
-    declared = Component.declared_modules(component)
-    sigs = signatures(component)
+  @spec surface(Component.t(), keyword()) :: %{
+          stub: [signature()],
+          skipped: [signature()],
+          possibly_foreign: [String.t()]
+        }
+  def surface(%Component{} = component, opts \\ []) do
+    environment = Keyword.get_lazy(opts, :environment, &Ownership.environment/0)
+    %{stub: stub} = parts = Ownership.partition(component, signatures(component), environment)
 
-    {qualified, bare} = Enum.split_with(sigs, &String.contains?(&1.module, "."))
-
-    {kept, skipped} =
-      Enum.split_with(qualified, &(&1.module in declared or not loadable?(&1.module)))
-
-    known = Enum.uniq(declared ++ Enum.map(kept, & &1.module))
-    {bare_kept, bare_skipped} = resolve_aliases(bare, known, declared)
-
-    %{
-      stub: Enum.uniq_by(kept ++ bare_kept, &{&1.module, &1.function, length(&1.args)}),
-      skipped: skipped ++ bare_skipped
-    }
-  end
-
-  defp loadable?(module), do: Code.ensure_loaded?(Module.concat([module]))
-
-  # A bare alias names the one known module whose last segment it is; a bare
-  # name that is itself loadable (`System`) is never an alias.
-  defp resolve_aliases(sigs, known, declared) do
-    resolved =
-      Enum.map(sigs, fn sig ->
-        matches = Enum.filter(known, &(List.last(String.split(&1, ".")) == sig.module))
-
-        cond do
-          sig.module in declared -> {:keep, sig}
-          loadable?(sig.module) -> {:skip, sig}
-          match?([_], matches) -> {:keep, %{sig | module: hd(matches)}}
-          true -> {:skip, sig}
-        end
-      end)
-
-    {for({:keep, sig} <- resolved, do: sig), for({:skip, sig} <- resolved, do: sig)}
+    %{parts | stub: Enum.uniq_by(stub, &{&1.module, &1.function, length(&1.args)})}
   end
 
   @doc "Renders one stub module per public-surface module the component owns."
-  @spec stubs(Component.t()) :: [{String.t(), String.t()}]
-  def stubs(%Component{} = component) do
+  @spec stubs(Component.t(), keyword()) :: [{String.t(), String.t()}]
+  def stubs(%Component{} = component, opts \\ []) do
     component
-    |> surface()
+    |> surface(opts)
     |> Map.fetch!(:stub)
     |> Enum.group_by(& &1.module)
     |> Enum.sort()
@@ -318,9 +306,9 @@ defmodule Covenant.Regen do
     """
   end
 
-  defp stub_files(component, out) do
+  defp stub_files(component, out, opts) do
     component
-    |> stubs()
+    |> stubs(opts)
     |> Enum.map(fn {module, source} ->
       path = Path.join([out, "stubs", "lib", Macro.underscore(module) <> ".ex"])
       File.mkdir_p!(Path.dirname(path))
@@ -346,22 +334,22 @@ defmodule Covenant.Regen do
     path
   end
 
-  defp prompt_file(component, tests, out) do
+  defp prompt_file(component, tests, out, opts) do
     path = Path.join(out, "PROMPT.md")
-    File.write!(path, prompt(component, tests))
+    File.write!(path, prompt(component, tests, opts))
     path
   end
 
   @doc "The brief handed to the regenerating agent."
-  @spec prompt(Component.t(), [Path.t()]) :: String.t()
-  def prompt(%Component{} = component, tests) do
+  @spec prompt(Component.t(), [Path.t()], keyword()) :: String.t()
+  def prompt(%Component{} = component, tests, opts \\ []) do
     contract_file =
       Path.join(
         "contracts",
         Path.relative_to(component.file, Path.dirname(Path.dirname(component.file)))
       )
 
-    stubs = stubs(component)
+    stubs = stubs(component, opts)
     obligations = Component.testable_obligations(component)
 
     test_list =

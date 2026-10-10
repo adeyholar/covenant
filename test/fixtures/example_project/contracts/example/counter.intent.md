@@ -1,7 +1,3 @@
----
-modules:
-  - Example.Counter
----
 # example.counter
 
 ## Purpose

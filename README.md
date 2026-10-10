@@ -189,14 +189,28 @@ section and renders one stub module per public module:
 ```
 
 The doc keeps the line's inline code verbatim; only the signature spans that
-open the line are removed. A reference to a module the component does not own
-(`System.halt(1)` in prose) gets no stub: a module is skipped when
-`Code.ensure_loaded?/1` finds it in the VM running the task, unless the
-intent's front matter lists it under `modules:`. A bare alias such as
-`Scope.put/1` is merged into the one declared or stubbed module ending in
-`Scope`, and dropped when none or several do. The task prints one line with
-the number and modules of the skipped references. Run inside the project being
-regenerated, its own modules are loadable too: list them under `modules:`.
+open the line are removed.
+
+A reference to a module the component does not own (`System.halt(1)` or
+`Ecto.UUID.cast/1` in prose) gets no stub. Which modules the component owns:
+
+1. If the Public surface has a `#### Modules` paragraph (or the front matter a
+   `modules:` list), that list is authoritative: exactly those modules are
+   stubbed and every other reference is skipped. Only the backticked names
+   outside parentheses count.
+2. Otherwise a loadable module is foreign when its beam lies under the OTP or
+   Elixir installation or a dependency's build path, and owned when it lies in
+   an app of the running Mix project (umbrella children and `in_umbrella`
+   dependencies included). A module that is not loadable is foreign when its
+   first segment is a dependency's namespace (`Ecto` for `:ecto`) and stubbed
+   otherwise.
+3. A module it cannot place (a beam anywhere else, or a namespace none of the
+   component's obligation scopes use) is stubbed and printed on a
+   `possibly_foreign:` line.
+
+A bare alias such as `Scope.put/1` is merged into the one owned module ending
+in `Scope`, and dropped when none or several do. The task prints one line with
+the number and modules of the skipped references.
 
 ## Configuration
 

@@ -15,9 +15,11 @@ defmodule Mix.Tasks.Covenant.Regen do
   See `Covenant.Regen` for the layout. Contract tests keep their path relative
   to the directory that holds the contracts directory.
 
-  A Public surface reference to a module the component does not own (one that
-  is already loadable, or a bare alias that matches no declared module) gets no
-  stub; the task says how many it skipped.
+  A Public surface reference to a module the component does not own (see
+  `Covenant.Regen.Ownership`: the intent's `#### Modules` paragraph or `modules:`
+  front matter, else where the module lives) gets no stub; the task says how
+  many it skipped. A module it could not place is stubbed anyway and listed on a
+  `possibly_foreign:` line.
 
   ## Options
 
@@ -69,7 +71,7 @@ defmodule Mix.Tasks.Covenant.Regen do
     regen_opts = [test_paths: test_paths] ++ if(opts[:out], do: [out: opts[:out]], else: [])
 
     case Regen.write_pack(contract, component_id, regen_opts) do
-      {:ok, %{dir: dir, files: files, skipped: skipped}} ->
+      {:ok, %{dir: dir, files: files, skipped: skipped, possibly_foreign: possibly_foreign}} ->
         Enum.each(files, &Mix.shell().info("  #{Path.relative_to(&1, dir)}"))
 
         if skipped != [] do
@@ -78,6 +80,13 @@ defmodule Mix.Tasks.Covenant.Regen do
           Mix.shell().info(
             "covenant.regen: skipped #{length(skipped)} references to modules the component does not own: " <>
               Enum.join(modules, ", ")
+          )
+        end
+
+        if possibly_foreign != [] do
+          Mix.shell().info(
+            "covenant.regen: possibly_foreign: #{Enum.join(possibly_foreign, ", ")} " <>
+              "(stubbed; list the component's modules under `#### Modules` or `modules:` to settle it)"
           )
         end
 

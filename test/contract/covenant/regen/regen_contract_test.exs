@@ -2,6 +2,7 @@ defmodule Covenant.RegenContractTest do
   use Covenant.Case, component: "covenant.regen", async: true
 
   alias Covenant.{Contract, Regen}
+  alias Covenant.Regen.Ownership
   alias Covenant.ContractBuilder
 
   setup do
@@ -206,73 +207,204 @@ defmodule Covenant.RegenContractTest do
 
   @tag :tmp_dir
   @tag obligation: "covenant.regen.I6"
-  test "stubs only modules the component owns and reports what it skipped", %{tmp_dir: dir} do
+  test "a listed set is authoritative: exactly those modules are stubbed", %{tmp_dir: dir} do
     surface =
       Enum.join(
         [
           "- `Demo.Widget.size/1` — its size.",
           "- `Demo.Widget.paint(widget, color)` — paints; at the end it calls `System.halt(1)`.",
           "- `Mix.raise/1` — mentioned in prose only.",
-          "- `Mix.Project.config/0` — qualified, loadable, mentioned in prose only.",
           "- `Widget.reset/1` — a short alias of `Demo.Widget`.",
           "- `Demo.Dial.read/0` — a dial.",
-          "- `Other.Dial.tick/0` — another dial.",
-          "- `Dial.turn/0` — ambiguous: two modules end in `Dial`.",
-          "- `Ghost.vanish/0` — no module ends in `Ghost`.",
-          "- `Covenant.Error.format/1` — loadable, but declared in the front matter."
+          "- `Other.Dial.tick/0` — another dial, not listed.",
+          "- `Dial.turn/0` — an alias of the one listed dial.",
+          "- `Ghost.vanish/0` — no listed module ends in `Ghost`.",
+          "- `Ecto.UUID.cast/1` — not listed, and not loadable either.",
+          "- `Covenant.Error.format/1` — loadable and in an app of this project, but not listed."
         ],
         "\n"
       )
 
-    front_matter = "---\nmodules:\n  - Covenant.Error\n---\n"
+    front_matter = "---\nmodules:\n  - Demo.Widget\n  - Demo.Dial\n---\n"
     contract = Contract.load!(ContractBuilder.demo_contracts(dir, surface, front_matter))
     component = Contract.component(contract, "demo.widget")
 
-    assert Enum.map(Regen.stubs(component), &elem(&1, 0)) ==
-             ["Covenant.Error", "Demo.Dial", "Demo.Widget", "Other.Dial"]
+    assert Ownership.listed(component) == ["Demo.Widget", "Demo.Dial"]
+
+    assert Enum.map(Regen.stubs(component), &elem(&1, 0)) == ["Demo.Dial", "Demo.Widget"]
 
     {_, widget} = List.keyfind(Regen.stubs(component), "Demo.Widget", 0)
     assert widget =~ "def reset(_arg1) do"
     assert widget =~ "def paint(_widget, _color) do"
+    {_, dial} = List.keyfind(Regen.stubs(component), "Demo.Dial", 0)
+    assert dial =~ "def turn() do"
 
-    %{stub: stub, skipped: skipped} = Regen.surface(component)
+    %{skipped: skipped, possibly_foreign: []} = Regen.surface(component)
+
+    assert Enum.map(skipped, &{&1.module, &1.function}) ==
+             [
+               {"Other.Dial", "tick"},
+               {"Ecto.UUID", "cast"},
+               {"Covenant.Error", "format"},
+               {"System", "halt"},
+               {"Mix", "raise"},
+               {"Ghost", "vanish"}
+             ]
+
+    out = Path.join(dir, "pack")
+
+    assert {:ok, %{files: files, skipped: ^skipped, possibly_foreign: []}} =
+             Regen.write_pack(contract, "demo.widget", out: out, root: dir, test_paths: [])
+
+    assert for(
+             file <- Enum.map(files, &Path.relative_to(&1, out)),
+             String.starts_with?(file, "stubs/"),
+             do: file
+           ) == ["stubs/lib/demo/dial.ex", "stubs/lib/demo/widget.ex"]
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.regen.I6"
+  test "the Modules paragraph lists top-level names only and joins the front matter", %{
+    tmp_dir: dir
+  } do
+    surface = """
+    #### Modules
+
+    `Demo.Widget`, `Demo.Gadget` (a behaviour, implemented by `Demo.Gadget.Impl`),
+    `Demo.Dial` (called only by `Demo.Widget` through `caps().pool_size`; see `Other.Dial`).
+
+    #### `Demo.Widget`
+
+    - `Demo.Widget.size/1` — its size.
+    - `Other.Dial.tick/0` — not listed.
+    """
+
+    front_matter = "---\nmodules: [Demo.Extra]\n---\n"
+    contract = Contract.load!(ContractBuilder.demo_contracts(dir, surface, front_matter))
+    component = Contract.component(contract, "demo.widget")
+
+    assert Ownership.listed(component) ==
+             ["Demo.Extra", "Demo.Widget", "Demo.Gadget", "Demo.Dial"]
+
+    assert Enum.map(Regen.stubs(component), &elem(&1, 0)) == ["Demo.Widget"]
+    assert [%{module: "Other.Dial"}] = Regen.surface(component).skipped
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.regen.I8"
+  test "without a list, ownership follows where a module lives", %{tmp_dir: dir} do
+    surface =
+      Enum.join(
+        [
+          "- `Demo.Widget.size/1` — its size.",
+          "- `Demo.Widget.paint(widget, color)` — paints; at the end it calls `System.halt(1)`.",
+          "- `Mix.raise/1` — Elixir, mentioned in prose only.",
+          "- `Mix.Project.config/0` — Elixir, qualified.",
+          "- `YamlElixir.Mapper.process/2` — a dependency, loadable.",
+          "- `YamlElixir.read_from_string/1` — the dependency's top module, bare to the parser.",
+          "- `YamlElixir.NotAModule.go/0` — a dependency's namespace, not loadable.",
+          "- `Covenant.Error.format/1` — an app of this project, loadable.",
+          "- `Elsewhere.Thing.go/0` — nobody can place it.",
+          "- `Widget.reset/1` — a short alias of `Demo.Widget`.",
+          "- `Ghost.vanish/0` — no module ends in `Ghost`."
+        ],
+        "\n"
+      )
+
+    contract = Contract.load!(ContractBuilder.demo_contracts(dir, surface, ""))
+    component = Contract.component(contract, "demo.widget")
+
+    assert Ownership.listed(component) == []
+
+    assert Enum.map(Regen.stubs(component), &elem(&1, 0)) ==
+             ["Covenant.Error", "Demo.Widget", "Elsewhere.Thing"]
+
+    %{skipped: skipped, possibly_foreign: possibly_foreign} = Regen.surface(component)
 
     assert Enum.map(skipped, &{&1.module, &1.function}) ==
              [
                {"Mix.Project", "config"},
+               {"YamlElixir.Mapper", "process"},
+               {"YamlElixir.NotAModule", "go"},
                {"System", "halt"},
                {"Mix", "raise"},
-               {"Dial", "turn"},
+               {"YamlElixir", "read_from_string"},
                {"Ghost", "vanish"}
              ]
 
-    assert Enum.all?(stub, &(&1.module != "Widget"))
+    assert possibly_foreign == ["Elsewhere.Thing"]
 
     out = Path.join(dir, "pack")
 
-    assert {:ok, %{files: files, skipped: ^skipped}} =
+    assert {:ok, %{possibly_foreign: ^possibly_foreign}} =
              Regen.write_pack(contract, "demo.widget", out: out, root: dir, test_paths: [])
 
-    stubs =
-      for file <- Enum.map(files, &Path.relative_to(&1, out)),
-          String.starts_with?(file, "stubs/"),
-          do: file
-
-    assert stubs == [
-             "stubs/lib/covenant/error.ex",
-             "stubs/lib/demo/dial.ex",
-             "stubs/lib/demo/widget.ex",
-             "stubs/lib/other/dial.ex"
-           ]
+    assert File.exists?(Path.join(out, "stubs/lib/elsewhere/thing.ex"))
+    refute File.exists?(Path.join(out, "stubs/lib/mix/project.ex"))
   end
 
-  @tag obligation: "covenant.regen.I6"
-  test "a module that is not loadable in the running VM keeps its stub", %{
-    contract: contract
-  } do
-    refute Code.ensure_loaded?(Example.Counter)
-    assert [{"Example.Counter", _}] = Regen.stubs(Contract.component(contract, "example.counter"))
-    assert %{skipped: []} = Regen.surface(Contract.component(contract, "example.counter"))
+  @tag obligation: "covenant.regen.I8"
+  test "a beam is classified by the directory it lies in, umbrella apps included" do
+    env =
+      Ownership.environment(%{
+        app: :shop,
+        apps: [:web],
+        in_umbrella: [:core],
+        deps: [:ecto, :core, :phoenix_pubsub],
+        build_path: "/work/_build/dev"
+      })
+
+    beam = fn app -> ~c"/work/_build/dev/lib/#{app}/ebin/Elixir.X.beam" end
+
+    assert Ownership.classify_beam(beam.(:shop), env) == :own
+    assert Ownership.classify_beam(beam.(:web), env) == :own
+    assert Ownership.classify_beam(beam.(:core), env) == :own
+    assert Ownership.classify_beam(beam.(:ecto), env) == :foreign
+    assert Ownership.classify_beam(beam.(:phoenix_pubsub), env) == :foreign
+
+    otp = Path.join(to_string(:code.root_dir()), "lib/kernel-1.0/ebin/kernel.beam")
+    assert Ownership.classify_beam(String.to_charlist(otp), env) == :foreign
+
+    elixir = :elixir |> :code.lib_dir() |> to_string() |> Path.join("ebin/Elixir.Enum.beam")
+    assert Ownership.classify_beam(String.to_charlist(elixir), env) == :foreign
+
+    assert Ownership.classify_beam(:preloaded, env) == :foreign
+    assert Ownership.classify_beam(~c"/elsewhere/Elixir.X.beam", env) == :unsure
+    assert Ownership.classify_beam(~c"/work/_build/dev/lib/shopping/ebin/X.beam", env) == :unsure
+    assert Ownership.classify_beam(:cover_compiled, env) == :unsure
+    assert Ownership.classify_beam(~c"", env) == :unsure
+
+    assert "Ecto" in env.dep_namespaces
+    assert "PhoenixPubsub" in env.dep_namespaces
+    refute Enum.any?(env.dep_namespaces, &(&1 in ["Core", "Web", "Shop"]))
+  end
+
+  @tag obligation: "covenant.regen.I8"
+  test "the in_umbrella dependencies are read from a deps list" do
+    deps = [
+      {:ecto, "~> 3.0"},
+      {:core, in_umbrella: true},
+      {:web, "~> 1.0", [in_umbrella: true, only: :test]},
+      {:oban, "~> 2.0", only: :prod},
+      {:plain, git: "https://example.test/plain.git"},
+      :not_a_tuple
+    ]
+
+    assert Ownership.in_umbrella(deps) == [:core, :web]
+    assert Ownership.in_umbrella(nil) == []
+  end
+
+  @tag obligation: "covenant.regen.I8"
+  test "a module that is not loadable is foreign in a dependency's namespace, else stubbed" do
+    env = Ownership.environment(%{app: :shop, deps: [:ecto], build_path: "/work/_build/dev"})
+
+    assert Ownership.classify("Ecto.NotAModule", env) == :foreign
+    assert Ownership.classify("Shop.NotAModule", env) == :own
+    assert Ownership.classify("Shop.NotAModule", env, ["Shop"]) == :own
+    assert Ownership.classify("Other.NotAModule", env) == :own
+    assert Ownership.classify("Other.NotAModule", env, ["Shop"]) == :unsure
+    assert Ownership.classify("System", env) == :foreign
   end
 
   @tag :tmp_dir
