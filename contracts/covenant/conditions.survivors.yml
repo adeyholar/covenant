@@ -2,7 +2,7 @@
 # Every surviving mutant is either caught by a new test or annotated here with
 # the judgment behind letting it live. Sorts: equivalent | log-only |
 # dead-code | timeout | evaluation-gap | decision-hole.
-- at: lib/covenant/conditions.ex:58:68
+- at: lib/covenant/conditions.ex:59:68
   operator: boolean_flip
   mutation: "`false` → `true`"
   sort: equivalent
@@ -11,8 +11,8 @@
     silences every tokenizer warning, and Elixir 1.19.6 ignores the option even
     when emit_warnings is true (probed: with emit_warnings: true the quoted-key
     warning still fires whatever warn_on_unnecessary_quotes says). The sibling
-    flip at 53:90 is not equivalent and is killed by the I3 no-warning assertion.
-- at: lib/covenant/conditions.ex:80:9
+    flip at 54:90 is not equivalent and is killed by the I3 no-warning assertion.
+- at: lib/covenant/conditions.ex:81:9
   operator: clause_removal
   mutation: "`case _ ->` → `(removed)`"
   sort: evaluation-gap

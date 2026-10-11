@@ -527,9 +527,9 @@ The test of a Contract is regeneration. If a component can be deleted and rebuil
 
 ## How Covenant holds itself to account
 
-Covenant has its own Contract in [`contracts/`](https://github.com/tools4imps/covenant/tree/main/contracts): 85 obligations across ten light-form components, a system intent and the decision records behind its policies. Every test in `test/contract/` is a `Covenant.Case` test that names its obligations. CI runs the suite and `mix covenant.check` on every push, on Elixir 1.18 and 1.19.
+Covenant has its own Contract in [`contracts/`](https://github.com/tools4imps/covenant/tree/main/contracts): 96 obligations across ten light-form components, a system intent and the decision records behind its policies. Every test in `test/contract/` is a `Covenant.Case` test that names its obligations. CI runs the suite and `mix covenant.check` on every push, on Elixir 1.18 and 1.19.
 
-Two components are mutated with Covenant itself. `covenant.conditions` makes 206 mutants: 177 killed, 27 invalid, and 2 survivors. `covenant.mutate`, run against its own unit tests, makes 1531: 1307 killed, 159 invalid, and 65 survivors. Every survivor is sorted, with its reason, in `contracts/covenant/*.survivors.yml`.
+Two components are mutated with Covenant itself. `covenant.conditions` makes 231 mutants: 202 killed, 27 invalid, and 2 survivors. `covenant.mutate`, run against its own unit tests, makes 1541: 1325 killed, 150 invalid, 2 timeouts, and 64 survivors. Every survivor is sorted, with its reason, in `contracts/covenant/*.survivors.yml`.
 
 ```bash
 mix deps.get
