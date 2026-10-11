@@ -49,7 +49,8 @@ defmodule Covenant.Regen do
   alias Covenant.Regen.Ownership
   alias Covenant.Static
 
-  # Written into every pack; only a directory holding it is ever cleared by a later run.
+  # Written into every pack: the component id on the first line, then every file Covenant wrote
+  # (relative to the pack). A later run clears only those files, and only in a directory holding it.
   @marker ".covenant-pack"
 
   @type pack :: %{
@@ -125,8 +126,16 @@ defmodule Covenant.Regen do
           {:write, "PROMPT.md", prompt(component, Enum.map(tests, &elem(&1, 1)), stub_opts)}
         ]
 
+    manifest =
+      writes
+      |> Enum.map(fn
+        {:copy, _source, target} -> target
+        {:write, target, _text} -> target
+      end)
+      |> Enum.sort()
+
     with :ok <- prepare(out, component.id) do
-      write(Path.join(out, @marker), component.id <> "\n")
+      write(Path.join(out, @marker), Enum.join([component.id | manifest], "\n") <> "\n")
 
       files =
         Enum.map(writes, fn
@@ -145,7 +154,8 @@ defmodule Covenant.Regen do
   end
 
   # An existing output directory is cleared only when it is a pack Covenant wrote (it holds the
-  # marker); an empty or missing one is fine; anything else is refused with nothing deleted.
+  # marker) and holds nothing but the files the marker lists; an empty or missing one is fine;
+  # anything else is refused with nothing deleted.
   defp prepare(out, component_id) do
     marker = Path.join(out, @marker)
 
@@ -156,7 +166,7 @@ defmodule Covenant.Regen do
       {:ok, %File.Stat{type: :directory}} ->
         cond do
           File.regular?(marker) ->
-            clear(out)
+            clear_pack(out, marker)
 
           File.ls!(out) == [] ->
             :ok
@@ -176,16 +186,46 @@ defmodule Covenant.Regen do
     end
   end
 
-  # Empties `dir`, unlinking symlinks rather than following them.
-  defp clear(dir) do
-    for entry <- File.ls!(dir), path = Path.join(dir, entry) do
-      case File.lstat!(path) do
-        %File.Stat{type: :directory} ->
-          clear(path)
-          File.rmdir!(path)
+  defp clear_pack(out, marker) do
+    manifest = marker |> File.read!() |> String.split("\n", trim: true) |> tl() |> MapSet.new()
 
-        _ ->
-          File.rm!(path)
+    foreign =
+      out
+      |> files_under()
+      |> Enum.map(&Path.relative_to(&1, out))
+      |> Enum.reject(&(&1 == @marker or &1 in manifest))
+
+    if foreign == [] do
+      for entry <- manifest, do: File.rm(Path.join(out, entry))
+      File.rm!(marker)
+      prune_empty(out)
+      :ok
+    else
+      {:error,
+       "refusing to write the pack to #{out}: the pack directory holds files Covenant didn't " <>
+         "write: #{Enum.join(Enum.sort(foreign), ", ")}; move them or choose another --out " <>
+         "(nothing was deleted)"}
+    end
+  end
+
+  # Every file and symlink under `dir`, never following a symlink.
+  defp files_under(dir) do
+    Enum.flat_map(File.ls!(dir), fn entry ->
+      path = Path.join(dir, entry)
+
+      case File.lstat!(path) do
+        %File.Stat{type: :directory} -> files_under(path)
+        _ -> [path]
+      end
+    end)
+  end
+
+  # Removes the directories under `dir` that are empty, keeping `dir` itself.
+  defp prune_empty(dir) do
+    for entry <- File.ls!(dir), path = Path.join(dir, entry), File.dir?(path) do
+      if match?(%File.Stat{type: :directory}, File.lstat!(path)) do
+        prune_empty(path)
+        File.rmdir(path)
       end
     end
 
@@ -204,16 +244,14 @@ defmodule Covenant.Regen do
   tree by `Covenant.Static.scan_source/3`, so any layout of the call counts and a comment or a
   string does not), as paths relative to `root`. `test_paths` entries (files, directories or globs, absolute or relative to `root`) are
   expanded as `Covenant.Static.expand/1` does for `mix covenant.check --static`. A primitive of
-  the sibling layout's tests are the `*_test.exs` files beside its README.
+  the sibling layout's tests are the test files beside its README and in its subdirectories.
   """
   @spec find_tests(String.t() | Component.t(), [Path.t()], Path.t()) :: [Path.t()]
   def find_tests(%Component{form: :primitive, file: readme}, _test_paths, root) do
     root = Path.expand(root)
 
-    readme
-    |> Path.dirname()
-    |> Path.join("*_test.exs")
-    |> Path.wildcard()
+    [Path.dirname(readme)]
+    |> Static.expand()
     |> Enum.map(&Path.relative_to(Path.expand(&1), root))
     |> Enum.sort()
   end
@@ -245,12 +283,19 @@ defmodule Covenant.Regen do
 
   # `{source, target}` pairs, the target relative to the pack.
   defp contract_files(contract, %Component{form: :primitive, file: readme}, layout) do
+    # `mutants.md` stays out: the survivors it lists describe the implementation.
+    helper = Path.join(layout, "contract/test_helper.exs")
+    convention = Path.join(contract.dir, "README.md")
+
     primitive =
-      for source <- [readme, Path.join(Path.dirname(readme), "mutants.md")],
+      for source <- [readme, helper],
           File.exists?(source),
           do: {source, Path.relative_to(Path.expand(source), layout)}
 
-    primitive ++ system_files(contract)
+    convention =
+      if File.exists?(convention), do: [{convention, "CONTRACT_CONVENTION.md"}], else: []
+
+    primitive ++ system_files(contract) ++ convention
   end
 
   defp contract_files(contract, component, _layout) do
@@ -379,16 +424,38 @@ defmodule Covenant.Regen do
   defp args("", ""), do: []
   defp args("", arity), do: Enum.map(1..String.to_integer(arity)//1, &"arg#{&1}")
 
+  # An argument keeps its `\\ default`; a name that is not a plain variable becomes `argN`.
   defp args(args, _arity) do
     args
-    |> String.split(",")
-    |> Enum.map(&String.trim/1)
+    |> split_args()
     |> Enum.reject(&(&1 == ""))
     |> Enum.with_index(1)
     |> Enum.map(fn {arg, i} ->
       name = arg |> String.split("::") |> hd() |> String.trim()
-      if Regex.match?(~r/^[a-z_][A-Za-z0-9_]*(\s*\\\\.*)?$/, name), do: name, else: "arg#{i}"
+      if Regex.match?(~r/^[a-z_][A-Za-z0-9_]*(\s*\\\\.*)?$/s, name), do: name, else: "arg#{i}"
     end)
+  end
+
+  # Splits on the commas outside brackets, so a default such as `opts \\ [a: 1, b: 2]` stays whole.
+  defp split_args(args) do
+    {parts, current, _depth} =
+      args
+      |> String.graphemes()
+      |> Enum.reduce({[], "", 0}, fn
+        ",", {parts, current, 0} ->
+          {[String.trim(current) | parts], "", 0}
+
+        char, {parts, current, depth} when char in ["(", "[", "{"] ->
+          {parts, current <> char, depth + 1}
+
+        char, {parts, current, depth} when char in [")", "]", "}"] ->
+          {parts, current <> char, max(depth - 1, 0)}
+
+        char, {parts, current, depth} ->
+          {parts, current <> char, depth}
+      end)
+
+    Enum.reverse([String.trim(current) | parts])
   end
 
   @doc """
@@ -466,9 +533,9 @@ defmodule Covenant.Regen do
     do: Enum.flat_map(Covers.expand(root <> ".*", modules), &exports/1)
 
   defp exports(module) do
-    mod = Module.concat([module])
+    mod = Ownership.module_atom(module)
 
-    if Code.ensure_loaded?(mod) and function_exported?(mod, :__info__, 1) do
+    if mod != nil and Code.ensure_loaded?(mod) and function_exported?(mod, :__info__, 1) do
       for {function, arity} <- mod.__info__(:functions),
           name = Atom.to_string(function),
           not String.starts_with?(name, "__"),
@@ -481,9 +548,11 @@ defmodule Covenant.Regen do
   @doc "Renders one stub module per public-surface module the component owns."
   @spec stubs(Component.t(), keyword()) :: [{String.t(), String.t()}]
   def stubs(%Component{} = component, opts \\ []) do
-    component
-    |> surface(opts)
-    |> Map.fetch!(:stub)
+    render_all(component, surface(component, opts).stub)
+  end
+
+  defp render_all(component, signatures) do
+    signatures
     |> Enum.group_by(& &1.module)
     |> Enum.sort()
     |> Enum.map(fn {module, sigs} -> {module, render_stub(component, module, sigs)} end)
@@ -491,10 +560,12 @@ defmodule Covenant.Regen do
 
   defp render_stub(component, module, sigs) do
     functions =
-      Enum.map_join(sigs, "\n", fn sig ->
+      sigs
+      |> drop_covered_by_defaults()
+      |> Enum.map_join("\n", fn sig ->
         arity = length(sig.args)
         signature = "#{sig.function}(#{Enum.join(sig.args, ", ")})"
-        head = "#{sig.function}(#{Enum.map_join(sig.args, ", ", &("_" <> &1))})"
+        head = "#{sig.function}(#{Enum.map_join(sig.args, ", ", &stub_arg/1)})"
         spec = if sig.return, do: " :: #{sig.return}", else: ""
         doc = if sig.doc == "", do: signature <> spec, else: "#{signature}#{spec} — #{sig.doc}"
 
@@ -518,6 +589,32 @@ defmodule Covenant.Regen do
 
     #{functions}end
     """
+  end
+
+  # `limit \\ 10` becomes `_limit \\ 10`.
+  defp stub_arg(arg) do
+    case String.split(arg, "\\\\", parts: 2) do
+      [name, default] -> "_#{String.trim(name)} \\\\ #{String.trim(default)}"
+      [name] -> "_" <> name
+    end
+  end
+
+  # One head with the defaults defines every arity from the required ones up to the full one; a
+  # second signature for an arity in that range would conflict with it.
+  defp drop_covered_by_defaults(sigs) do
+    ranges =
+      for sig <- sigs,
+          required = Enum.count(sig.args, &(not String.contains?(&1, "\\\\"))),
+          required < length(sig.args),
+          do: {sig.function, required, length(sig.args)}
+
+    Enum.reject(sigs, fn sig ->
+      arity = length(sig.args)
+
+      Enum.any?(ranges, fn {function, required, full} ->
+        function == sig.function and arity != full and arity >= required and arity < full
+      end)
+    end)
   end
 
   defp stub_source(%Component{form: :primitive}),
@@ -554,7 +651,8 @@ defmodule Covenant.Regen do
         )
       end
 
-    stubs = stubs(component, opts)
+    %{stub: signatures, skipped: skipped} = surface(component, opts)
+    stubs = render_all(component, signatures)
     obligations = Component.testable_obligations(component)
 
     test_list =
@@ -569,7 +667,7 @@ defmodule Covenant.Regen do
     stub_list =
       case stubs do
         [] ->
-          "  - _none: the #{form_name(component)} lists no `Module.function/arity` signatures in a `## Public surface` section_"
+          none_stubs(component, skipped, opts)
 
         stubs ->
           Enum.map_join(stubs, "\n", fn {module, _} ->
@@ -594,7 +692,7 @@ defmodule Covenant.Regen do
     - `#{contract_file}` — #{describe_file(component)} Read it in full first.
     #{if component.records_file, do: "- `contracts/#{Path.relative_to(component.records_file, Path.dirname(Path.dirname(component.records_file)))}` — its decision records: the reasons behind every value that looks arbitrary.\n", else: ""}- `contracts/system/` — the whole-product intent and records, when present.
     - `REGENERATION_BRIEF.md` — the questions previous regenerations asked, answered.
-    #{convention_line(component, opts)}- Contract tests (they are the executable obligations; do not edit them):
+    #{convention_line(component, opts)}#{helper_line(component, opts)}- Contract tests (they are the executable obligations; do not edit them):
     #{test_list}
     - Public-surface stubs to start from:
     #{stub_list}
@@ -623,13 +721,57 @@ defmodule Covenant.Regen do
     """
   end
 
-  defp describe_file(%Component{form: :primitive}),
+  defp none_stubs(%Component{form: :primitive} = component, _skipped, opts) do
+    if unavailable(component, opts) == [] do
+      "  - _none: the #{form_name(component)}'s covers block names no function_"
+    else
+      "  - _none: signatures are unavailable; the covers block names code that could not be loaded when " <>
+        "this pack was written (#{Enum.join(unavailable(component, opts), ", ")}), so take the " <>
+        "public surface from the README and the contract tests_"
+    end
+  end
+
+  defp none_stubs(_component, [_ | _] = skipped, _opts) do
+    modules = skipped |> Enum.map(& &1.module) |> Enum.uniq() |> Enum.sort()
+
+    "  - _none: the signatures in the `## Public surface` section name modules the component " <>
+      "does not own or that this project already implements (#{Enum.join(modules, ", ")}), " <>
+      "so no stub was written for them_"
+  end
+
+  defp none_stubs(component, [], _opts),
     do:
-      "the primitive's Contract README: its obligations, the code its covers block names and,\n  in `mutants.md` beside it when present, the survivors it declares."
+      "  - _none: the #{form_name(component)} lists no `Module.function/arity` signatures in a `## Public surface` section_"
+
+  # The module and tree references of a primitive's covers block that gave no signature: the
+  # code was not loadable here, so the stubs do not depend on it being the same everywhere.
+  defp unavailable(%Component{covers: covers}, opts) do
+    modules = Keyword.get_lazy(opts, :modules, &Covers.project_modules/0)
+
+    for %{ref: ref} <- covers,
+        match?({tag, _} when tag in [:module, :tree], ref),
+        functions(ref, modules) == [] do
+      case ref do
+        {:module, module} -> module
+        {:tree, root} -> root <> ".*"
+      end
+    end
+  end
+
+  defp describe_file(%Component{form: :primitive}),
+    do: "the primitive's Contract README: its obligations and the code its covers block names."
 
   defp describe_file(component),
     do:
       "the component's #{form_name(component)}: purpose, scope,\n  environment facts, public surface, obligations, decisions, orderings and\n  known limits."
+
+  defp helper_line(%Component{form: :primitive}, opts) do
+    if opts[:layout] && File.exists?(Path.join(opts[:layout], "contract/test_helper.exs")),
+      do: "- `contract/test_helper.exs` — the helper the contract tests start with.\n",
+      else: ""
+  end
+
+  defp helper_line(_component, _opts), do: ""
 
   # A sibling-layout project may have no contracts/README.md to copy.
   defp convention_line(%Component{form: :primitive}, opts) do

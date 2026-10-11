@@ -216,19 +216,20 @@ defmodule Covenant.SiblingE2EContractTest do
   end
 
   @tag obligation: "covenant.primitive.I7"
-  test "mix covenant.regen packs a primitive with its README, mutants.md, tests and stubs from its covers" do
+  test "mix covenant.regen packs a primitive with its README, tests, helper and stubs from its covers, and not mutants.md" do
     {output, status} = mix(["covenant.regen", "calc", "--out", "tmp/pack"])
     assert status == 0, output
 
     pack = Path.join(@project, "tmp/pack")
 
     for file <-
-          ~w(PROMPT.md REGENERATION_BRIEF.md contract/calc/README.md contract/calc/mutants.md
+          ~w(PROMPT.md REGENERATION_BRIEF.md contract/calc/README.md contract/test_helper.exs
                   contract/calc/calc_test.exs stubs/lib/calc.ex) do
       assert File.exists?(Path.join(pack, file)), "#{file} is missing from the pack"
     end
 
     refute File.exists?(Path.join(pack, "lib/calc.ex"))
+    refute File.exists?(Path.join(pack, "contract/calc/mutants.md"))
 
     stub = File.read!(Path.join(pack, "stubs/lib/calc.ex"))
     assert stub =~ "def add(_arg1, _arg2) do"
@@ -239,7 +240,9 @@ defmodule Covenant.SiblingE2EContractTest do
     assert prompt =~ "`contract/calc/README.md` — the primitive's Contract README"
     assert prompt =~ "- `calc/A1` — Add returns the sum of its arguments."
     assert prompt =~ "  - `contract/calc/calc_test.exs`"
+    assert prompt =~ "`contract/test_helper.exs`"
     refute prompt =~ "CONTRACT_CONVENTION.md"
+    refute prompt =~ "mutants.md"
   end
 
   @tag obligation: "covenant.primitive.I6"

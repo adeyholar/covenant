@@ -59,13 +59,10 @@ defmodule Covenant.RegenSafetyContractTest do
   test "re-running into its own previous pack replaces it", %{contract: contract, tmp_dir: dir} do
     out = Path.join(dir, "pack")
     assert {:ok, _} = pack(contract, out)
-    File.write!(Path.join(out, "stale.txt"), "old")
-    File.mkdir_p!(Path.join(out, "stale_dir"))
-    File.write!(Path.join(out, "stale_dir/x"), "old")
+    File.write!(Path.join(out, "PROMPT.md"), "edited")
 
     assert {:ok, %{files: files}} = pack(contract, out)
-    refute File.exists?(Path.join(out, "stale.txt"))
-    refute File.exists?(Path.join(out, "stale_dir"))
+    assert File.read!(Path.join(out, "PROMPT.md")) =~ "# Regenerate"
     assert Path.join(out, "PROMPT.md") in files
     assert File.exists?(Path.join(out, ".covenant-pack"))
   end
@@ -82,11 +79,12 @@ defmodule Covenant.RegenSafetyContractTest do
     outside = Path.join(dir, "outside")
     File.mkdir_p!(outside)
     File.write!(Path.join(outside, "keep.txt"), "keep")
-    File.ln_s!(outside, Path.join(out, "link"))
+    File.rm!(Path.join(out, "PROMPT.md"))
+    File.ln_s!(outside, Path.join(out, "PROMPT.md"))
 
     assert {:ok, _} = pack(contract, out)
     assert File.read!(Path.join(outside, "keep.txt")) == "keep"
-    refute File.exists?(Path.join(out, "link"))
+    assert File.regular?(Path.join(out, "PROMPT.md"))
   end
 
   @tag :tmp_dir
