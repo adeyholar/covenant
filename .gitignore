@@ -34,3 +34,9 @@ covenant-*.tar
 /test/fixtures/umbrella_project/tmp/
 /test/fixtures/umbrella_project/contracts/coverage.json
 /test/fixtures/umbrella_project/contracts/coverage.static.json
+
+# Umbrella fixture app output (test/fixtures/umbrella_project/apps/shop)
+/test/fixtures/umbrella_project/apps/shop/tmp/
+
+# Editor tooling
+.elixir_ls/

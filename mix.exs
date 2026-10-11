@@ -2,6 +2,7 @@ defmodule Covenant.MixProject do
   use Mix.Project
 
   @version "0.1.0"
+  @source_url "https://github.com/tools4imps/covenant"
 
   def project do
     [
@@ -20,7 +21,9 @@ defmodule Covenant.MixProject do
       description: description(),
       package: package(),
       docs: docs(),
-      name: "Covenant"
+      name: "Covenant",
+      source_url: @source_url,
+      homepage_url: @source_url
     ]
   end
 
@@ -39,19 +42,28 @@ defmodule Covenant.MixProject do
   end
 
   defp description do
-    "The IMP Contract layer for Elixir: intent documents, decision records, " <>
-      "obligation-tagged contract tests, contract coverage and regeneration packs."
+    "The Contract layer of Impatient Programming for Elixir: intent documents, " <>
+      "decision records, obligation-tagged contract tests, contract coverage, " <>
+      "regeneration packs and mutation testing credited to obligations."
   end
 
   defp package do
     [
       licenses: ["MIT"],
-      links: %{},
-      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md)
+      links: %{
+        "GitHub" => @source_url,
+        "Impatient Programming" => "https://impatientprogramming.org"
+      },
+      files: ~w(lib docs .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
     ]
   end
 
   defp docs do
-    [main: "readme", extras: ["README.md"]]
+    [
+      main: "readme",
+      source_url: @source_url,
+      source_ref: "v#{@version}",
+      extras: ["README.md", "CHANGELOG.md", "docs/contract-convention.md"]
+    ]
   end
 end
