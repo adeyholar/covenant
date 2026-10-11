@@ -185,11 +185,28 @@ defmodule Covenant do
 
     with true <- apps != project and root != apps,
          {:ok, text} <- File.read(Path.join(root, "mix.exs")),
-         [_, apps_path] <- Regex.run(~r/\bapps_path:\s*"([^"]+)"/, text),
-         true <- Path.expand(apps_path, root) == apps do
+         true <- apps_dir?(apps_path(text), apps, root) do
       root
     else
       _ -> nil
+    end
+  end
+
+  # A literal `apps_path` must name the candidate; a value computed in the file
+  # (`apps_path: @apps`) counts only for a directory named `apps`.
+  defp apps_dir?({:literal, path}, apps, root), do: Path.expand(path, root) == apps
+  defp apps_dir?(:computed, apps, _root), do: Path.basename(apps) == "apps"
+  defp apps_dir?(nil, _apps, _root), do: false
+
+  # The one reading of a mix.exs's `apps_path:`, with `#` comments removed: its
+  # literal (`"apps"`, `'apps'`, `~c"apps"`), `:computed` for any other value, or
+  # nil when the file declares none.
+  defp apps_path(text) do
+    code = Regex.replace(~r/#(?!\{).*/, text, "")
+
+    case Regex.run(~r/\bapps_path:\s*(?:~c)?(["'])(.*?)\1/, code) do
+      [_, _, path] -> {:literal, path}
+      nil -> if Regex.match?(~r/\bapps_path:/, code), do: :computed
     end
   end
 
@@ -199,7 +216,7 @@ defmodule Covenant do
   @spec umbrella?(Path.t()) :: boolean()
   def umbrella?(dir) do
     case File.read(Path.join(dir, "mix.exs")) do
-      {:ok, text} -> Regex.match?(~r/\bapps_path:/, text)
+      {:ok, text} -> apps_path(text) != nil
       _ -> false
     end
   end
