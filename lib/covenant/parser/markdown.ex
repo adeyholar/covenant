@@ -39,18 +39,22 @@ defmodule Covenant.Parser.Markdown do
   @revision_log_header ~r/^\|\s*Rev\s*\|\s*Date\s*\|\s*Change\s*\|\s*Driver\s*\|/
 
   @heading ~r/^(\#{1,6})[ \t]+(.+?)[ \t]*\#*[ \t]*$/
-  @field ~r/^[ \t]*[-*][ \t]+\*\*([a-z_]+):\*\*[ \t]*(.*)$/
+  @field ~r/^[ \t]*[-*+][ \t]+\*\*([a-z_]+):\*\*[ \t]*(.*)$/
+  # `**Record:**` or `**record**:` — a field the reader would otherwise drop.
+  @near_field ~r/^[ \t]*[-*+][ \t]+\*\*([A-Za-z_]+)(:\*\*|\*\*:)/
+  # The fields the convention gives a meaning to; only these are policed outside prose.
+  @known_fields ~w(scope must why kind status record target)
   @block_heading ~r/^(\S+)[ \t]+(?:—|–|--|-)[ \t]+(.+)$/
   @block_id_like ~r/^[a-z0-9_.]+\.I[0-9]+$/
   @fence ~r/^[ \t]*(`{3,}|~{3,})(.*)$/
   @indented_heading ~r/^ {1,3}(\#{1,6})[ \t]+(.+?)[ \t]*\#*[ \t]*$/
-  @id_tail ~r/(^|\.)I[0-9]+$/
 
   @typep token ::
            {:heading, 1..6, String.t(), pos_integer()}
            | {:indented_heading, 1..6, String.t(), pos_integer()}
            | {:unclosed_fence, pos_integer()}
            | {:field, String.t(), String.t(), pos_integer()}
+           | {:bad_field, String.t(), String.t(), pos_integer()}
            | {:text, String.t(), pos_integer()}
 
   @doc "The required `##` headings of a heavy-form intent, in order."
@@ -195,12 +199,17 @@ defmodule Covenant.Parser.Markdown do
           {nil, [_, marker, info]} ->
             if String.starts_with?(marker, "`") and String.contains?(info, "`"),
               do: {[classify(line, n) | acc], nil},
-              else: {[{:text, line, n} | acc], {String.first(marker), String.length(marker), n}}
+              else:
+                {[{:text, line, n} | acc],
+                 {String.first(marker), String.length(marker), n, indent(line)}}
 
-          {{char, size, _}, [_, marker, info]} when binary_part(marker, 0, 1) == char ->
-            if String.length(marker) >= size and String.trim(info) == "",
-              do: {[{:text, line, n} | acc], nil},
-              else: {[{:text, line, n} | acc], fence}
+          {{char, size, _, open_indent}, [_, marker, info]}
+          when binary_part(marker, 0, 1) == char ->
+            # CommonMark: a closing fence is indented at most three spaces more than the opening.
+            if String.length(marker) >= size and String.trim(info) == "" and
+                 indent(line) <= open_indent + 3,
+               do: {[{:text, line, n} | acc], nil},
+               else: {[{:text, line, n} | acc], fence}
 
           {nil, _} ->
             {[classify(line, n) | acc], nil}
@@ -212,9 +221,11 @@ defmodule Covenant.Parser.Markdown do
 
     case fence do
       nil -> Enum.reverse(tokens)
-      {_, _, n} -> Enum.reverse([{:unclosed_fence, n} | tokens])
+      {_, _, n, _} -> Enum.reverse([{:unclosed_fence, n} | tokens])
     end
   end
+
+  defp indent(line), do: String.length(line) - String.length(String.trim_leading(line, " "))
 
   defp classify(line, n) do
     cond do
@@ -230,14 +241,29 @@ defmodule Covenant.Parser.Markdown do
         [_, key, value] = match
         {:field, key, String.trim(value), n}
 
+      bad = near_field(line) ->
+        {key, correct} = bad
+        {:bad_field, key, correct, n}
+
       true ->
         {:text, line, n}
     end
   end
 
+  # A known field written in a way the reader would not recognise, as `{written, correct}`.
+  defp near_field(line) do
+    with [_, key, tail] <- Regex.run(@near_field, line),
+         lower = String.downcase(key),
+         true <- lower in @known_fields do
+      {key <> if(tail == ":**", do: ":", else: "**:"), lower}
+    else
+      _ -> nil
+    end
+  end
+
   defp obligation_shaped?(title) do
     case Regex.run(@block_heading, title) do
-      [_, id, _] -> Regex.match?(@id_tail, id)
+      [_, id, _] -> Regex.match?(@block_id_like, id)
       nil -> false
     end
   end
@@ -281,6 +307,9 @@ defmodule Covenant.Parser.Markdown do
     tokens
     |> blocks()
     |> Enum.reduce({[], heading_errors(tokens, file), %{}}, fn
+      {:stray_bad, key, correct, n}, {obls, errors, seen} ->
+        {obls, [bad_field_error(file, n, key, correct) | errors], seen}
+
       {:stray, key, n}, {obls, errors, seen} ->
         message = "field `#{key}` is outside an obligation block"
         {obls, [Error.new(file, n, message) | errors], seen}
@@ -361,7 +390,13 @@ defmodule Covenant.Parser.Markdown do
   end
 
   defp chunk_block({:indented_heading, _, _, _}, current), do: {:cont, emit(current), :ignored}
-  defp chunk_block({:field, key, _, n}, nil), do: {:cont, {:stray, key, n}, nil}
+
+  defp chunk_block({:field, key, _, n}, nil) when key in @known_fields,
+    do: {:cont, {:stray, key, n}, nil}
+
+  defp chunk_block({:bad_field, key, correct, n}, nil),
+    do: {:cont, {:stray_bad, key, correct, n}, nil}
+
   defp chunk_block(_token, current) when current in [nil, :ignored], do: {:cont, current}
 
   defp chunk_block(token, {title, n, body}), do: {:cont, {title, n, [token | body]}}
@@ -373,24 +408,40 @@ defmodule Covenant.Parser.Markdown do
     body = Enum.reverse(body_rev)
     {fields, repeats} = fields(body)
 
-    case Regex.run(@block_heading, title) do
-      [_, id, block_title] ->
-        cond do
-          Regex.match?(@block_id_like, id) ->
-            build(id, String.trim(block_title), n, {fields, repeats}, component_id, file, form)
+    bad =
+      for {:bad_field, key, correct, line} <- body, do: bad_field_error(file, line, key, correct)
 
-          fields == %{} ->
-            :skip
+    known? = Enum.any?(@known_fields, &is_map_key(fields, &1))
 
-          true ->
-            {:error, [Error.new(file, n, bad_heading(component_id))]}
-        end
+    result =
+      case Regex.run(@block_heading, title) do
+        [_, id, block_title] ->
+          cond do
+            Regex.match?(@block_id_like, id) ->
+              build(id, String.trim(block_title), n, {fields, repeats}, component_id, file, form)
 
-      nil ->
-        if fields == %{},
-          do: :skip,
-          else: {:error, [Error.new(file, n, bad_heading(component_id))]}
+            known? ->
+              {:error, [Error.new(file, n, bad_heading(component_id))]}
+
+            true ->
+              :skip
+          end
+
+        nil ->
+          if known?,
+            do: {:error, [Error.new(file, n, bad_heading(component_id))]},
+            else: :skip
+      end
+
+    case {result, bad} do
+      {_, []} -> result
+      {{:error, errors}, _} -> {:error, errors ++ bad}
+      {_, _} -> {:error, bad}
     end
+  end
+
+  defp bad_field_error(file, line, written, correct) do
+    Error.new(file, line, "field `#{written}` must be written `- **#{correct}:** <value>`")
   end
 
   defp bad_heading(component_id),
