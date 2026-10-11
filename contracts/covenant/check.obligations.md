@@ -1,3 +1,6 @@
+---
+modules: [Covenant.Check, Covenant.Coverage, Covenant.Target, Covenant.JSON]
+---
 # covenant.check
 
 ## Purpose

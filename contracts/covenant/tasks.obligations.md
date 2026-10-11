@@ -1,3 +1,6 @@
+---
+modules: [Mix.Tasks.Covenant.Check, Mix.Tasks.Covenant.Conditions, Mix.Tasks.Covenant.Regen, Mix.Tasks.Covenant.Mutate]
+---
 # covenant.tasks
 
 ## Purpose

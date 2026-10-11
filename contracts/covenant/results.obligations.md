@@ -1,3 +1,6 @@
+---
+modules: [Covenant.Results, Covenant.Formatter]
+---
 # covenant.results
 
 ## Purpose

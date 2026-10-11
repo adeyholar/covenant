@@ -1,3 +1,6 @@
+---
+modules: [Covenant.Static, Covenant]
+---
 # covenant.static
 
 ## Purpose

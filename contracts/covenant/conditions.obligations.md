@@ -1,3 +1,6 @@
+---
+modules: [Covenant.Conditions]
+---
 # covenant.conditions
 
 ## Purpose

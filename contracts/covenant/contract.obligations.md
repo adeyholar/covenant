@@ -1,3 +1,6 @@
+---
+modules: [Covenant.Contract, Covenant.Contract.Component, Covenant.Contract.Obligation, Covenant.Contract.Record, Covenant.Contract.Condition, Covenant.Contract.Section, Covenant.Contract.Ceiling, Covenant.Contract.Validate, Covenant.Parser.Markdown, Covenant.Parser.Records, Covenant.Parser.Scope, Covenant.Error, Covenant.ContractError]
+---
 # covenant.contract
 
 ## Purpose

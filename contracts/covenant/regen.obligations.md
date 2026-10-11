@@ -1,3 +1,6 @@
+---
+modules: [Covenant.Regen, Covenant.Regen.Ownership]
+---
 # covenant.regen
 
 ## Purpose

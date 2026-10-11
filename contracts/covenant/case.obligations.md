@@ -1,3 +1,6 @@
+---
+modules: [Covenant.Case]
+---
 # covenant.case
 
 ## Purpose
