@@ -200,7 +200,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
         {:error, reason} -> fail(reason)
       end
 
-    survivors_path = Survivors.path(settings.contracts, plan.component)
+    # shown to the user: relative to where they ran the task, as they typed it
+    survivors_path =
+      settings.contracts |> Survivors.path(plan.component) |> Path.relative_to_cwd()
 
     check_survivors_document(survivors_path)
 
