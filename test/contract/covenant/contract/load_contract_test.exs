@@ -71,9 +71,11 @@ defmodule Covenant.Contract.LoadContractTest do
 
   @tag obligation: "covenant.contract.I8"
   test "a missing directory is an error" do
-    assert messages(Contract.load("no/such/contracts")) == [
-             "no/such/contracts: contracts directory not found"
-           ]
+    assert [message] = messages(Contract.load("no/such/contracts"))
+    assert message =~ "no/such/contracts: contracts directory not found"
+    assert message =~ ~S(config :covenant, contracts_dir: "../contracts")
+    assert message =~ "COVENANT_ROOT"
+    assert message =~ "config :covenant, root:"
 
     assert_raise Covenant.ContractError, ~r/contracts directory not found/, fn ->
       Contract.load!("no/such/contracts")

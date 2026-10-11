@@ -55,7 +55,7 @@ problem anchored to a file and line.
 
 ### covenant.contract.I8 — An empty directory is a valid Contract; a missing one is not
 - **scope:** `Covenant.Contract.load/1`
-- **must:** return an empty Contract for a directory with no contract files, and an error naming the path for a directory that does not exist
+- **must:** return an empty Contract for a directory with no contract files, and an error naming the path for a directory that does not exist, with a hint for a `contracts/` that lives above the Mix project (`config :covenant, contracts_dir: "../contracts"`, `COVENANT_ROOT`, `config :covenant, root: ...`)
 - **kind:** functional
 - **status:** active
 

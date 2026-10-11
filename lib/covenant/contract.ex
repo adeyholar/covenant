@@ -38,6 +38,10 @@ defmodule Covenant.Contract do
 
   defstruct dir: nil, components: %{}, records: %{}, ceilings: []
 
+  @not_found "contracts directory not found; the project root is the Mix project, so a `contracts/` " <>
+               "above it needs `config :covenant, contracts_dir: \"../contracts\"`, or " <>
+               "`COVENANT_ROOT` / `config :covenant, root: ...` to move the root"
+
   @doc "Loads the Contract from `dir`; `sibling: dir` adds the sibling layout's primitives."
   @spec load(Path.t(), keyword()) :: {:ok, t()} | {:error, [Error.t()]}
   def load(dir, opts \\ []) do
@@ -47,7 +51,7 @@ defmodule Covenant.Contract do
     cond do
       File.dir?(dir) -> do_load(dir, if(sibling?, do: sibling))
       sibling? -> do_load(dir, sibling)
-      true -> {:error, [Error.new(dir, nil, "contracts directory not found")]}
+      true -> {:error, [Error.new(dir, nil, @not_found)]}
     end
   end
 
