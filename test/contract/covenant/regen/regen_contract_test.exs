@@ -608,12 +608,23 @@ defmodule Covenant.RegenContractTest do
 
   @tag :tmp_dir
   @tag obligation: "covenant.regen.I4"
-  test "rewrites an existing pack directory from scratch", %{contract: contract, tmp_dir: dir} do
+  test "rewrites an existing pack directory, refusing files the marker does not list", %{
+    contract: contract,
+    tmp_dir: dir
+  } do
     out = Path.join(dir, "pack")
     File.mkdir_p!(out)
-    File.write!(Path.join(out, ".covenant-pack"), "example.greeter\n")
-    File.write!(Path.join(out, "stale.txt"), "old")
+    File.write!(Path.join(out, ".covenant-pack"), "example.greeter\nPROMPT.md\n")
+    File.write!(Path.join(out, "PROMPT.md"), "old")
     {:ok, _} = Regen.write_pack(contract, "example.greeter", out: out, root: dir, test_paths: [])
-    refute File.exists?(Path.join(out, "stale.txt"))
+    assert File.read!(Path.join(out, "PROMPT.md")) =~ "# Regenerate"
+
+    File.write!(Path.join(out, "stale.txt"), "old")
+
+    assert {:error, message} =
+             Regen.write_pack(contract, "example.greeter", out: out, root: dir, test_paths: [])
+
+    assert message =~ "stale.txt"
+    assert File.read!(Path.join(out, "stale.txt")) == "old"
   end
 end

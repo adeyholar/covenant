@@ -210,7 +210,32 @@ defmodule Covenant.Regen.Ownership do
 
   defp first_segment(module), do: module |> String.split(".") |> hd()
 
-  defp loaded?(module), do: Code.ensure_loaded?(Module.concat([module]))
+  defp loaded?(module) do
+    case module_atom(module) do
+      nil -> false
+      atom -> Code.ensure_loaded?(atom)
+    end
+  end
+
+  @doc """
+  The atom of a module named by a string in a Contract, or `nil`. A name is never turned into a
+  new atom unless a beam of that name is on the code path (so it names a real module): the atom
+  exists already when the module is loaded.
+  """
+  @spec module_atom(String.t()) :: module() | nil
+  def module_atom(module) do
+    name = "Elixir." <> module
+
+    try do
+      String.to_existing_atom(name)
+    rescue
+      ArgumentError ->
+        case :code.where_is_file(String.to_charlist(name <> ".beam")) do
+          :non_existing -> nil
+          _ -> String.to_atom(name)
+        end
+    end
+  end
 
   @doc """
   Classifies one module name by where it lives (rule 3 and 4 of the module
@@ -220,7 +245,7 @@ defmodule Covenant.Regen.Ownership do
   @spec classify(String.t(), environment(), [String.t()]) :: verdict()
   def classify(module, environment, own_namespaces \\ []) do
     if loaded?(module) do
-      case [module] |> Module.concat() |> :code.which() |> classify_beam(environment) do
+      case module |> module_atom() |> :code.which() |> classify_beam(environment) do
         :own -> :implemented
         other -> other
       end
