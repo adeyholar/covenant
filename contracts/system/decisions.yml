@@ -285,3 +285,53 @@
       check: { kind: file, path: lib/covenant.ex }
   expires: When the next subsystem lands in Covenant
   source: ["contracts/system/scope.yml"]
+
+- id: sibling-primitives-are-components
+  date: "2026-10-10"
+  decision: "A primitive of the sibling layout (`contract/<primitive>/README.md`) loads as a component of form `:primitive`, app `contract`, with obligation ids `<primitive>/<id>`, so check, coverage, regen and mutate treat both layouts alike and a project can use either or both."
+  driver: "flinch, qualm and exhale read `contract/<primitive>/` with `- **A1**` obligations and `// Contract: calc/A1` comments; a team running them beside Covenant should not keep two Contracts."
+  alternatives:
+    - option: Convert the sibling layout into contracts/ files
+      rejected: "Two copies of every obligation drift, and the sibling tools would stop reading the one Covenant keeps."
+    - option: A second set of tasks for the sibling layout
+      rejected: "Every check, the coverage table, regen and mutate would exist twice; a component is already the unit all of them work on."
+  evidence: "tools4imps/flinch README (The Contract, Declaring survivors) and its contract/contract/README.md (C1–C7)."
+  invariant: covenant.primitive.I1
+  approved_by: "lead, 2026-10-10"
+  conditions:
+    - text: The sibling layout's directory is contract/ at the project root unless configured
+  expires: When the sibling tools change their Contract layout
+  source: ["lib/covenant/parser/primitive.ex", "lib/covenant/contract.ex"]
+
+- id: contract-comments-become-tags
+  date: "2026-10-10"
+  decision: "`Covenant.Case` reads the `# Contract:` comments above each test from the source at compile time and writes their ids into the test's `obligation` tag, registering its `@before_compile` before `use ExUnit.Case` so it runs before ExUnit turns the tests into `__ex_unit__/0`."
+  driver: "Everything downstream (Covenant.Formatter, coverage, the mutate runner's kill credit) reads `tags[:obligation]`; a comment that became a tag needs no second path through any of them."
+  alternatives:
+    - option: Read the comments only in mix covenant.check
+      rejected: "The formatter and the mutate runner would not credit commented tests, so the coverage and the kill matrix would disagree with the check."
+    - option: Override ExUnit's test macro
+      rejected: "Covenant.Case would have to track ExUnit's macro across releases; rewriting the registered tests touches one attribute."
+  evidence: "ExUnit.Case's __before_compile__ reads @ex_unit_tests; @before_compile hooks run in registration order (checked on Elixir 1.18.4 and 1.19.6)."
+  invariant: covenant.primitive.I4
+  approved_by: "lead, 2026-10-10"
+  conditions:
+    - text: Elixir is at least 1.18
+      check: { kind: elixir, version: ">= 1.18.0" }
+  expires: When ExUnit stops building __ex_unit__/0 from @ex_unit_tests in its own @before_compile
+  source: ["lib/covenant/case.ex"]
+
+- id: mutants-md-is-a-survivors-file
+  date: "2026-10-10"
+  decision: "A primitive's `mutants.md` is its survivors file: an `equivalent` declaration sorts its survivors `equivalent`, an `unpromised` one sorts them `unpromised` (a sort added for it), and a declaration names a unit (`Module.function/arity`) and the mutation as `mix covenant.mutate` prints it (`from -> to`), or `*`."
+  driver: "flinch's rule holds unchanged: every survivor is killed or declared with a reason, and a declaration a test contradicts or that matches nothing fails the run; only the mutant ids differ, because Covenant's operators print their own text."
+  alternatives:
+    - option: Map unpromised onto decision-hole
+      rejected: "decision-hole is a gap in the Contract's own text; unpromised is a behaviour the Contract leaves open on purpose, and flinch keeps them apart."
+    - option: Keep flinch's whole-expression mutant ids
+      rejected: "Covenant's mutants print the changed node (`<` → `<=`), so a declaration copied from the run is what matches; inventing a second rendering would make every declaration hand-written."
+  evidence: "flinch README, Declaring survivors; contract/declare/README.md D1–D8."
+  invariant: covenant.primitive.I5
+  approved_by: "lead, 2026-10-10"
+  expires: When Covenant's mutants get ids of their own
+  source: ["lib/covenant/parser/primitive.ex", "lib/covenant/mutate/survivors.ex"]
