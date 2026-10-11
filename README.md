@@ -1,525 +1,392 @@
 # Covenant
 
-The Contract layer of IMP (Impatient Programming) for
-Elixir. A Contract is the team's versioned description of what a component
-must do: an **intent** document, **decision records** with the reasons
-behind every value that looks arbitrary, and **obligations** made executable
-as tagged contract tests. Covenant parses the Contract, binds tests to
-obligations at compile time, publishes contract coverage, re-checks the
-premises of decisions and writes regeneration packs — so a component can be
-deleted and rebuilt from its Contract alone.
+Covenant fails a build when an Elixir project's Contract stops being true. It is the Contract layer for [Impatient Programming](https://impatientprogramming.org) in Elixir, and the sibling of [flinch](https://github.com/tools4imps/flinch), [qualm](https://github.com/tools4imps/qualm) and [exhale](https://github.com/tools4imps/exhale-ruby).
 
-Covenant implements the Machina contract convention (`contracts/README.md`
-in machina-ex) and governs itself with it: see this project's own
-[`contracts/`](contracts/) and `test/contract/`.
+A Contract, in Impatient Programming, is what a component promises, written down well enough that the component could be deleted and rebuilt from it alone: an intent, decision records that give the reason behind every value that looks arbitrary, and numbered obligations, each proved by a contract test. Covenant reads the Contract under `contracts/`, binds every contract test to the obligations it proves when the test compiles, publishes contract coverage, re-checks the premises of decisions, writes regeneration packs, and mutates a component to show which obligation's tests notice when its code breaks.
 
-## Installation
+`mix covenant.mutate` is the Elixir counterpart of flinch's mutation gate. It breaks a component's code one change at a time, runs the component's contract tests against each broken copy, and credits every kill to the obligations tagged on the tests that caught it. A test that catches nothing is named. qualm judges a change in any language, so it runs beside Covenant as it is.
+
+Covenant is a Mix library with one runtime dependency, `yaml_elixir`. It needs Elixir 1.18 or later.
+
+## Install
 
 ```elixir
+# mix.exs
 def deps do
-  [{:covenant, "~> 0.1", only: [:dev, :test]}]
+  [{:covenant, "~> 0.1", only: [:dev, :test], runtime: false}]
 end
 ```
 
-Elixir 1.18 or later. The only runtime dependency is `yaml_elixir`.
+Until 0.1 is on Hex, take it from GitHub:
 
-## Layout
-
+```elixir
+{:covenant, github: "tools4imps/covenant", only: [:dev, :test], runtime: false}
 ```
+
+Then let every `mix test` record which obligations passed:
+
+```elixir
+# test/test_helper.exs
+ExUnit.start(formatters: [ExUnit.CLIFormatter, Covenant.Formatter])
+```
+
+## Use
+
+```bash
+mix covenant.check                    # every active obligation has a passing test
+mix covenant.check --static           # the same checks, with nothing compiled or run
+mix covenant.conditions               # re-check the premises of the decision records
+mix covenant.regen billing.invoices   # write a pack to rebuild a component from its Contract
+mix covenant.mutate billing.invoices  # break the component and see which obligations notice
+```
+
+A real run on the example project in [`test/fixtures/example_project`](https://github.com/tools4imps/covenant/tree/main/test/fixtures/example_project), two components with seven active obligations:
+
+```text
+$ mix covenant.check
+covenant.check: running mix test test/contract
+Running ExUnit with seed: 848591, max_cases: 20
+
+........
+Finished in 0.04 seconds (0.04s async, 0.00s sync)
+8 tests, 0 failures
+
+Contract coverage (obligations with a passing test / active obligations)
+
+  example.counter      6/6  100.0%
+  example.greeter      1/1  100.0%
+  system               0/0     n/a
+
+  app example              7/7  100.0%
+  app system               0/0     n/a
+
+  total                    7/7  100.0%
+covenant.check: warning: 1 component(s) declare no modules: example.greeter
+
+wrote contracts/coverage.json
+covenant.check: the Contract holds
+```
+
+`mix covenant.check` fails on a malformed obligation block, a dangling `record`, `invariant`, `superseded_by` or `depends_on` reference, an active obligation with no passing tagged test, a failing tagged test, an exception whose target no longer exists, and a scope ceiling exceeded. Coverage counts the active obligations that have at least one passing test; retired obligations and declared exceptions are reported but left out of the count. `contracts/coverage.json` is written without a timestamp, so it can be committed and diffed.
+
+`--static` compiles nothing and runs no test. It reads the contract test files as source and applies every check that needs no compiled code, for a Contract written ahead of its implementation. It writes `contracts/coverage.static.json` and never touches `coverage.json`:
+
+```text
+$ mix covenant.check --static
+covenant.check --static: read 2 file(s), 2 contract test module(s), 8 tagged test(s) under test/contract; no test was compiled or run
+
+Static contract coverage (obligations with a tagged test / active obligations)
+
+  example.counter      6/6  100.0%
+  example.greeter      1/1  100.0%
+  system               0/0     n/a
+
+  app example              7/7  100.0%
+  app system               0/0     n/a
+
+  total                    7/7  100.0%
+
+skipped (need compiled code): 1 exception target(s), 1 module ceiling(s): counter-event-kinds, example.greeter.I2
+covenant.check: warning: 1 component(s) declare no modules: example.greeter
+
+wrote contracts/coverage.static.json
+covenant.check: the Contract holds statically
+```
+
+## Exit codes
+
+Every task exits 0 when the Contract holds and 1 when it doesn't. 1 also covers a run that couldn't finish: a Contract that doesn't parse, an unknown component, a red baseline before mutation.
+
+| Task | Exits 1 when |
+| --- | --- |
+| `mix covenant.check` | any check above fails, or the contract suite fails |
+| `mix covenant.conditions` | any decision record is suspect |
+| `mix covenant.regen` | the component is unknown or the Contract doesn't parse |
+| `mix covenant.mutate` | the baseline is red, a survivor has no annotation, or an annotation matches no survivor |
+
+## The Contract
+
+```text
 contracts/
-  README.md                      # your convention
+  README.md                        the project's convention
   system/
-    intent.md                    # whole-product intent (component "system")
-    decisions.yml                # architecture decision records
-    scope.yml                    # scope-budget ceilings
+    intent.md                      the whole product's intent
+    decisions.yml                  architecture decision records
+    scope.yml                      scope-budget ceilings
   <app>/
-    <component>.intent.md        # heavy form: nine required sections
-    <component>.obligations.md   # light form: Purpose + obligation blocks
-    <component>.decisions.yml    # that component's records
+    <component>.intent.md          heavy form: nine sections in a fixed order
+    <component>.obligations.md     light form: a Purpose and obligation blocks
+    <component>.decisions.yml      the component's decision records
+    <component>.survivors.yml      sorted survivors of mix covenant.mutate
 test/contract/<app>/<component>_contract_test.exs
 ```
 
-Component ids are `<app>.<component>`; obligation ids are `<component id>.I<n>`.
+The full convention, with the nine heavy-form sections and the rules for contract tests, is in [`docs/contract-convention.md`](docs/contract-convention.md). Copy it to your project as `contracts/README.md`: `mix covenant.regen` puts that file in every pack.
 
-### Obligation blocks
+Component ids are `<app>.<component>`, and obligation ids are `<component id>.I<n>`. An obligation is a block:
 
 ```markdown
 ### example.counter.I1 — A counter never goes below zero
 - **scope:** `Example.Counter.decrement/2`, every starting value
-- **must:** stop at zero when `by` exceeds the value, instead of going negative
-- **why:** v1 raised on underflow and every caller rescued it (incident #1)
+- **must:** stop at zero when `by` exceeds the value, instead of going negative or raising
+- **why:** v1 raised on underflow and every caller rescued it, hiding real bugs (fixture incident #1)
 - **kind:** functional
 - **record:** clamp-at-zero
 - **status:** active
 ```
 
-`kind` is one of `functional`, `non-functional`, `persisted-format`,
-`ordering`, `security` or `exception`; `status` is `active` or `retired`.
-Heavy form requires `scope`, `must`, `why`, `kind`, `status`; light form
-makes `why` optional. A `kind: exception` block declares intentional
-duplication or a known gap and names the code with `target:`
-(`Module.function/arity`, `Module` or a file path); it needs no test, and
-the build fails when its target no longer exists.
+`kind` is `functional`, `non-functional`, `persisted-format`, `ordering`, `security` or `exception`. A `kind: exception` block declares intentional duplication or a known gap, names the code with `target:` (`Module.function/arity`, `Module` or a file path), needs no test, and fails the check once its target is gone.
 
-### Decision records
+### Contract tests
 
-```yaml
-- id: clamp-at-zero
-  date: "2026-10-09"
-  decision: A decrement that would go below zero stops at zero instead of raising.
-  driver: v1 raised on underflow and every caller rescued it (incident #1).
-  alternatives:
-    - option: Raise ArgumentError on underflow
-      rejected: Every caller wrapped the call in rescue.
-  evidence: Incident log #1.
-  invariant: example.counter.I1
-  approved_by: lead (2026-10-09)
-  conditions:
-    - text: Elixir is at least 1.18
-      check: { kind: elixir, version: ">= 1.18.0" }
-    - text: Callers treat the counter as a value
-  expires: When callers need signed counters
-  source: ["docs/incidents.md#1"]
-  # optional: kind (fact | cross-system | known-gap), superseded_by, depends_on, notes
-```
-
-`id`, `date`, `decision`, `driver` and `approved_by` are required. Condition
-`check`s are what `mix covenant.conditions` evaluates:
-
-| kind     | fields                     | holds when                                   |
-|----------|----------------------------|----------------------------------------------|
-| `dep`    | `name`, optional `version` | the dependency is in `mix.lock` (and matches)|
-| `env`    | `name`                     | the environment variable is set              |
-| `file`   | `path`                     | the path exists                              |
-| `otp`    | `version`                  | the running OTP release matches              |
-| `elixir` | `version`                  | the running Elixir version matches           |
-| `value`  | `call`, `equals`, optional `path` | the function returns the value the record says (below) |
-
-A version requirement may leave out the minor or patch number after a comparison
-operator: `>= 28.0` reads as `>= 28.0.0`. `~>` keeps the parts it was written with, so
-`~> 28.0` still means below 29. The running version is compared as three numbers
-(`28` and `28.5` are padded with zeros, the fourth number of `27.3.4.1` is dropped). A
-requirement that does not parse is suspect, never skipped.
-
-### `value` checks
-
-The record that decides a value can verify it:
-
-```yaml
-conditions:
-  - text: The claim batch is 20
-    check: { kind: value, call: "Agora.Wake.limits/0", path: [claim_batch], equals: 20 }
-  - text: A failed turn is retried after 60 s, then 300 s
-    check: { kind: value, call: "Agora.Wake.limits/0", path: [backoff_s], equals: [60, 300] }
-```
-
-`call` is `Module.fun/0` (arity 0 only; any other shape is an incomplete check). It is
-called in the running project's VM, so `mix covenant.conditions` compiles the project first.
-`path` is an optional list of keys walked through maps; for each key the atom form is tried,
-then the string form. `equals` is a YAML scalar or list, compared after normalising: atoms
-compare as their string (`mode: fast` matches `:fast`), lists element by element, numbers by
-value (`20` equals `20.0`); a boolean and `null` only equal themselves.
-
-| Outcome | When |
-|---|---|
-| holds | the value equals `equals` |
-| suspect | the value differs (`Agora.Wake.limits/0 [claim_batch] is 21, the record says 20`), a key is missing, or the call raises, throws or exits |
-| unchecked | the module is not compiled in this VM (`module not compiled in this VM: Agora.Wake`); counted and listed by `--verbose`, never a failure |
-
-### Scope ceilings (`system/scope.yml`)
-
-```yaml
-- name: core-modules
-  ceiling: 60
-  counter: { kind: glob, pattern: "apps/core/lib/**/*.ex" }
-  why: The core stays small enough to regenerate in a day.
-  record: six-tools                       # optional
-- name: runtime-deps
-  ceiling: 25
-  counter: { kind: module, module: Machina.Scope, function: runtime_deps }
-```
-
-A `glob` counter counts matching files; a `module` counter calls
-`module.function/0`. A count above the ceiling fails `mix covenant.check`. A module
-counter that raises (a stub not implemented yet) leaves its ceiling unchecked: the check
-warns (`scope ceiling `name` unchecked: Mod.fun/0 raised Mod.NotImplemented`), still
-completes and writes `contracts/coverage.json`.
-
-## Contract tests
+`Covenant.Case` wraps `ExUnit.Case`. Every test in a `Covenant.Case` module names the obligations it proves:
 
 ```elixir
 defmodule Example.CounterContractTest do
   use Covenant.Case, component: "example.counter", async: true
 
   @tag obligation: "example.counter.I1"
-  test "decrementing past zero stops at zero" do
-    ...
-  end
-
-  @tag obligation: ["example.counter.I1", "example.counter.I4"]
-  test "the worked example: clamps record a clamped event in call order" do
+  test "decrementing past zero stops at zero, never negative, never raising" do
     ...
   end
 end
 ```
 
-`Covenant.Case` wraps `ExUnit.Case`. At compile time every test must carry
-an `obligation` tag naming an active obligation of the module's component; an
-unknown or retired id, an id of another component, or an untagged test is a
-compile error at the test's line:
+The tags are checked when the module compiles. An untagged test, an unknown or retired id, or an id from another component is a compile error at the test's line:
 
-```
-** (CompileError) test/contract/example/counter_contract_test.exs:12: test x is
-tagged with unknown obligation `example.counter.I99`; `example.counter` declares:
-example.counter.I1, example.counter.I2, ...
+```text
+** (CompileError) test/contract/example/zz_bad_contract_test.exs:5: test counts past the cap is tagged with unknown obligation `example.counter.I99`; `example.counter` declares: example.counter.I1, example.counter.I2, example.counter.I3, example.counter.I4, example.counter.I5, example.counter.I6, example.counter.I7
 ```
 
-Add the formatter to `test/test_helper.exs` so every `mix test` records which
-obligations passed:
+`@tag`, `@describetag` and `@moduletag` all work, and a tag can be a list of ids.
 
-```elixir
-ExUnit.start(formatters: [ExUnit.CLIFormatter, Covenant.Formatter])
+### Decision records
+
+```yaml
+- id: configurable-max
+  date: "2026-10-09"
+  decision: The cap is configurable per counter via new(max:) and defaults to 100.
+  driver: Widgets of other widths appeared; the fixed cap had to be forked.
+  alternatives:
+    - option: A global application-env cap
+      rejected: Two widgets on one page need two caps.
+  approved_by: lead (fixture, 2026-10-09)
+  depends_on: [fixed-max-100]
+  conditions:
+    - text: OTP 26 or later
+      check: { kind: otp, version: ">= 26.0.0" }
+    - text: The counter implementation lives in lib/example/counter.ex
+      check: { kind: file, path: lib/example/counter.ex }
+    - text: A counter built without options is capped at 100
+      check: { kind: value, call: "Example.Counter.new/0", path: [max], equals: 100 }
+  expires: When the cap moves to a persisted setting
 ```
 
-## Tasks
+`id`, `date`, `decision`, `driver` and `approved_by` are required. A condition with a `check` is one `mix covenant.conditions` can evaluate:
 
-| Task | Does |
-|---|---|
-| `mix covenant.check` | Parses the Contract, runs `test/contract` with the formatter, fails on malformed blocks, dangling `record`/`invariant`/`superseded_by`/`depends_on` references, an active obligation without a tagged test, a tag naming an unknown obligation, a failing tagged test, a stale exception, or a scope ceiling exceeded; prints coverage per component and per app; writes `contracts/coverage.json`. `--no-run` reuses the last results; `--contracts DIR`, `--test-path PATH` (repeatable), `--results-dir DIR`. Exit 1 on any problem. Warns, without failing, about the components that declare no modules (see [Declaring modules](#declaring-modules)). |
-| `mix covenant.check --static` | Compiles and runs no test: parses the contract test files (`Code.string_to_quoted/2`), reads every `use Covenant.Case` module's `@tag`/`@describetag`/`@moduletag obligation:` values (strings and lists, merged as ExUnit merges them) and runs every check that needs no compiled code, plus `Covenant.Case`'s compile-time rules. Module/function exception targets and `module` ceiling counters are listed as skipped; file targets and `glob` counters are checked against `--root` (default `Covenant.root/0`). Writes `contracts/coverage.static.json` (`"mode": "static"`), never `coverage.json`. For a Contract written ahead of its implementation. |
-| `mix covenant.conditions` | Evaluates every record condition with a `check` (a `value` check runs in the project's VM) and lists suspect records with the failing premise. `--verbose` prints every outcome and why a condition was not checked. Exit 1 when any record is suspect; a condition that cannot be checked in this VM is counted, not failed. |
-| `mix covenant.regen <component>` | Writes a regeneration pack: `PROMPT.md`, the regeneration brief, the convention, the intent (or obligations file) and records, the system intent and records, the component's contract tests and public-surface stubs. The implementation is excluded. `--out DIR` (default `tmp/covenant/regen/<component>`). |
-| `mix covenant.mutate <component>` | Mutates the component's implementation, runs its contract tests against every mutant and credits each kill to the obligations tagged on the tests that caught it; writes the kill matrix. See [Mutation testing](#mutation-testing). `--jobs N`, `--seed N`, `--timeout MS`, `--fail-fast`, `--module MOD` (repeatable), `--out PATH`. Exit 1 on a red baseline, an unannotated survivor or a stale annotation. |
+| `kind` | Fields | Holds when |
+| --- | --- | --- |
+| `dep` | `name`, optional `version` | the dependency is in `mix.lock`, at a matching version |
+| `env` | `name` | the environment variable is set |
+| `file` | `path` | the path exists under the project root |
+| `otp` | `version` | the running OTP release matches |
+| `elixir` | `version` | the running Elixir matches |
+| `value` | `call`, `equals`, optional `path` | the function returns the value the record decided |
 
-```
-$ mix covenant.check
-covenant.check: running mix test test/contract
-......
-6 tests, 0 failures
+A `value` check lets the record that decides a value verify it. `call` names a zero-arity function of your project, as `"Module.fun/0"`, and is called in the project's own VM after it compiles. `path` walks keys through maps, trying the atom form of each key before the string form. Atoms compare as strings, lists element by element, numbers by value. A different value is suspect (`Example.Scope.event_kinds/0 is 3, the record says 4`), and so is a missing key or a call that raises. A module that isn't compiled in the VM leaves the condition unchecked, which is counted and never a failure.
 
-Contract coverage (obligations with a passing test / active obligations)
+```text
+$ mix covenant.conditions --verbose
+clamp-at-zero (contracts/example/counter.decisions.yml:1)
+  ok Elixir is at least 1.18 — Elixir 1.19.6 matches `>= 1.18.0`
+  - Callers treat the counter as a value, never as a process (not machine-checkable)
+positive-steps (contracts/example/counter.decisions.yml:20)
+  ok The contract tooling depends on yaml_elixir — dependency `yaml_elixir` 2.12.2 matches `~> 2.12`
+fixed-max-100 (contracts/example/counter.decisions.yml:36)
+configurable-max (contracts/example/counter.decisions.yml:46)
+  ok OTP 26 or later — OTP 28.5 matches `>= 26.0.0`
+  ok The counter implementation lives in lib/example/counter.ex — file `lib/example/counter.ex` exists
+  ok A counter built without options is capped at 100 — Example.Counter.new/0 [max] is 100
+one-example-app (contracts/system/decisions.yml:1)
+  ok The PATH environment variable is set (mix is found through it) — env `PATH` is set
+  ok The fixture keeps its own mix.lock — file `mix.lock` exists
 
-  example.counter      4/4  100.0%
-  example.greeter      1/1  100.0%
-
-  app example              5/5  100.0%
-
-  total                    5/5  100.0%
-
-wrote contracts/coverage.json
-covenant.check: the Contract holds
-```
-
-Coverage counts obligations with at least one passing test over active
-obligations. Retired obligations and `kind: exception` declarations are
-reported but excluded from the denominators.
-
-### Public-surface stubs
-
-`mix covenant.regen` reads signatures from the intent's `## Public surface`
-section and renders one stub module per public module:
-
-```markdown
-- `Example.Counter.new(opts) :: t` — a counter at zero; `opts[:max]` sets the cap.
-- `Example.Counter.value/1` — the current value.
+covenant.conditions: 5 record(s), 7 machine-checkable condition(s), 0 suspect record(s)
 ```
 
-The doc keeps the line's inline code verbatim; only the signature spans that
-open the line are removed.
+A version requirement may leave out the minor and patch numbers after a comparison: `>= 28.0` reads as `>= 28.0.0`. One that doesn't parse is suspect, never skipped.
 
-A reference to a module the component does not own (`System.halt(1)` or
-`Ecto.UUID.cast/1` in prose, or a collaborator's `Machina.Repo.Scoped.scoped/2`)
-gets no stub. Which modules the component owns:
+### Scope ceilings
 
-1. If the Public surface has a `#### Modules` paragraph (or the front matter a
-   `modules:` list), that list is authoritative: exactly those modules are
-   stubbed and every other reference is skipped. Only the backticked names
-   outside parentheses count.
-2. A module that another component of the Contract lists (in its own
-   `#### Modules` paragraph or `modules:`) belongs to that component, whether or
-   not it is implemented yet: it is skipped, and the task prints it on a
-   `skipped (owned by <component>)` line.
-3. Otherwise a loadable module is foreign when its beam lies under the OTP or
-   Elixir installation or a dependency's build path, and *already implemented*
-   when it lies in an app of the running Mix project (umbrella children and
-   `in_umbrella` dependencies included): the component declared no modules, so
-   nothing says the implementation is its own and a stub would shadow it. It is
-   skipped, on a `skipped (already implemented in this project)` line. A module
-   that is not loadable is foreign when its first segment is a dependency's
-   namespace (`Ecto` for `:ecto`), stubbed when its first segment is a namespace
-   the component's obligation scopes use (or when they name no module), and
-   *unplaced* otherwise.
-4. A loadable module whose beam is anywhere else is stubbed and printed on a
-   `possibly_foreign:` line.
+`system/scope.yml` caps what can be counted, so the product stays small enough to regenerate. A `glob` counter counts files; a `module` counter calls a function of the project.
 
-An alias is merged into the one known module whose name ends in it, the known
-modules being the listed ones, the ones other components list and the ones the
-surface stubs: the bare `Scope` (`Scope.put/1`), a dotted fragment such as
-`Repo.Scoped`, and an unplaced name such as `Spend.Policy`. It is dropped when
-none or several match. The task prints one more line with the number and modules
-of the skipped references no other line accounts for.
-
-### Declaring modules
-
-Rule 3 is a guess, and it skips the component's *own* implemented modules too: a
-component that lists no modules has claimed none. Declare them, in a
-`#### Modules` paragraph of the Public surface or in the front matter:
-
-```markdown
-## Public surface
-
-#### Modules
-
-`Example.Counter`, `Example.Counter.Log`.
+```yaml
+- name: lib-files
+  ceiling: 36
+  counter: { kind: glob, pattern: "lib/**/*.ex" }
+  why: A contract tool that cannot be read in an afternoon will not be trusted to gate merges.
+  record: small-surface-after-mutate
 ```
 
-`mix covenant.check` (and `--static`) warns about every component that declares
-none, as one line that never fails the check:
+A count over its ceiling fails `mix covenant.check`. A module counter that raises, such as a stub not written yet, leaves its ceiling unchecked with a warning.
 
-```
-covenant.check: warning: 2 component(s) declare no modules: example.greeter, example.widget
+## Regeneration packs
+
+```text
+$ mix covenant.regen example.counter
+  CONTRACT_CONVENTION.md
+  PROMPT.md
+  REGENERATION_BRIEF.md
+  contracts/example/counter.decisions.yml
+  contracts/example/counter.intent.md
+  contracts/system/decisions.yml
+  contracts/system/intent.md
+  stubs/lib/example/counter.ex
+  test/contract/example/counter_contract_test.exs
+covenant.regen: wrote 9 file(s) to tmp/covenant/regen/example.counter
 ```
 
-The whole-product `system` intent is never listed. (`mix covenant.mutate` reads only the
-front matter's `modules:`, then derives the modules from the Public surface and the scopes.)
+A pack holds everything an agent needs to rebuild one component and nothing of the old implementation: the intent or obligations file, the records, the system intent, the component's contract tests, and one stub module per module of the intent's `## Public surface`. Hand it to a fresh agent, rebuild, and run the contract tests. Every difference is a sentence the Contract was missing.
+
+A Public surface mentions modules the component doesn't own, and a stub for one of those would shadow the real module. A `#### Modules` paragraph in the Public surface, or `modules:` in the file's front matter, says exactly what the component owns. Without one, Covenant decides from where each module lives and prints what it skipped; `mix covenant.check` warns about every component that declares no modules. The rules are in the docs for `Covenant.Regen.Ownership`.
 
 ## Mutation testing
 
-Obligations say what must hold; the contract tests claim to prove it. `mix
-covenant.mutate <component>` (for example `mix covenant.mutate example.counter`)
-checks that claim by breaking the implementation on purpose and seeing which
-tests notice (IMP R26: every test proves it is worth keeping).
+```text
+$ mix covenant.mutate example.counter
+covenant.mutate: example.counter — modules (derived): Example.Counter
+covenant.mutate: tests: test/contract/example/counter_contract_test.exs
+covenant.mutate: Example.Counter (lib/example/counter.ex)
+  m001 lib/example/counter.ex:11:16 integer_shift `100` → `101`  killed by 1 test(s)
+  m002 lib/example/counter.ex:11:16 integer_shift `100` → `99`  killed by 2 test(s)
+  m003 lib/example/counter.ex:18:20 integer_shift `0` → `1`  SURVIVED
+  ...
+covenant.mutate: baseline 7 test(s) green in 19 ms; 61 of 61 mutant(s) run, per-test timeout 1000 ms
 
-**What it mutates.** The component's implementation modules, in this order of
-precedence: the `--module` flags, the `modules:` list in the front matter of
-its intent or obligations file, the modules named in its `## Public surface`
-and in the `scope` of its obligations. The source is parsed to an AST
-(`Code.string_to_quoted/2` with positions), one change is applied at a time and
-the result is compiled **in memory**: no file is written. A change is made by an
-operator; each mutant is one change at one place.
+Kill matrix — example.counter (Example.Counter)
+  61 mutants: 43 killed, 14 survived, 0 timed out, 4 invalid — score 75.4%
+  7 tests, baseline 19 ms, seed 0, timeout 1000 ms
+
+  obligation          killed  unique
+  example.counter.I1      26       1
+  example.counter.I2      17       7
+  example.counter.I3      20       2
+  example.counter.I4      22       0
+  example.counter.I6      23       3
+  example.counter.I7      15       1
+
+Survivors (14; 0 unsorted)
+  m003 lib/example/counter.ex:18:20 integer_shift `0` → `1`  equivalent — new/1 sets value explicitly; the defstruct default is never read.
+  m007 lib/example/counter.ex:25:29 logical_swap `and` → `or`  evaluation-gap — new/1 rejecting a non-integer max is not an obligation yet; add one before callers rely on it.
+  m019 lib/example/counter.ex:34:48 integer_shift `1` → `2`  decision-hole — The Contract lists increment/2 only; whether a default step exists is deliberately undecided.
+  ...
+
+Mutation-blind tests (warn): no mutant only this test catches
+  test events are listed oldest first, one per successful call (Example.CounterContractTest) — 15 kill(s), 0 unique
+  test the worked example: clamps record a clamped event in call order (Example.CounterContractTest) — 21 kill(s), 0 unique
+
+wrote tmp/covenant/mutate/example.counter/kill_matrix.json
+
+covenant.mutate: every mutant is caught or sorted
+```
+
+The modules to mutate come from `--module` flags, else the `modules:` front matter, else the Public surface and the obligations' `scope`. Each mutant is one AST change, compiled in memory: no file is written. The suite runs in one `MIX_ENV=test` worker that boots once and hot-swaps each mutant, and the unmutated baseline has to pass first. The set and order of mutants is a pure function of the source.
 
 | Operator | Change |
-|---|---|
-| `boolean_flip` | `true` ↔ `false` |
-| `comparison_swap` | `==` ↔ `!=`, `===` ↔ `!==`, `<` → `<=` and `>=`, and so on |
-| `arithmetic_swap` | `+` ↔ `-`, `*` ↔ `/` |
-| `logical_swap` | `and` ↔ `or`, `&&` ↔ `\|\|` |
-| `condition_negate` | `if c` → `if !c`, `unless c` → `unless !c` |
-| `statement_removal` | drop a non-final function call from a block |
-| `return_nil` | the last expression of a `def`/`defp` body becomes `nil` |
-| `integer_shift` | `n` → `n + 1` and `n - 1` |
+| --- | --- |
+| `boolean_flip` | `true` and `false` swap |
+| `comparison_swap` | `==` and `!=` swap, `<` becomes `<=` or `>=`, and so on |
+| `arithmetic_swap` | `+` and `-` swap, `*` and `/` swap |
+| `logical_swap` | `and` and `or` swap, `&&` and `\|\|` swap |
+| `condition_negate` | `if c` becomes `if !c`, `unless c` becomes `unless !c` |
+| `statement_removal` | a call that isn't a block's last expression is dropped |
+| `return_nil` | the last expression of a `def` or `defp` becomes `nil` |
+| `integer_shift` | `n` becomes `n + 1` and `n - 1` |
 | `string_empty` | a non-empty string becomes `""` |
-| `guard_removal` | drop the `when` guard of a clause |
-| `clause_removal` | drop one clause of a `case`, `cond` or multi-clause `fn` |
-| `element_removal` | drop one element of a list or one pair of a map |
-| `ecto_where_removal` | drop a `\|> where(...)` stage or a `where:` key of `from` |
+| `guard_removal` | a clause's `when` guard is dropped |
+| `clause_removal` | one clause of a `case`, `cond` or multi-clause `fn` is dropped |
+| `element_removal` | one element of a list or one pair of a map is dropped |
+| `ecto_where_removal` | a `\|> where(...)` stage or a `where:` key of `from` is dropped |
 
-Docs, specs, types, compiler attributes, `defmacro`/`defguard`, `use`/`import`/
-`alias`/`require`, sigils and `quote` are never mutated. The set and order of
-mutants (`m001`, `m002`, ...) is a pure function of the source.
+Docs, specs, types, `defmacro`, `defguard`, `use`, `import`, `alias`, `require`, sigils and `quote` are never mutated.
 
-**What it runs.** The component's contract tests: the files under the
-configured test paths that declare `use Covenant.Case, component: "<id>"`. The
-suite runs in a worker with `MIX_ENV=test`, which boots once and hot-swaps each
-mutant. The baseline (the unmutated suite) must be green or nothing is mutated.
+A mutant is killed when a test fails for any reason but a timeout, survives when every test passes, and is invalid when it doesn't compile; a mutant the tests only time out against is a survivor. A kill is credited to the obligations tagged on every test that failed. An obligation's unique kills are the mutants only its tests caught. A test with no unique kill is mutation-blind and is listed as a warning; `@tag mutation_blind: "reason"` keeps the reason beside the warning.
 
-**Verdicts.**
-
-| Verdict | Meaning |
-|---|---|
-| killed | at least one test failed, for a reason other than a timeout |
-| survived | every test passed |
-| timeout | the only failures were test timeouts: a **survivor**, never a kill |
-| invalid | the mutant does not compile; excluded from the score |
-
-The score is `killed / (killed + survived + timed out)`.
-
-**Credit.** A kill is credited to the obligations tagged on *every* test that
-failed. The kill matrix lists, per obligation, the mutants killed in total and
-the mutants **only** that obligation's tests killed (the *unique* kills): an
-obligation with no unique kill caught nothing the other obligations' tests did
-not also catch. It does the same per test. A test no mutant needs, whose kills
-are all shared with another test, is **mutation-blind**: it is listed as a
-warning (never a failure) and is a candidate for deletion or sharpening. A test
-that is deliberately redundant says why with `@tag mutation_blind: "reason"`,
-and the warning then carries the reason.
-
-```
-Kill matrix — covenant.conditions (Covenant.Conditions)
-  127 mutants: 106 killed, 2 survived, 0 timed out, 19 invalid — score 98.2%
-
-  obligation              killed  unique
-  covenant.conditions.I1      57      25
-  covenant.conditions.I2      16      13
-  ...
-```
-
-The matrix is also written as JSON (`--out PATH`, default
-`tmp/covenant/mutate/<component>/kill_matrix.json`): the summary, one record
-per mutant with its verdict and `killed_by`, per-obligation and per-test
-credit, and the survivors with their sort.
-
-### The survivors file
-
-A survivor is either a test not yet written or a mutant that does not matter.
-Telling them apart is a judgment, and it lives in
-`contracts/<app>/<component>.survivors.yml`, one entry per survivor. The task
-prints a skeleton for each unsorted survivor.
+There's no score threshold. The score is printed for information. Every survivor is either killed by a new test or sorted in `contracts/<app>/<component>.survivors.yml`, under a reason a reviewer can check:
 
 ```yaml
-- at: lib/example/counter.ex:29:17
-  operator: element_removal
-  mutation: "`value: 0` → `(removed)`"   # optional
+- at: lib/example/counter.ex:18:20
+  operator: integer_shift
+  mutation: "`0` → `1`"
   sort: equivalent
-  reason: The struct default for value is already 0.
+  reason: new/1 sets value explicitly; the defstruct default is never read.
 ```
 
-`at` is `file:line:column` and `operator` an operator from the table. Without
-`mutation` the entry covers every mutant with that `at` and `operator`; give it
-when two mutants share both and need different judgments. `reason` is required
-and should say something specific. `sort` is one of:
-
 | Sort | The survivor is |
-|---|---|
+| --- | --- |
 | `equivalent` | a mutant that behaves exactly like the original |
 | `log-only` | a change to a message or a log line nobody pins |
 | `dead-code` | in code that is never reached, or whose value is never read |
 | `timeout` | a mutant the tests only timed out against |
-| `evaluation-gap` | a behaviour that matters but no test pins yet |
-| `decision-hole` | a behaviour the Contract leaves deliberately undecided |
+| `evaluation-gap` | a behaviour that matters and no test pins yet |
+| `decision-hole` | a behaviour the Contract leaves undecided on purpose |
 
-A mutant inside the target of an active `kind: exception` obligation is sorted
-`decision-hole` without an entry. Prefer a test to an annotation: use a sort
-only with a reason a reviewer can check, and never weaken the mutation or the
-implementation to dodge a mutant.
+A mutant inside the target of an active `kind: exception` obligation is sorted `decision-hole` without an entry. An entry that matches no survivor fails the run, so the file stays true.
 
-### Exit status
-
-0 when the baseline is green and every survivor has an annotation. 1 when the
-baseline is red, a survivor has no annotation, an annotation is **stale** (it
-matches no survivor, because the mutant is now killed or the code moved), the
-Contract or the survivors file does not parse, or a worker fails.
-
-### Options and `--jobs`
-
-`--module MOD` (repeatable), `--timeout MS` (per test, measured by default),
-`--fail-fast`, `--seed N` (the ExUnit seed; the default 0 runs in definition
-order), `--jobs N`, `--out PATH`, `--contracts DIR`, `--test-path PATH`
-(repeatable).
-
-#### A timeout measured from the baseline
-
-Every mutant runs the whole suite, so a mutant that makes a test loop forever
-costs the per-test timeout for each test it reaches. A flat ceiling is either
-long (a database-backed suite spent about a minute per mutant) or short enough to
-cut off a slow suite's honest tests. Without `--timeout` the baseline run is
-timed per test and the mutants' tests get **five times the slowest baseline test,
-never under 1000 ms**: a 33 ms suite runs its mutants under 1 s, a suite with a
-7 s test under 35 s. The matrix records the timeout used as `timeout_ms` (with
-`--jobs`, each worker measures its own baseline and the largest is recorded).
-`--timeout MS` overrides it, and a test or module with its own `@tag timeout:`
-keeps that.
-
-#### `--fail-fast`: kills without the credit
-
-`--fail-fast` stops a mutant's run at its first failing test (ExUnit
-`max_failures: 1`), so a killed mutant costs one failure instead of the whole
-suite. The **verdict** is the same as a full run's, mutant for mutant: a mutant
-fails some test or none, and the survivors, the sort and the exit status do not
-change. The **credit** is not: only the tests that failed before the stop are in
-`killed_by`, so the matrix marks every such kill `credit: partial` (a survivor ran
-every test and is `exact`, and so is an invalid mutant, which ran none).
-
-* The obligation totals (`killed`, `unique`) and the per-test `kills` and
-  `unique_kills` count only mutants with **exact** credit, so in a fail-fast matrix
-  they are mostly zero: that is the absence of a judgment, not of coverage.
-* No test is judged mutation-blind (`mutation_blind` is `null` in the JSON unless
-  the test declares a reason), and the table says so.
-* `fail_fast: true` and `summary.partial` (the partial kills) are in the JSON.
-* A timeout is a failure to ExUnit and can end the run before a later test that
-  would kill the mutant, so a mutant whose fail-fast run failed on timeouts alone is
-  run again in full; it is the one case in which a fail-fast run reports exact
-  credit for a kill.
-
-A fail-fast matrix **proves kills, not obligation credit**. Use it to sort the
-survivors of a slow suite quickly, and a full run when the question is which
-obligation's tests caught what.
-
-#### Progress
-
-After every 25th mutant the task prints how far it is and how long is left:
-
-```
-progress: 250/700 mutants (35.7%), 14.8 mutants/min, ETA 30m 20s
-```
-
-The rate is the mutants done over the time since the first one started, the ETA
-the mutants left at that rate. With `--jobs N` each worker prints its own line,
-prefixed `[i/N]`, for its own slice.
-
-`--jobs N` splits the mutants round-robin over N worker OS processes. ExUnit
-creates a test's `:tmp_dir` at `tmp/<module>/<test>` under the *process's*
-working directory and offers no way to move it, so workers sharing the project
-would clear and rewrite each other's files and the failures that follow would
-be credited as kills. With N > 1 each worker therefore runs its tests from a
-private directory under the system temp directory: a symlink to every entry of
-the project root (relative paths in the tests resolve as usual) and a `tmp/` of
-its own, removed when the worker ends. The kill credit is the same as with
-`--jobs 1`, which the contract tests of `mix covenant.mutate` check.
-
-Isolation covers `:tmp_dir` and anything a test writes below `tmp/`. What the
-tests share otherwise stays shared between workers: a fixed path under the
-system temp directory, a database, a port, a named process on a distributed
-node. A suite that depends on such a resource must run with `--jobs 1`.
+Without `--timeout`, each test's timeout is five times the slowest baseline test, and never under a second. `--fail-fast` stops each mutant's run at its first failing test: the verdicts are the same as a full run's, but the kill credit is partial, so use it to sort survivors on a slow suite and a full run to credit obligations. `--jobs N` splits the mutants over N worker processes, each running from its own directory so ExUnit's `:tmp_dir` isn't shared. A suite that shares anything else, such as a database or a fixed port, needs `--jobs 1`. `mix help covenant.mutate` has the rest.
 
 ## Configuration
 
 ```elixir
 config :covenant,
-  contracts_dir: "contracts",               # default
-  test_paths: ["test/contract"],            # default; globs allowed
-  results_dir: "_build/covenant/results"    # default, next to the Mix build dir
+  contracts_dir: "contracts",              # default
+  test_paths: ["test/contract"],           # default; globs allowed
+  results_dir: "_build/covenant/results"   # default
 ```
 
-`Covenant.root/0` is the directory holding the contracts directory
-(`COVENANT_ROOT`, then `config :covenant, root:`, then the parent of
-`contracts_dir`, found from the working directory upwards when relative).
-Contract tests resolve paths from it so they never depend on the directory
-`mix test` runs in.
+Covenant resolves paths from the directory that holds `contracts/`, never from the directory `mix` runs in. In an umbrella, set `contracts_dir: Path.expand("../contracts", __DIR__)` in `config/config.exs` and `test_paths: ["apps/*/test/contract"]`; each app's results are written separately and merged by `mix covenant.check`. [`test/fixtures/umbrella_project`](https://github.com/tools4imps/covenant/tree/main/test/fixtures/umbrella_project) runs the tasks from inside an app.
 
-In an umbrella, set `contracts_dir` to an absolute path
-(`Path.expand("../contracts", __DIR__)` from `config/config.exs`) and
-`test_paths: ["apps/*/test/contract"]`. Results are written per app
-(`<results_dir>/<app>.json`) and merged by `mix covenant.check`, so each
-app's suite contributes its own tests.
+## In CI
 
-Configured `test_paths` are relative to `Covenant.root/0`, not to the directory a
-task runs in: `mix covenant.regen`, `mix covenant.mutate` and `mix covenant.check`
-(`--static` included) find the same contract tests from the umbrella root and from
-`apps/<app>`, and `mix covenant.conditions` resolves `file` conditions and `mix.lock`
-against that root. A `--test-path` typed on the command line is relative to the directory
-you typed it in, and `--contracts DIR` redirects the Contract without moving the root.
-(`mix covenant.check` hands `mix test` the paths relative to the working directory.)
-`test/fixtures/umbrella_project` is an umbrella-shaped fixture that runs the tasks from
-`apps/shop`.
-
-## Example
-
-`test/fixtures/example_project` is a complete small project: a heavy-form
-`example.counter` with four active obligations, one retired obligation and
-four decision records; a light-form `example.greeter` with a declared
-exception; the implementation; and the contract tests. Covenant's own suite
-runs `mix covenant.check`, `mix covenant.conditions` and
-`mix covenant.regen` there.
-
-## Development
-
+```yaml
+- uses: actions/checkout@v4
+- uses: erlef/setup-beam@v1
+  with:
+    otp-version: "28"
+    elixir-version: "1.19"
+- run: mix deps.get
+- run: mix covenant.check
 ```
+
+`mix covenant.check` runs the contract suite itself, so it can replace the `mix test` step for `test/contract`. Mutation runs per component and takes longer; run it on the components a change touches.
+
+## Why
+
+Agents write more code than anyone reads. What a team can still read is the Contract: what each component promises, why, and the tests that prove it. Covenant keeps that layer load-bearing. A test that proves no obligation doesn't compile, an obligation with no passing test fails the build, a decision whose premise stopped holding is listed, and a test that catches no broken code is named.
+
+The test of a Contract is regeneration. If a component can be deleted and rebuilt from its pack alone, the Contract is complete, and every difference after a rebuild is a sentence it was missing.
+
+## How Covenant holds itself to account
+
+Covenant has its own Contract in [`contracts/`](https://github.com/tools4imps/covenant/tree/main/contracts): 77 obligations across nine light-form components, a system intent and the decision records behind its policies. Every test in `test/contract/` is a `Covenant.Case` test that names its obligations. CI runs the suite and `mix covenant.check` on every push, on Elixir 1.18 and 1.19.
+
+Two components are mutated with Covenant itself. `covenant.conditions` makes 206 mutants: 177 killed, 27 invalid, and 2 survivors. `covenant.mutate`, run against its own unit tests, makes 1396: 1197 killed, 139 invalid, and 60 survivors. Every survivor is sorted, with its reason, in `contracts/covenant/*.survivors.yml`.
+
+```bash
 mix deps.get
-mix test              # unit tests plus the end-to-end runs in the fixture
-mix covenant.check    # Covenant checked against its own Contract
+mix test               # Elixir 1.18: mix test test/contract
+mix covenant.check     # Covenant against its own Contract
 ```
 
-## Licence
+## Known limits in 0.1
 
-MIT.
+- An exception's `target` can name a public function, a module or a file, not a private function.
+- `--static` reads only literal component names and literal tags.
+- A `value` check calls only zero-arity functions.
+- Mutation runs one component at a time. There is no mode that mutates only what a branch changed.
+- `--jobs` isolates `tmp/` and nothing else.
+- The modules that run the mutation worker can't be mutated by their own run.
+
+## License
+
+MIT
