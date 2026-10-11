@@ -26,7 +26,7 @@ defmodule Covenant.Contract.ScopeContractTest do
     assert %Ceiling{
              name: "counter-event-kinds",
              ceiling: 3,
-             counter: {:module, Example.Scope, :event_kinds},
+             counter: {:module, "Example.Scope", "event_kinds"},
              line: 7
            } = kinds
 

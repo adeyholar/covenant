@@ -61,7 +61,7 @@ supports is relied on.
 - **status:** active
 
 ### covenant.conditions.I9 — Names from a record never become atoms
-- **scope:** `Covenant.Conditions.evaluate/2`
-- **must:** keep the module and function of a `value` call as strings: the module is looked up as an atom only when that atom already exists, and a module with no atom is unchecked as a module that is not compiled in this VM; the function is found by comparing its name with the loaded module's exports, and one that is not exported is suspect as a call that raises `UndefinedFunctionError`. A Contract cannot grow the atom table, and a name written ahead of its implementation is never a crash
+- **scope:** `Covenant.Conditions.evaluate/2`, `Covenant.Contract.Ceiling.count/2`
+- **must:** keep the module and function of a `value` call, and of a scope ceiling's `module` counter, as strings: the module is looked up as an atom only when that atom already exists, and a module with no atom is unchecked as a module that is not compiled in this VM; the function is found by comparing its name with the loaded module's exports, and one that is not exported is suspect as a call that raises `UndefinedFunctionError` (an error for a counter, which is never called when its module is not loaded, so `--static` still skips it). A Contract cannot grow the atom table, and a name written ahead of its implementation is never a crash
 - **kind:** functional
 - **status:** active

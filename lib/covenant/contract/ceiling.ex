@@ -23,7 +23,7 @@ defmodule Covenant.Contract.Ceiling do
 
   @type counter ::
           {:glob, String.t()}
-          | {:module, module(), atom()}
+          | {:module, String.t(), String.t()}
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -52,29 +52,51 @@ defmodule Covenant.Contract.Ceiling do
   end
 
   def count(%__MODULE__{counter: {:module, module, function}}, _opts) do
+    name = module_name(module)
+    function = to_string(function)
+    atom = existing_module(module)
+
     cond do
-      not Code.ensure_loaded?(module) ->
-        {:error, "counter module #{inspect(module)} is not loaded"}
+      is_nil(atom) or not Code.ensure_loaded?(atom) ->
+        {:error, "counter module #{name} is not loaded"}
 
-      system_module?(module) ->
-        {:error,
-         "counter #{inspect(module)}.#{function}/0 is refused: #{inspect(module)} is part of Elixir or OTP"}
+      system_module?(atom) ->
+        {:error, "counter #{name}.#{function}/0 is refused: #{name} is part of Elixir or OTP"}
 
-      not function_exported?(module, function, 0) ->
-        {:error, "counter #{inspect(module)}.#{function}/0 is not exported"}
-
-      true ->
-        case call(module, function) do
+      fun = exported_function(atom, function) ->
+        case call(atom, fun) do
           {:returned, n} when is_integer(n) and n >= 0 ->
             {:ok, n}
 
           {:returned, other} ->
-            {:error, "counter #{inspect(module)}.#{function}/0 returned #{inspect(other)}"}
+            {:error, "counter #{name}.#{function}/0 returned #{inspect(other)}"}
 
           {:raised, what} ->
             {:unchecked, what}
         end
+
+      true ->
+        {:error, "counter #{name}.#{function}/0 is not exported"}
     end
+  end
+
+  # A counter's names come from the Contract and are strings: no atom is made for them.
+  defp module_name(module) when is_atom(module), do: inspect(module)
+  defp module_name(name), do: name
+
+  defp existing_module(module) when is_atom(module), do: module
+
+  defp existing_module(name) do
+    String.to_existing_atom("Elixir." <> name)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp exported_function(module, function) do
+    Enum.find_value(module.module_info(:exports), fn
+      {name, 0} -> if Atom.to_string(name) == function, do: name
+      _ -> nil
+    end)
   end
 
   @doc """
@@ -103,5 +125,5 @@ defmodule Covenant.Contract.Ceiling do
   def describe(%__MODULE__{counter: {:glob, pattern}}), do: "glob #{pattern}"
 
   def describe(%__MODULE__{counter: {:module, module, function}}),
-    do: "#{inspect(module)}.#{function}/0"
+    do: "#{module_name(module)}.#{function}/0"
 end

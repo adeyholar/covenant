@@ -349,6 +349,31 @@ defmodule Covenant.ConditionsContractTest do
     end
   end
 
+  @tag obligation: "covenant.conditions.I9"
+  test "a module counter's names never become atoms, and an unknown module is an error" do
+    n = System.unique_integer([:positive])
+    module = "Covenant.Atomless#{n}"
+    fun = "atomless_fun_#{n}"
+
+    ceiling = %Ceiling{
+      name: "x",
+      ceiling: 1,
+      counter: {:module, module, fun},
+      file: "system/scope.yml",
+      line: 1
+    }
+
+    assert Ceiling.count(ceiling, []) == {:error, "counter module #{module} is not loaded"}
+    assert Ceiling.describe(ceiling) == "#{module}.#{fun}/0"
+
+    known = %Ceiling{ceiling | counter: {:module, "Example.Scope", fun}}
+    assert {:error, message} = Ceiling.count(known, [])
+    assert message =~ "is not exported"
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom("Elixir." <> module) end
+    assert_raise ArgumentError, fn -> String.to_existing_atom(fun) end
+  end
+
   @tag obligation: "covenant.conditions.I8"
   test "file: a path that leaves the project root is suspect even when the file exists", %{
     ctx: ctx,
