@@ -101,6 +101,12 @@ defmodule Mix.Tasks.Covenant.Check do
     # `--static` reads source and compiles nothing: a Contract written ahead of its code is checkable
     unless opts[:static], do: Mix.Task.run("app.config")
 
+    # `--contracts` means a path from where it was typed, not from the root
+    opts =
+      if opts[:contracts],
+        do: Keyword.put(opts, :contracts, Path.expand(opts[:contracts])),
+        else: opts
+
     contracts_dir = opts[:contracts] || Covenant.contracts_dir()
     results_dir = opts[:results_dir] || Covenant.results_dir()
 

@@ -167,4 +167,21 @@ defmodule Covenant.TasksUmbrellaContractTest do
     assert output =~ "covenant.mutate: Shop.Cart (lib/shop/cart.ex)"
     refute output =~ "no contract test file declares"
   end
+
+  @tag obligation: "covenant.tasks.I9"
+  test "a relative --contracts typed in an app means the same Contract to the workers" do
+    {output, status} =
+      mix([
+        "covenant.mutate",
+        "shop.cart",
+        "--contracts",
+        "../../contracts",
+        "--out",
+        "tmp/kill_matrix_contracts.json"
+      ])
+
+    assert status == 0, output
+    assert output =~ "covenant.mutate: Shop.Cart (lib/shop/cart.ex)"
+    refute output =~ "exited with status"
+  end
 end

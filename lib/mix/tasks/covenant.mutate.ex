@@ -155,6 +155,13 @@ defmodule Mix.Tasks.Covenant.Mutate do
         _ -> Mix.raise("usage: mix covenant.mutate <component id> [options]")
       end
 
+    # `--contracts` means a path from where it was typed; the workers resolve a relative
+    # `contracts_dir` against the root, so hand them the absolute path
+    opts =
+      if opts[:contracts],
+        do: Keyword.put(opts, :contracts, Path.expand(opts[:contracts])),
+        else: opts
+
     # before the override below: `--contracts` redirects the Contract, not the root the
     # configured test paths resolve against
     test_paths = Covenant.test_paths(Keyword.get_values(opts, :test_path))

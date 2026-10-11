@@ -19,5 +19,19 @@ defmodule Covenant.CeilingMalformedContractTest do
       assert {:error, message} = Ceiling.count(ceiling, root: dir)
       assert message =~ "glob pattern `#{pattern}` is malformed"
     end
+
+    # a null byte or invalid UTF-8 raises something other than ErlangError
+    for pattern <- ["lib/a\0b", <<"lib/", 0xFF, ".ex">>] do
+      ceiling = %Ceiling{
+        name: "x",
+        ceiling: 1,
+        counter: {:glob, pattern},
+        file: "system/scope.yml",
+        line: 1
+      }
+
+      assert {:error, message} = Ceiling.count(ceiling, root: dir)
+      assert message =~ "is malformed"
+    end
   end
 end

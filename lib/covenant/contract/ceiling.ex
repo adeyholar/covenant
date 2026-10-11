@@ -60,6 +60,9 @@ defmodule Covenant.Contract.Ceiling do
       rescue
         e in ErlangError ->
           {:error, "glob pattern `#{pattern}` is malformed: #{inspect(e.original)}"}
+
+        e in [ArgumentError, UnicodeConversionError] ->
+          {:error, "glob pattern `#{inspect(pattern)}` is malformed: #{Exception.message(e)}"}
       end
     end
   end
