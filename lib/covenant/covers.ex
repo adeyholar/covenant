@@ -184,13 +184,27 @@ defmodule Covenant.Covers do
     do: loaded?(root) or Enum.any?(expand(root <> ".*", modules), &loaded?/1)
 
   def exists?({:function, module, function, arity}, _modules) do
-    mod = Module.concat([module])
-
-    loaded?(module) and
-      Enum.any?(mod.__info__(:functions), fn {f, a} ->
+    with mod when is_atom(mod) <- to_module(module),
+         true <- Code.ensure_loaded?(mod) do
+      Enum.any?(mod.__info__(:functions) ++ mod.__info__(:macros), fn {f, a} ->
         Atom.to_string(f) == function and a == arity
       end)
+    else
+      _ -> false
+    end
   end
 
-  defp loaded?(module), do: Code.ensure_loaded?(Module.concat([module]))
+  defp loaded?(module) do
+    case to_module(module) do
+      mod when is_atom(mod) -> Code.ensure_loaded?(mod)
+      _ -> false
+    end
+  end
+
+  # No new atom: the module's atom if it already exists, else a string (never loaded).
+  defp to_module(name) do
+    String.to_existing_atom("Elixir." <> String.replace_prefix(name, "Elixir.", ""))
+  rescue
+    ArgumentError -> name
+  end
 end

@@ -38,7 +38,7 @@ defmodule Covenant.Parser.Primitive do
 
   @name ~r/^[a-z][a-z0-9_]*$/
   @obligation ~r/^- \*\*([A-Z]+[0-9]+)\*\*[ \t]+(.+?)[ \t]*$/
-  @bold_id ~r/\*\*[A-Za-z]+[0-9]+[:.]?\*\*/
+  @bold_id ~r/^\s*(?:[-*+]|\d+\.)\s+\*\*[A-Za-z]+[0-9]+[:.]?\*\*/
   @primitive_id ~r/^[a-z][a-z0-9_]*\/[A-Z]+[0-9]+$/
   @fence_open ~r/^ {0,3}(`{3,}|~{3,})[ \t]*([^`\s]*)/
   @atx ~r/^ {0,3}\#{1,6}[ \t]+(.+?)[ \t]*\#*[ \t]*$/
@@ -201,8 +201,8 @@ defmodule Covenant.Parser.Primitive do
     |> Enum.sort_by(& &1.line)
   end
 
-  # A line that holds a bold id but is not `- **A1** text` would otherwise be
-  # dropped without a word.
+  # A list item that opens with a bold id but is not `- **A1** text` would
+  # otherwise be dropped without a word. Bold words in prose are just prose.
   defp malformed(parts, file) do
     for %{kind: :line, text: text, line: n} <- parts,
         Regex.match?(@bold_id, text),
@@ -454,17 +454,39 @@ defmodule Covenant.Parser.Primitive do
   @spec comment_ids([String.t()], pos_integer()) :: [String.t()]
   def comment_ids(lines, line) do
     lines
+    |> attached(line)
+    |> Enum.flat_map(fn {text, _n} -> split_ids(text) end)
+    |> Enum.uniq()
+  end
+
+  @doc """
+  The line numbers of the `# Contract:` comments directly above line `line`
+  (the ones `comment_ids/2` reads).
+  """
+  @spec attached_comment_lines([String.t()], pos_integer()) :: [pos_integer()]
+  def attached_comment_lines(lines, line),
+    do: for({text, n} <- attached(lines, line), Regex.match?(@contract_comment, text), do: n)
+
+  @doc "The line numbers of every `# Contract:` comment in `lines`."
+  @spec contract_comment_lines([String.t()]) :: [pos_integer()]
+  def contract_comment_lines(lines),
+    do: for({text, n} <- Enum.with_index(lines, 1), Regex.match?(@contract_comment, text), do: n)
+
+  defp attached(lines, line) do
+    lines
+    |> Enum.with_index(1)
     |> Enum.take(max(line - 1, 0))
     |> Enum.reverse()
-    |> Enum.take_while(&Regex.match?(@above, &1))
+    |> Enum.take_while(fn {text, _} -> Regex.match?(@above, text) end)
     |> Enum.reverse()
-    |> Enum.flat_map(fn text ->
-      case Regex.run(@contract_comment, text) do
-        [_, ids] -> String.split(ids, [",", " ", "\t"], trim: true)
-        nil -> []
-      end
-    end)
-    |> Enum.uniq()
+  end
+
+  # Ids are separated by commas only, so trailing prose is never an id.
+  defp split_ids(text) do
+    case Regex.run(@contract_comment, text) do
+      [_, ids] -> ids |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+      nil -> []
+    end
   end
 
   @doc """
@@ -477,12 +499,7 @@ defmodule Covenant.Parser.Primitive do
 
   @doc "True when `line` is a `# Contract:` comment that names a primitive obligation id."
   @spec contract_comment?(String.t()) :: boolean()
-  def contract_comment?(line) do
-    case Regex.run(@contract_comment, line) do
-      [_, ids] -> ids |> String.split([",", " ", "\t"], trim: true) |> Enum.any?(&primitive_id?/1)
-      nil -> false
-    end
-  end
+  def contract_comment?(line), do: line |> split_ids() |> Enum.any?(&primitive_id?/1)
 
   @doc "True for a primitive obligation id, `<primitive>/<id>`."
   @spec primitive_id?(String.t()) :: boolean()
