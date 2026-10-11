@@ -58,5 +58,7 @@
       check: { kind: otp, version: ">= 26.0.0" }
     - text: The counter implementation lives in lib/example/counter.ex
       check: { kind: file, path: lib/example/counter.ex }
+    - text: A counter built without options is capped at 100
+      check: { kind: value, call: "Example.Counter.new/0", path: [max], equals: 100 }
   expires: When the cap moves to a persisted setting
   source: ["test/fixtures/example_project"]

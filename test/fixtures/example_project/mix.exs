@@ -13,7 +13,7 @@ defmodule Example.MixProject do
       elixir: "~> 1.18",
       deps_path: "../../../deps",
       lockfile: "mix.lock",
-      deps: [{:covenant, path: "../../.."}]
+      deps: [{:covenant, path: "../../..", runtime: false}]
     ]
   end
 

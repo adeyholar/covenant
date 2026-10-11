@@ -122,8 +122,12 @@ defmodule Covenant.TasksContractTest do
     assert status == 0, output
     assert output =~ "ok Elixir is at least 1.18"
     assert output =~ "ok The contract tooling depends on yaml_elixir"
+
+    assert output =~
+             "ok A counter built without options is capped at 100 — Example.Counter.new/0 [max] is 100"
+
     assert output =~ "(not machine-checkable)"
-    assert output =~ "5 record(s), 6 machine-checkable condition(s), 0 suspect record(s)"
+    assert output =~ "5 record(s), 7 machine-checkable condition(s), 0 suspect record(s)"
   end
 
   @tag obligation: "covenant.tasks.I4"
@@ -181,7 +185,7 @@ defmodule Covenant.TasksContractTest do
     assert output =~
              "A module this project does not compile (not checked: module not compiled in this VM: Nope.Missing)"
 
-    assert output =~ "6 record(s), 7 machine-checkable condition(s), 0 suspect record(s)"
+    assert output =~ "6 record(s), 8 machine-checkable condition(s), 0 suspect record(s)"
     assert output =~ "covenant.conditions: 1 condition(s) not checked in this VM"
 
     File.write!(records, String.replace(File.read!(records), "equals: 3 }", "equals: 4 }"))
