@@ -207,12 +207,12 @@ defmodule Covenant.Mutate.Runner do
   @spec run(plan()) :: {:ok, result()} | {:error, String.t()}
   def run(plan) do
     with {:ok, files} <- prepare_files(plan),
-         {:ok, modules} <- boot_suite(plan) do
-      isolated(plan, fn -> run_suite(plan, files, modules) end)
+         {:ok, modules, project_timeout} <- boot_suite(plan) do
+      isolated(plan, fn -> run_suite(plan, files, modules, project_timeout) end)
     end
   end
 
-  defp run_suite(plan, files, modules) do
+  defp run_suite(plan, files, modules, project_timeout) do
     with {:ok, tests, baseline_ms} <- baseline(modules) do
       timeout = plan.timeout || Mutate.default_timeout(tests)
       ExUnit.configure(timeout: timeout)
@@ -251,7 +251,7 @@ defmodule Covenant.Mutate.Runner do
         modules: modules,
         apps: apps,
         budget: budget,
-        baseline_timeout: plan.timeout || @baseline_timeout,
+        baseline_timeout: baseline_timeout(plan.timeout, project_timeout),
         total: length(slice),
         started: System.monotonic_time(:millisecond),
         result: result
@@ -682,13 +682,16 @@ defmodule Covenant.Mutate.Runner do
     |> Enum.filter(&File.exists?/1)
     |> Enum.each(&Code.require_file/1)
 
+    # the project's own timeout (`test_helper.exs`, `mix test --timeout`), read before this run sets its own
+    project_timeout = ExUnit.configuration()[:timeout]
+
     ExUnit.configure(
       autorun: false,
       formatters: [Collector],
       covenant_sink: self(),
       covenant_root: Path.expand(plan.root),
       seed: plan.seed,
-      timeout: plan.timeout || @baseline_timeout,
+      timeout: baseline_timeout(plan.timeout, project_timeout),
       capture_log: true,
       max_failures: :infinity,
       colors: [enabled: false]
@@ -706,9 +709,14 @@ defmodule Covenant.Mutate.Runner do
        "no contract test module declares `use Covenant.Case, component: \"#{plan.component}\"` " <>
          "in #{Enum.join(plan.test_files, ", ")}"}
     else
-      {:ok, modules}
+      {:ok, modules, project_timeout}
     end
   end
+
+  @doc false
+  @spec baseline_timeout(timeout() | nil, timeout() | nil) :: timeout()
+  def baseline_timeout(plan_timeout, project_timeout),
+    do: plan_timeout || project_timeout || @baseline_timeout
 
   defp contract_module?(module, component) do
     function_exported?(module, :__ex_unit__, 0) and
