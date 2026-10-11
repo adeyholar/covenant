@@ -611,6 +611,7 @@ defmodule Covenant.RegenContractTest do
   test "rewrites an existing pack directory from scratch", %{contract: contract, tmp_dir: dir} do
     out = Path.join(dir, "pack")
     File.mkdir_p!(out)
+    File.write!(Path.join(out, ".covenant-pack"), "example.greeter\n")
     File.write!(Path.join(out, "stale.txt"), "old")
     {:ok, _} = Regen.write_pack(contract, "example.greeter", out: out, root: dir, test_paths: [])
     refute File.exists?(Path.join(out, "stale.txt"))

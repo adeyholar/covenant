@@ -9,10 +9,14 @@ defmodule Covenant.Static do
 
   A module counts when its body contains `use Covenant.Case, component: "..."`
   with a literal string. In such a module every `test` and `property` (also
-  inside `describe` blocks and `for` comprehensions) is read with the
-  `obligation` tag ExUnit would give it, merged as ExUnit merges tags:
-  `@tag` over `@describetag` over `@moduletag`, and at each level the last
-  `obligation:` wins. A tag is a literal string or a list of literal strings.
+  inside `describe` blocks) is read with the `obligation` tag ExUnit would
+  give it, merged as ExUnit merges tags: `@tag` over `@describetag` over
+  `@moduletag`, and at each level the last `obligation:` wins (a later tag
+  overrides an earlier one, so `@tag :obligation` after a string tag leaves
+  `true`, which is a problem). A tag is a literal string or a list of literal
+  strings. A test inside `for`, `Enum.each`, `if`, `case` and the like can
+  define zero or many tests, so it is never credited: it is reported as
+  needing compiled code.
 
   `scan/1` returns one `Covenant.Results.Test` per test, with state
   `:tagged` (seen, not run), and the problems that `Covenant.Case` would
@@ -25,8 +29,9 @@ defmodule Covenant.Static do
     first is silently lost; use a list);
   * a `@tag` left dangling before `describe` or at the end of a module;
   * a `test` or `property` with no body (ExUnit fails it as not implemented);
-  * a test name used twice in a module, or a literal name inside a `for`
-    (ExUnit rejects the duplicate at compile time).
+  * a `@describetag` outside a `describe` block (ExUnit raises);
+  * a test name used twice in a module (ExUnit rejects the duplicate at
+    compile time).
 
   With `sibling: dir` (the sibling layout's directory), a file under
   `dir/<primitive>/` belongs to that primitive: its `use Covenant.Case` may
@@ -163,9 +168,7 @@ defmodule Covenant.Static do
             module: module,
             component: component,
             file: file,
-            describe: nil,
-            describe_varies: false,
-            in_for: false
+            describe: nil
           }
 
           acc = %{acc | modules: [entry | acc.modules]}
@@ -235,6 +238,8 @@ defmodule Covenant.Static do
 
   # -- tests ------------------------------------------------------------------
 
+  @opaque_forms [:def, :defp, :defmacro, :defmacrop, :defmodule, :@, :describe, :test, :property]
+
   defp walk_tests(exprs, state, tags, acc) do
     {tags, acc} = Enum.reduce(exprs, {tags, acc}, &walk_expr(&1, state, &2))
 
@@ -246,6 +251,17 @@ defmodule Covenant.Static do
     else
       acc
     end
+  end
+
+  defp walk_expr({:@, meta, [{:describetag, _, [_]}]}, %{describe: nil} = state, {tags, acc}) do
+    problem =
+      Error.new(
+        state.file,
+        meta[:line],
+        "@describetag outside a describe block; ExUnit raises when it compiles it"
+      )
+
+    {tags, %{acc | problems: [problem | acc.problems]}}
   end
 
   defp walk_expr({:@, meta, [{level, _, [value]}]}, state, {tags, acc})
@@ -278,7 +294,7 @@ defmodule Covenant.Static do
           end
 
         problems =
-          if Map.fetch!(tags, level) != [] do
+          if Map.fetch!(tags, level) != [] or repeated_obligation?(value) do
             problems ++
               [
                 Error.new(
@@ -314,8 +330,7 @@ defmodule Covenant.Static do
 
     inner_state = %{
       state
-      | describe: literal_name(name),
-        describe_varies: state.describe_varies or not is_binary(name)
+      | describe: literal_name(name)
     }
 
     inner_tags = %{tags | describetag: [], tag: []}
@@ -342,17 +357,52 @@ defmodule Covenant.Static do
     {%{tags | tag: []}, acc}
   end
 
-  defp walk_expr({:for, _, args}, state, {tags, acc}) when is_list(args) do
-    case List.last(args) do
-      [do: body] ->
-        Enum.reduce(block(body), {tags, acc}, &walk_expr(&1, %{state | in_for: true}, &2))
-
-      _ ->
+  # A `test` under `for`, `Enum.each`, `if`, `case` and the like can be defined zero or many times
+  # (and a `@tag` before it reaches only the first), so static mode cannot credit it.
+  defp walk_expr({form, _, _} = node, state, {tags, acc}) when form not in @opaque_forms do
+    case nested_tests(node) do
+      [] ->
         {tags, acc}
+
+      found ->
+        where = construct(node)
+
+        problems =
+          for {kind, line, name} <- found do
+            Error.new(
+              state.file,
+              line,
+              "#{kind} #{name} is defined inside `#{where}`, which can define zero or many tests; " <>
+                "static mode cannot credit it, so run `mix covenant.check` against compiled code"
+            )
+          end
+
+        {%{tags | tag: []}, %{acc | problems: Enum.reverse(problems) ++ acc.problems}}
     end
   end
 
   defp walk_expr(_other, _state, tags_acc), do: tags_acc
+
+  defp nested_tests(node) do
+    {_, found} =
+      Macro.prewalk(node, [], fn
+        {kind, meta, [name | _]}, found when kind in [:test, :property] ->
+          {nil, [{kind, meta[:line], literal_name(name)} | found]}
+
+        {form, _, _}, found when form in @opaque_forms ->
+          {nil, found}
+
+        other, found ->
+          {other, found}
+      end)
+
+    Enum.reverse(found)
+  end
+
+  defp construct({{:., _, [module, function]}, _, _}),
+    do: Macro.to_string(module) <> "." <> to_string(function)
+
+  defp construct({form, _, _}), do: to_string(form)
 
   defp has_body?(rest), do: Enum.any?(rest, &(is_list(&1) and Keyword.has_key?(&1, :do)))
 
@@ -399,27 +449,18 @@ defmodule Covenant.Static do
       end
 
     acc = if problem, do: %{acc | problems: [problem | acc.problems]}, else: acc
-    acc = duplicate_name(acc, state, full_name, is_binary(name), line)
+    acc = duplicate_name(acc, state, full_name, line)
     if test, do: %{acc | tests: [test | acc.tests]}, else: acc
   end
 
-  # ExUnit refuses a second test with the same name in a module. A literal
-  # name inside a `for` repeats on every iteration, so it is refused too.
-  defp duplicate_name(acc, state, full_name, literal?, line) do
+  # ExUnit refuses a second test with the same name in a module.
+  defp duplicate_name(acc, state, full_name, line) do
     key = {state.module, full_name}
 
     problem =
-      cond do
-        state.in_for and literal? and not state.describe_varies ->
-          "#{full_name} is defined inside a `for` with a literal name, so every iteration " <>
-            "repeats it and ExUnit rejects the duplicate; interpolate the generator into the name"
-
-        Map.has_key?(acc.seen, key) ->
+      if Map.has_key?(acc.seen, key),
+        do:
           "#{full_name} is already defined in #{state.module} at line #{acc.seen[key]}; ExUnit rejects the duplicate"
-
-        true ->
-          nil
-      end
 
     acc = %{acc | seen: Map.put_new(acc.seen, key, line)}
 
@@ -458,15 +499,23 @@ defmodule Covenant.Static do
     end)
   end
 
+  # ExUnit keeps the last `obligation:` of a keyword list; a bare `:obligation` sets it to `true`.
+  defp obligation_value(:obligation), do: {:error, "true"}
+
   defp obligation_value(value) when is_list(value) do
     if Keyword.keyword?(value) and Keyword.has_key?(value, :obligation) do
-      literal_ids(Keyword.fetch!(value, :obligation))
+      value |> Keyword.get_values(:obligation) |> List.last() |> literal_ids()
     else
       :none
     end
   end
 
   defp obligation_value(_value), do: :none
+
+  defp repeated_obligation?(value) when is_list(value),
+    do: Keyword.keyword?(value) and length(Keyword.get_values(value, :obligation)) > 1
+
+  defp repeated_obligation?(_value), do: false
 
   defp literal_ids(id) when is_binary(id), do: {:ok, [id]}
 
