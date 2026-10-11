@@ -465,7 +465,7 @@ Calc.clamp/3: > -> >=
 ```
 ````
 
-A line is a unit and the mutation as the run prints it, `Module.function/arity: from -> to`. An `equivalent` block claims no program can tell the mutant from the original; an `unpromised` block says the behaviour changes and the Contract leaves it open, and also takes `Module.function/arity: *` for every survivor of the unit. A declaration that a test contradicts, or that matches nothing, fails the run. An unsorted survivor is printed as a block ready to paste.
+A line is a unit and the mutation as the run prints it, `Module.function/arity: from -> to`, and it names exactly one mutant. When several of the unit's mutants share the change, `#k` picks the k-th in source order, killed ones included, so the number doesn't move as tests change: `Calc.clamp/3: < -> <= #2`. A line they share without `#k` is ambiguous and fails the run. An `equivalent` block claims no program can tell the mutant from the original; an `unpromised` block says the behaviour changes and the Contract leaves it open, and only there does `Module.function/arity: *` declare every survivor of the unit. A declaration that a test contradicts, or that names no surviving mutant, fails the run, line by line. An unsorted survivor is printed as a block ready to paste, with `#k` where it needs one.
 
 `mix covenant.regen calc` writes the README, `mutants.md`, the Contract tests and a stub of every public function the primitive covers.
 
@@ -505,7 +505,7 @@ The test of a Contract is regeneration. If a component can be deleted and rebuil
 
 Covenant has its own Contract in [`contracts/`](https://github.com/tools4imps/covenant/tree/main/contracts): 85 obligations across ten light-form components, a system intent and the decision records behind its policies. Every test in `test/contract/` is a `Covenant.Case` test that names its obligations. CI runs the suite and `mix covenant.check` on every push, on Elixir 1.18 and 1.19.
 
-Two components are mutated with Covenant itself. `covenant.conditions` makes 206 mutants: 177 killed, 27 invalid, and 2 survivors. `covenant.mutate`, run against its own unit tests, makes 1461: 1247 killed, 152 invalid, and 62 survivors. Every survivor is sorted, with its reason, in `contracts/covenant/*.survivors.yml`.
+Two components are mutated with Covenant itself. `covenant.conditions` makes 206 mutants: 177 killed, 27 invalid, and 2 survivors. `covenant.mutate`, run against its own unit tests, makes 1531: 1307 killed, 159 invalid, and 65 survivors. Every survivor is sorted, with its reason, in `contracts/covenant/*.survivors.yml`.
 
 ```bash
 mix deps.get

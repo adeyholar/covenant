@@ -182,4 +182,43 @@ defmodule Covenant.SurvivorsContractTest do
     assert Survivors.template(lone, format: :md, mutants: all) == "Lab.Retry.run/1: 1 -> 0"
     assert Survivors.template(lone, format: :md) == "Lab.Retry.run/1: 1 -> 0"
   end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "a change is matched as written, arrows of its own and all, and a wildcard is a declaration without one" do
+    [fun] = declarations!("Lab.Retry.run/1: f -> fn x -> x end")
+    lambda = mutant("m001", 10, from: "f", to: "fn x -> x end")
+    assert Survivors.matches?(fun, lambda)
+    refute Survivors.matches?(fun, %{lambda | to: "fn x -> x"})
+
+    written = %Annotation{
+      at: "Lab.Retry.run/1",
+      operator: "*",
+      sort: "unpromised",
+      reason: "r",
+      file: "mutants.md",
+      line: 1,
+      unit: "Lab.Retry.run/1",
+      change: "1 -> 2"
+    }
+
+    assert Survivors.matches?(written, mutant("m001", 10))
+    refute Survivors.matches?(written, mutant("m001", 10, to: "3"))
+
+    by_parts = %{written | change: nil, from: "1", to: "2"}
+    assert Survivors.matches?(by_parts, mutant("m001", 10))
+    refute Survivors.matches?(by_parts, mutant("m001", 10, to: "3"))
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "an ambiguity names the change as the line wrote it" do
+    two = [mutant("m001", 10), mutant("m002", 40)]
+
+    {[], [error]} = Survivors.resolve(declarations!("Lab.Retry.run/1: `1` → `2`"), two)
+    assert error.message =~ "2 mutants in Lab.Retry.run/1 share `1` → `2`;"
+
+    [declared] = declarations!("Lab.Retry.run/1: 1 -> 2")
+    by_parts = %{declared | change: nil, from: "1", to: "2"}
+    {[], [error]} = Survivors.resolve([by_parts], two)
+    assert error.message =~ "2 mutants in Lab.Retry.run/1 share 1 -> 2;"
+  end
 end

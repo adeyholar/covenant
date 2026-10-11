@@ -267,37 +267,37 @@
   mutation: "`nil` → `(removed)`"
   sort: dead-code
   reason: "The catch-all anchor/2 clause is never reached: elements are pairs or nodes with meta."
-- at: lib/covenant/mutate/survivors.ex:102:20
+- at: lib/covenant/mutate/survivors.ex:121:20
   operator: clause_removal
   mutation: "`case {:ok, nil} ->` → `(removed)`"
   sort: dead-code
   reason: "YamlElixir 2.x answers an empty document with {:ok, %{}} (probed with null, ~, --- and a comment-only file), never {:ok, nil}."
-- at: lib/covenant/mutate/survivors.ex:119:25
+- at: lib/covenant/mutate/survivors.ex:138:25
   operator: clause_removal
   mutation: "`case {:error, error} ->` → `(removed)`"
   sort: dead-code
   reason: "YamlElixir.read_from_string/1 reports every error as a ParsingError carrying line and message, which the clause above handles; this generic fallback never runs."
-- at: lib/covenant/mutate/survivors.ex:120:27
+- at: lib/covenant/mutate/survivors.ex:139:27
   operator: element_removal
   mutation: "`Error.new(file, 1, \"invalid YAML: #{Exception.message(error…` → `(removed)`"
   sort: dead-code
   reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
-- at: lib/covenant/mutate/survivors.ex:120:37
+- at: lib/covenant/mutate/survivors.ex:139:37
   operator: integer_shift
   mutation: "`1` → `2`"
   sort: dead-code
   reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
-- at: lib/covenant/mutate/survivors.ex:120:37
+- at: lib/covenant/mutate/survivors.ex:139:37
   operator: integer_shift
   mutation: "`1` → `0`"
   sort: dead-code
   reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
-- at: lib/covenant/mutate/survivors.ex:120:40
+- at: lib/covenant/mutate/survivors.ex:139:40
   operator: string_empty
   mutation: "`\"invalid YAML: #{Exception.message(error)}\"` → `\"\"`"
   sort: dead-code
   reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
-- at: lib/covenant/mutate/survivors.ex:134:22
+- at: lib/covenant/mutate/survivors.ex:153:22
   operator: element_removal
   mutation: "`\"\\r\\n\"` → `(removed)`"
   sort: equivalent
@@ -312,3 +312,18 @@
   mutation: "`\".*\"` → `\"\"`"
   sort: equivalent
   reason: With an empty suffix every name list is expanded, and Covers.expand/2 returns a name without `.*` unchanged, so the names are the same; only a needless call to project_modules/0 is added.
+- at: lib/covenant/mutate/survivors.ex:240:60
+  operator: return_nil
+  mutation: "`false` → `nil`"
+  sort: equivalent
+  reason: Every caller of matches?/2 (Enum.find, Enum.any?, Enum.filter) only tests truthiness, and nil is as false as false.
+- at: lib/covenant/mutate/survivors.ex:273:59
+  operator: guard_removal
+  mutation: "`when unit != nil` → `(no guard)`"
+  sort: equivalent
+  reason: A survivors-file entry has no unit, change or from, so without the guard it is taken for a wildcard and returned as it is, which is what the fallback clause does.
+- at: lib/covenant/mutate/survivors.ex:352:49
+  operator: element_removal
+  mutation: "`mutant` → `(removed)`"
+  sort: equivalent
+  reason: Without mutants the default only decides whether to add `#k`; a list of none and a list of the mutant itself both give no suffix.
