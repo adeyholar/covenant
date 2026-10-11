@@ -100,9 +100,10 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 - **kind:** functional
 - **status:** active
 
-### covenant.mutate.I15 — Parallel workers get a directory of their own
-- **scope:** `Covenant.Mutate.Workdir.build/2`, `Covenant.Mutate.Workdir.remove/1`, `Covenant.Mutate.Workdir.within/2`
-- **must:** build, under the given base directory (the system temp directory by default), a directory named after the OS process that holds a symlink to every entry of the project root except `tmp`, and a real empty `tmp`; remove it with the symlinks, never what they point at; run a function with it as the working directory and restore the previous one even when the function raises
+### covenant.mutate.I15 — A worker runs in a private copy of the project
+- **scope:** `Covenant.Mutate.Workdir.build/3`, `Covenant.Mutate.Workdir.remove/1`, `Covenant.Mutate.Workdir.within/2`
+- **must:** build, under the given base directory (the system temp directory by default), a directory named `covenant-mutate-<OS pid>-<random suffix>`, created with an exclusive `mkdir` (one that exists already is an error and is never touched) and readable by its owner only (mode 0700), that holds a real copy of every top-level entry of the project root except `_build`, `deps` and `node_modules`, which are symlinks, and `.git`, `.elixir_ls` and `tmp`, which are left out, and a real empty `tmp`; so a write or delete by a cwd-relative path in a test or a mutant lands in the copy and never in the project; remove it without ever following a symlink, so the links go and never what they point at; run a function with it as the working directory and restore the previous one even when the function raises; do not protect absolute paths, paths reached through the `_build` and `deps` links, or paths derived from the project's location (`__DIR__`, `Application.app_dir/1`), because the tool runs the project's own code against broken copies of it, and say so in the moduledoc
+- **why:** a `string_empty` mutant turned `@dir "tmp/cache"` into `""` and the project's own `clear!/0` then ran `File.rm_rf!(Path.expand(""))` in the project root, deleting the whole project, `.git` included
 - **kind:** functional
 - **status:** active
 

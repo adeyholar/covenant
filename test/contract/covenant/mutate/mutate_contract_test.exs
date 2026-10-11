@@ -1872,31 +1872,74 @@ defmodule Covenant.MutateWorkdirContractTest do
   end
 
   @tag obligation: "covenant.mutate.I15"
-  test "a worker directory links every root entry but tmp and has a tmp of its own", %{
+  test "a worker directory holds copies of the sources, links the big dirs and has a tmp of its own",
+       %{root: root, base: base} do
+    File.mkdir_p!(Path.join(root, "_build/test"))
+    File.mkdir_p!(Path.join(root, "deps"))
+    File.mkdir_p!(Path.join(root, ".git"))
+    File.mkdir_p!(Path.join(root, ".elixir_ls"))
+    File.write!(Path.join(root, "_build/test/x"), "x")
+
+    dir = Workdir.build(root, base)
+    assert Path.dirname(dir) == base
+    assert Path.basename(dir) =~ ~r/^covenant-mutate-#{System.pid()}-[0-9a-z]+$/
+    assert dir |> File.ls!() |> Enum.sort() == ["_build", "deps", "lib", "mix.exs", "tmp"]
+    assert File.read!(Path.join(dir, "mix.exs")) == "mix"
+    assert File.read!(Path.join(dir, "lib/a.ex")) == "a"
+    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "lib"))
+    assert {:ok, %File.Stat{type: :regular}} = File.lstat(Path.join(dir, "mix.exs"))
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "_build"))
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "deps"))
+    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "tmp"))
+    assert File.ls!(Path.join(dir, "tmp")) == []
+    assert File.stat!(dir).mode |> Bitwise.band(0o777) == 0o700
+
+    # a second worker never reuses or clears the first one's directory
+    File.write!(Path.join(dir, "tmp/stale.txt"), "stale")
+    other = Workdir.build(root, base)
+    refute other == dir
+    assert File.exists?(Path.join(dir, "tmp/stale.txt"))
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "writes and deletes by relative path land in the copy, never in the project", %{
     root: root,
     base: base
   } do
+    File.mkdir_p!(Path.join(root, "deps"))
+    File.write!(Path.join(root, "deps/dep.txt"), "dep")
     dir = Workdir.build(root, base)
-    assert dir == Path.join(base, "covenant-mutate-#{System.pid()}")
-    assert dir |> File.ls!() |> Enum.sort() == ["lib", "mix.exs", "tmp"]
-    assert File.read!(Path.join(dir, "mix.exs")) == "mix"
-    assert File.read!(Path.join(dir, "lib/a.ex")) == "a"
-    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "lib"))
-    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "mix.exs"))
-    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "tmp"))
-    assert File.ls!(Path.join(dir, "tmp")) == []
 
-    # building again starts clean
-    File.write!(Path.join(dir, "tmp/stale.txt"), "stale")
-    assert ^dir = Workdir.build(root, base)
-    assert File.ls!(Path.join(dir, "tmp")) == []
+    Workdir.within(dir, fn ->
+      File.write!("lib/a.ex", "mutated")
+      File.rm_rf!(Path.expand(""))
+    end)
+
+    refute File.exists?(dir)
+    assert File.read!(Path.join(root, "lib/a.ex")) == "a"
+    assert File.read!(Path.join(root, "mix.exs")) == "mix"
+    assert File.read!(Path.join(root, "deps/dep.txt")) == "dep"
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "building refuses a directory that already exists", %{root: root, base: base} do
+    existing = Path.join(base, "covenant-mutate-#{System.pid()}-fixed")
+    File.mkdir_p!(existing)
+    File.write!(Path.join(existing, "keep"), "keep")
+
+    assert_raise File.Error, ~r/file already exists/, fn -> Workdir.build(root, base, "fixed") end
+    assert File.read!(Path.join(existing, "keep")) == "keep"
   end
 
   @tag obligation: "covenant.mutate.I15"
   test "removing it deletes the links, never what they point at", %{root: root, base: base} do
+    File.mkdir_p!(Path.join(root, "deps"))
+    File.write!(Path.join(root, "deps/dep.txt"), "dep")
     dir = Workdir.build(root, base)
     File.write!(Path.join(dir, "tmp/mine.txt"), "mine")
     File.write!(Path.join(dir, "loose.txt"), "loose")
+    # a link nested in a copied entry points outside the project
+    File.ln_s!(Path.join(root, "deps"), Path.join(dir, "lib/nested"))
 
     assert :ok = Workdir.remove(dir)
 
@@ -1904,6 +1947,7 @@ defmodule Covenant.MutateWorkdirContractTest do
     assert File.read!(Path.join(root, "lib/a.ex")) == "a"
     assert File.read!(Path.join(root, "mix.exs")) == "mix"
     assert File.read!(Path.join(root, "tmp/theirs.txt")) == "theirs"
+    assert File.read!(Path.join(root, "deps/dep.txt")) == "dep"
   end
 
   @tag obligation: "covenant.mutate.I15"

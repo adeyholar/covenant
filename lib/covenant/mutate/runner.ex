@@ -92,9 +92,10 @@ defmodule Covenant.Mutate.Runner do
     after every 25th mutant of the slice (`Covenant.Mutate.progress_due?/2`);
   * `:fail_fast` — (optional, default `false`) stop each mutant's run at its
     first failing test: exact verdict, `credit: :partial` on a kill;
-  * `:isolate` — (optional, default `false`) run the tests from a private
-    working directory (`Covenant.Mutate.Workdir`), so that parallel workers
-    never share ExUnit's `:tmp_dir` paths.
+  * `:isolate` — (optional, default `true`) run the tests from a private copy
+    of the project (`Covenant.Mutate.Workdir`), so that a mutant's relative
+    writes and deletes never reach the project and parallel workers never
+    share ExUnit's `:tmp_dir` paths; `false` runs in the project root.
   """
   @type plan :: %{
           required(:component) => String.t(),
@@ -184,11 +185,14 @@ defmodule Covenant.Mutate.Runner do
 
   defp eta(_plan, _done, _total, _started), do: :ok
 
-  # ExUnit puts a test's `:tmp_dir` under `tmp/` in the OS process's working
-  # directory, so workers running side by side must not share it. The suite is
-  # already compiled and loaded, so only what the tests do at run time sees the
-  # private directory.
-  defp isolated(%{isolate: true, root: root}, fun) do
+  # A mutant runs the project's own code, so it must not run in the project
+  # root, and ExUnit puts a test's `:tmp_dir` under `tmp/` in the OS process's
+  # working directory, so workers running side by side must not share it. The
+  # suite is already compiled and loaded, so only what the tests do at run time
+  # sees the private copy.
+  defp isolated(%{isolate: false}, fun), do: fun.()
+
+  defp isolated(%{root: root}, fun) do
     workdir = Workdir.build(root)
 
     try do
@@ -197,8 +201,6 @@ defmodule Covenant.Mutate.Runner do
       Workdir.remove(workdir)
     end
   end
-
-  defp isolated(_plan, fun), do: fun.()
 
   # -- files ------------------------------------------------------------------
 
