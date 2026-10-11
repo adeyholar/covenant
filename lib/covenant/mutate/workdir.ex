@@ -61,18 +61,22 @@ defmodule Covenant.Mutate.Workdir do
     do: 6 |> :crypto.strong_rand_bytes() |> Base.encode32(case: :lower, padding: false)
 
   @doc """
-  Removes the directory. It never follows a symlink: the links go, never what
-  they point at, whether they are at the top or inside a copied entry.
+  Removes the directory, if it is still there (a mutant may have deleted it).
+  It never follows a symlink: the links go, never what they point at, whether
+  they are at the top or inside a copied entry.
   """
   @spec remove(Path.t()) :: :ok
   def remove(dir) do
-    for entry <- File.ls!(dir),
-        path = Path.join(dir, entry),
-        match?({:ok, %File.Stat{type: :symlink}}, File.lstat(path)) do
-      File.rm!(path)
+    with {:ok, entries} <- File.ls(dir) do
+      for entry <- entries,
+          path = Path.join(dir, entry),
+          match?({:ok, %File.Stat{type: :symlink}}, File.lstat(path)) do
+        File.rm!(path)
+      end
+
+      File.rm_rf!(dir)
     end
 
-    File.rm_rf!(dir)
     :ok
   end
 

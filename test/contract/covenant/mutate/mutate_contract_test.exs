@@ -2012,6 +2012,9 @@ defmodule Covenant.MutateWorkdirContractTest do
     assert File.read!(Path.join(root, "mix.exs")) == "mix"
     assert File.read!(Path.join(root, "tmp/theirs.txt")) == "theirs"
     assert File.read!(Path.join(root, "deps/dep.txt")) == "dep"
+
+    # a mutant may have deleted it already
+    assert :ok = Workdir.remove(dir)
   end
 
   @tag obligation: "covenant.mutate.I15"
