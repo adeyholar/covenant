@@ -1,4 +1,5 @@
-[component, module, file, test_file | _rest] = System.argv()
+[component, module, file, test_file | rest] = System.argv()
+timeout = with [ms | _] <- rest, do: String.to_integer(ms), else: (_ -> nil)
 Mix.shell(Mix.Shell.IO)
 
 plan = %{
@@ -7,12 +8,19 @@ plan = %{
   test_files: [test_file],
   root: File.cwd!(),
   seed: 0,
-  timeout: nil,
+  timeout: timeout,
   slice: {1, 1},
   on_progress: fn m -> IO.puts("  #{m.id} #{m.verdict} #{Covenant.Mutate.Mutant.mutation(m)}") end,
+  # the callback runs inside the worker's copy and does not halt: the runner does,
+  # after it has removed the copy; the pause lets a mutant's stray processes write
   on_timeout: fn result, mutant ->
     IO.puts("ON_TIMEOUT #{mutant.id} #{length(result.mutants)}")
-    System.halt(Covenant.Mutate.Runner.timeout_exit())
+    IO.puts("CWD_IN_CALLBACK #{File.cwd!()}")
+  end,
+  halt: fn status ->
+    Process.sleep(1_000)
+    IO.puts("CWD_AT_HALT #{inspect(File.cwd())}")
+    System.halt(status)
   end
 }
 

@@ -58,11 +58,11 @@ defmodule Covenant.MutateRunnerE2EContractTest do
   @project Path.expand("../../../fixtures/mutate/vm_project", __DIR__)
   @probe Path.expand("../../../fixtures/mutate/runner_probe.exs", __DIR__)
 
-  defp probe(component, module, file, env \\ []) do
+  defp probe(component, module, file, env \\ [], args \\ []) do
     mix = System.find_executable("mix") || raise "mix not on PATH"
     test_file = "test/contract/vm/#{Path.basename(file, ".ex")}_contract_test.exs"
 
-    System.cmd(mix, ["run", @probe, component, module, file, test_file],
+    System.cmd(mix, ["run", @probe, component, module, file, test_file | args],
       cd: @project,
       env: [{"MIX_ENV", "test"}, {"COVENANT_RESULTS_DIR", nil} | env],
       stderr_to_stdout: true
@@ -94,6 +94,32 @@ defmodule Covenant.MutateRunnerE2EContractTest do
     assert [_, number, count] = Regex.run(~r/ON_TIMEOUT m(\d+) (\d+)/, output)
     assert String.to_integer(count) == String.to_integer(number)
     refute output =~ "RESULT:"
+  end
+
+  @tag obligation: "covenant.mutate.I20"
+  test "a timed-out mutant's stray processes never write into the project" do
+    File.rm_rf!(Path.join(@project, "tmp"))
+    on_exit(fn -> File.rm_rf!(Path.join(@project, "tmp")) end)
+
+    {output, status} = probe("vm.writer", "Vm.Writer", "lib/vm/writer.ex")
+
+    assert status == 3
+    # the callback ran inside the worker's copy, and the cwd never went back to the project
+    assert [_, in_callback] = Regex.run(~r/CWD_IN_CALLBACK (\S+)/, output)
+    assert Path.basename(in_callback) =~ ~r/^covenant-mutate-/
+    assert [_, at_halt] = Regex.run(~r/CWD_AT_HALT \{:ok, "([^"]+)"\}/, output)
+    assert Path.basename(at_halt) =~ ~r/^covenant-mutate-/
+    # the probe waits a second after the timeout before it halts: nothing appeared in the project
+    refute File.exists?(Path.join(@project, "tmp"))
+  end
+
+  @tag obligation: "covenant.mutate.I20"
+  test "many tests that each hit the per-test timeout finish, and are not a hang" do
+    {output, status} = probe("vm.count", "Vm.Count", "lib/vm/count.ex", [], ["1000"])
+
+    assert status == 0
+    refute output =~ "ON_TIMEOUT"
+    assert output =~ ~r/RESULT: \{:ok, \d+\}/
   end
 
   @tag obligation: "covenant.mutate.I21"

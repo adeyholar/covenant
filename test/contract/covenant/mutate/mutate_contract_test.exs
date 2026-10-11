@@ -1974,6 +1974,7 @@ defmodule Covenant.MutateWorkdirContractTest do
     File.mkdir_p!(Path.join(root, "apps/x/_build/dev"))
     File.write!(Path.join(root, "apps/x/_build/dev/x.beam"), "beam")
     File.mkdir_p!(Path.join(root, "apps/x/lib"))
+    File.write!(Path.join(root, "apps/x/mix.exs"), "mix")
     File.write!(Path.join(root, "apps/x/lib/x.ex"), "x")
     File.write!(Path.join(root, "apps/x/.git"), "gitdir: elsewhere")
     File.mkdir_p!(Path.join(root, "apps/y/.elixir_ls"))
@@ -2054,6 +2055,93 @@ defmodule Covenant.MutateWorkdirContractTest do
 
     # a mutant may have deleted it already
     assert :ok = Workdir.remove(dir)
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "a _build or deps directory is linked only beside a mix.exs; node_modules anywhere",
+       %{root: root, base: base} do
+    File.mkdir_p!(Path.join(root, "test/fixtures/deps"))
+    File.write!(Path.join(root, "test/fixtures/deps/data.txt"), "data")
+    File.mkdir_p!(Path.join(root, "test/fixtures/_build"))
+    File.mkdir_p!(Path.join(root, "test/fixtures/node_modules"))
+    File.mkdir_p!(Path.join(root, "deps"))
+
+    dir = Workdir.build(root, base)
+
+    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "test/fixtures/deps"))
+    assert File.read!(Path.join(dir, "test/fixtures/deps/data.txt")) == "data"
+
+    assert {:ok, %File.Stat{type: :directory}} =
+             File.lstat(Path.join(dir, "test/fixtures/_build"))
+
+    assert {:ok, %File.Stat{type: :symlink}} =
+             File.lstat(Path.join(dir, "test/fixtures/node_modules"))
+
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "deps"))
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "symlinks never lead a write into the project, and none dangles", %{root: root, base: base} do
+    outside = Path.join(Path.dirname(root), "outside")
+    File.mkdir_p!(outside)
+    File.write!(Path.join(outside, "o.txt"), "o")
+    File.ln_s!(Path.join(root, "lib"), Path.join(root, "abs_in"))
+    File.ln_s!(Path.join(root, "lib/a.ex"), Path.join(root, "abs_in_file"))
+    File.ln_s!("../outside/o.txt", Path.join(root, "rel_out"))
+    File.ln_s!("lib/a.ex", Path.join(root, "rel_in"))
+    File.ln_s!("/somewhere/else", Path.join(root, "abs_out"))
+
+    dir = Workdir.build(root, base)
+
+    assert File.read_link!(Path.join(dir, "abs_in")) == Path.join(dir, "lib")
+    assert File.read_link!(Path.join(dir, "abs_in_file")) == Path.join(dir, "lib/a.ex")
+    assert File.read_link!(Path.join(dir, "rel_out")) == Path.join(outside, "o.txt")
+    assert File.read!(Path.join(dir, "rel_out")) == "o"
+    assert File.read_link!(Path.join(dir, "rel_in")) == "lib/a.ex"
+    assert File.read_link!(Path.join(dir, "abs_out")) == "/somewhere/else"
+
+    Workdir.within(dir, fn -> File.write!("abs_in/a.ex", "through the link") end)
+    assert File.read!(Path.join(root, "lib/a.ex")) == "a"
+    assert File.read!(Path.join(dir, "lib/a.ex")) == "through the link"
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "removing it survives a read-only directory a test left behind", %{root: root, base: base} do
+    dir = Workdir.build(root, base)
+    File.mkdir_p!(Path.join(dir, "tmp/ro/inner"))
+    File.write!(Path.join(dir, "tmp/ro/inner/f"), "f")
+    File.chmod!(Path.join(dir, "tmp/ro/inner"), 0o500)
+    File.chmod!(Path.join(dir, "tmp/ro"), 0o500)
+
+    assert :ok = Workdir.remove(dir)
+    refute File.exists?(dir)
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "an unreadable entry is left out with a warning, and a failed build leaves no directory",
+       %{root: root, base: base} do
+    File.mkdir_p!(Path.join(root, "data/pg"))
+    File.write!(Path.join(root, "data/pg/f"), "f")
+    File.write!(Path.join(root, "data/ok"), "ok")
+    File.chmod!(Path.join(root, "data/pg"), 0o000)
+
+    try do
+      warning =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          send(self(), {:dir, Workdir.build(root, base)})
+        end)
+
+      assert_received {:dir, dir}
+      assert warning =~ "data/pg"
+      assert File.read!(Path.join(dir, "data/ok")) == "ok"
+      refute File.exists?(Path.join(dir, "data/pg"))
+    after
+      File.chmod!(Path.join(root, "data/pg"), 0o755)
+    end
+
+    before = File.ls!(base)
+    assert_raise File.Error, fn -> Workdir.build(Path.join(root, "nowhere"), base) end
+    assert File.ls!(base) == before
   end
 
   @tag obligation: "covenant.mutate.I15"
