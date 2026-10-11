@@ -156,12 +156,12 @@ defmodule Covenant.Case do
       env.module
       |> Module.get_attribute(:ex_unit_tests)
       |> Enum.reverse()
-      |> Enum.map_reduce(%{}, fn test, sources ->
+      |> Enum.map_reduce(seed_sources(env), fn test, sources ->
         {lines, sources} = source_lines(test.tags[:file], sources)
         {validate_test(test, lines, component, contract), sources}
       end)
 
-    if component.form == :primitive, do: check_orphan_comments(tests, sources)
+    if component.form == :primitive, do: check_orphan_comments(tests, sources, env)
 
     if component.form == :primitive do
       Module.delete_attribute(env.module, :ex_unit_tests)
@@ -174,7 +174,7 @@ defmodule Covenant.Case do
 
   # A `# Contract:` comment that is not directly above a test (above a `setup`,
   # a `defp`, a blank line) would be silently ignored, so it is an error.
-  defp check_orphan_comments(tests, sources) do
+  defp check_orphan_comments(tests, sources, env) do
     for {file, lines} <- sources do
       attached =
         for %{tags: %{file: ^file, line: line}} <- tests,
@@ -182,7 +182,13 @@ defmodule Covenant.Case do
             into: MapSet.new(),
             do: n
 
-      case Enum.find(Primitive.contract_comment_lines(lines), &(not MapSet.member?(attached, &1))) do
+      # only this module's own lines: another `Covenant.Case` module in the file has its own check
+      range = if file == env.file, do: Primitive.module_range(lines, env.line)
+
+      case Enum.find(
+             Primitive.contract_comment_lines(lines, range),
+             &(not MapSet.member?(attached, &1))
+           ) do
         nil ->
           :ok
 
@@ -212,6 +218,9 @@ defmodule Covenant.Case do
         )
     end
   end
+
+  # The module's own file is always read, so a module with no test still has its comments checked.
+  defp seed_sources(env), do: elem(source_lines(env.file, %{}), 1)
 
   defp source_lines(nil, sources), do: {[], sources}
 

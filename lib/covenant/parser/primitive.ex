@@ -479,10 +479,48 @@ defmodule Covenant.Parser.Primitive do
   def attached_comment_lines(lines, line),
     do: for({text, n} <- attached(lines, line), Regex.match?(@contract_comment, text), do: n)
 
-  @doc "The line numbers of every `# Contract:` comment in `lines`."
-  @spec contract_comment_lines([String.t()]) :: [pos_integer()]
-  def contract_comment_lines(lines),
-    do: for({text, n} <- Enum.with_index(lines, 1), Regex.match?(@contract_comment, text), do: n)
+  @doc """
+  The line numbers of the `# Contract:` comments in `lines` that lie in `range` (default: the
+  whole file). Only real comments count: the same text inside a heredoc or a string is not one.
+  """
+  @spec contract_comment_lines([String.t()], Range.t() | nil) :: [pos_integer()]
+  def contract_comment_lines(lines, range \\ nil) do
+    candidates =
+      for {text, n} <- Enum.with_index(lines, 1), Regex.match?(@contract_comment, text), do: n
+
+    real =
+      case Code.string_to_quoted_with_comments(Enum.join(lines, "\n"), emit_warnings: false) do
+        {:ok, _ast, comments} -> MapSet.new(comments, & &1.line)
+        _ -> nil
+      end
+
+    for n <- candidates, real == nil or MapSet.member?(real, n), range == nil or n in range, do: n
+  end
+
+  @doc """
+  The line range of the innermost `defmodule` of `lines` that holds `line`, or `nil`.
+  """
+  @spec module_range([String.t()], pos_integer()) :: Range.t() | nil
+  def module_range(lines, line) do
+    case Code.string_to_quoted(Enum.join(lines, "\n"), token_metadata: true, emit_warnings: false) do
+      {:ok, ast} ->
+        {_, ranges} =
+          Macro.prewalk(ast, [], fn
+            {:defmodule, meta, [_, _]} = node, acc ->
+              first = meta[:line]
+              last = get_in(meta, [:end, :line])
+              {node, if(first && last && line in first..last, do: [first..last | acc], else: acc)}
+
+            node, acc ->
+              {node, acc}
+          end)
+
+        Enum.min_by(ranges, &Range.size/1, fn -> nil end)
+
+      _ ->
+        nil
+    end
+  end
 
   defp attached(lines, line) do
     lines
