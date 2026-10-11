@@ -1966,6 +1966,45 @@ defmodule Covenant.MutateWorkdirContractTest do
   end
 
   @tag obligation: "covenant.mutate.I15"
+  test "build and dependency trees are links at any depth, a nested .git is left out, links are copied as links",
+       %{root: root, base: base} do
+    File.mkdir_p!(Path.join(root, "assets/node_modules/pkg"))
+    File.write!(Path.join(root, "assets/node_modules/pkg/index.js"), "js")
+    File.write!(Path.join(root, "assets/app.js"), "app")
+    File.mkdir_p!(Path.join(root, "apps/x/_build/dev"))
+    File.write!(Path.join(root, "apps/x/_build/dev/x.beam"), "beam")
+    File.mkdir_p!(Path.join(root, "apps/x/lib"))
+    File.write!(Path.join(root, "apps/x/lib/x.ex"), "x")
+    File.write!(Path.join(root, "apps/x/.git"), "gitdir: elsewhere")
+    File.mkdir_p!(Path.join(root, "apps/y/.elixir_ls"))
+    File.ln_s!("a.ex", Path.join(root, "lib/link.ex"))
+
+    dir = Workdir.build(root, base)
+
+    for link <- ["assets/node_modules", "apps/x/_build"] do
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, link))
+    end
+
+    assert File.read!(Path.join(dir, "assets/app.js")) == "app"
+    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "assets"))
+    assert File.read!(Path.join(dir, "apps/x/lib/x.ex")) == "x"
+    refute File.exists?(Path.join(dir, "apps/x/.git"))
+    refute File.exists?(Path.join(dir, "apps/y/.elixir_ls"))
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "lib/link.ex"))
+    assert File.read_link!(Path.join(dir, "lib/link.ex")) == "a.ex"
+
+    Workdir.within(dir, fn ->
+      File.rm_rf!("assets")
+      File.rm_rf!("apps")
+    end)
+
+    assert File.read!(Path.join(root, "assets/node_modules/pkg/index.js")) == "js"
+    assert File.read!(Path.join(root, "apps/x/_build/dev/x.beam")) == "beam"
+    assert File.read!(Path.join(root, "apps/x/lib/x.ex")) == "x"
+    assert File.read!(Path.join(root, "apps/x/.git")) == "gitdir: elsewhere"
+  end
+
+  @tag obligation: "covenant.mutate.I15"
   test "writes and deletes by relative path land in the copy, never in the project", %{
     root: root,
     base: base

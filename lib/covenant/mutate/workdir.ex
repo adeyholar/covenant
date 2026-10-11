@@ -14,10 +14,13 @@ defmodule Covenant.Mutate.Workdir do
   The same directory keeps parallel workers from sharing ExUnit's `:tmp_dir`
   paths (`tmp/<module>/<test>` below the working directory).
 
-  Not copied: `_build`, `deps` and `node_modules` are symlinks to the
-  project's (too big to copy; `File.rm_rf!/1` does not follow a symlink, but
-  a write through one reaches the project); `.git` and `.elixir_ls` are left
-  out; `tmp` is a fresh, empty directory.
+  Not copied: a directory named `_build`, `deps` or `node_modules`, at any
+  depth (Phoenix's `assets/node_modules`, an umbrella app's `_build`), is a
+  symlink to the project's (too big to copy; `File.rm_rf!/1` does not follow a
+  symlink, but a write through one reaches the project); `.git` and
+  `.elixir_ls`, directory or file, are left out at any depth; the top-level
+  `tmp` is a fresh, empty directory; a symlink is copied as a symlink, never
+  followed.
 
   What this does **not** protect: absolute paths, paths reached through the
   `_build` and `deps` links, and paths derived from the project's location
@@ -28,7 +31,7 @@ defmodule Covenant.Mutate.Workdir do
   """
 
   @linked ~w(_build deps node_modules)
-  @left_out ~w(.git .elixir_ls tmp)
+  @left_out ~w(.git .elixir_ls)
 
   @doc """
   Creates the directory for the current OS process under `base` (the system
@@ -45,16 +48,38 @@ defmodule Covenant.Mutate.Workdir do
     File.chmod!(dir, 0o700)
     File.mkdir!(Path.join(dir, "tmp"))
 
-    for entry <- File.ls!(root), entry not in @left_out do
-      source = Path.join(root, entry)
-      target = Path.join(dir, entry)
-
-      if entry in @linked,
-        do: File.ln_s!(source, target),
-        else: File.cp_r!(source, target)
+    for entry <- File.ls!(root), entry not in ["tmp" | @left_out] do
+      copy(Path.join(root, entry), Path.join(dir, entry))
     end
 
     dir
+  end
+
+  # Directories named like a build or dependency tree are linked, at any depth; a
+  # symlink is copied as a symlink, never followed; what is not a directory, a link
+  # or a regular file (a socket, say) is left out.
+  defp copy(source, target) do
+    case File.lstat!(source) do
+      %File.Stat{type: :symlink} ->
+        File.ln_s!(File.read_link!(source), target)
+
+      %File.Stat{type: :directory} ->
+        if Path.basename(source) in @linked do
+          File.ln_s!(source, target)
+        else
+          File.mkdir!(target)
+
+          for entry <- File.ls!(source), entry not in @left_out do
+            copy(Path.join(source, entry), Path.join(target, entry))
+          end
+        end
+
+      %File.Stat{type: :regular} ->
+        File.cp!(source, target)
+
+      _ ->
+        :ok
+    end
   end
 
   defp random_suffix,
