@@ -28,7 +28,7 @@ contract tests resolve paths from.
 
 ### covenant.static.I3 — What only a reader can see is a problem at the line
 - **scope:** `Covenant.Static.scan_source/2`
-- **must:** report at file and line: a file that does not parse; a `component:` or `obligation` tag that is not a literal; a test with no obligation tag; a second `obligation:` tag at one level (ExUnit keeps the last, so the first is silently lost); a `@tag` before `describe` or at the end of a module; a `test` or `property` with no body; a `@describetag` outside a `describe` block (ExUnit raises); a test name used twice in one module (a compile error in ExUnit); a `test` or `property` inside `for`, `Enum.each`, `if`, `unless`, `case`, `cond` or any other expression that can define zero or many of them, which is never credited and is reported as needing compiled code; and never raise on any of these
+- **must:** report at file and line: a file that does not parse; a `component:` or `obligation` tag that is not a literal; a test with no obligation tag; a second `obligation:` tag at one level (ExUnit keeps the last, so the first is silently lost); a `@tag` before `describe` or at the end of a module; a `test` or `property` with no body; a `@describetag` outside a `describe` block (ExUnit raises); a test name used twice in one module (a compile error in ExUnit); a `test` or `property` inside `for`, `Enum.each`, `if`, `unless`, `case`, `cond` or any other expression that can define zero or many of them, which is never credited and is not a problem but is returned by `scan/2` and `scan_source/3` in `generated` (file, line, name); and never raise on any of these
 - **kind:** functional
 - **record:** static-reads-literals
 - **status:** active

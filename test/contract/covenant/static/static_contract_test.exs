@@ -64,8 +64,7 @@ defmodule Covenant.StaticContractTest do
 
     %{tests: [first | _], problems: problems} = scan(source)
 
-    assert [problem] = messages(problems)
-    assert problem =~ "inside `for`"
+    assert problems == []
 
     assert %Test{
              module: "Demo.WidgetContractTest",

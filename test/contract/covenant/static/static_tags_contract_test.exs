@@ -58,7 +58,7 @@ defmodule Covenant.StaticTagsContractTest do
   end
 
   @tag obligation: "covenant.static.I3"
-  test "tests inside for, Enum.each, if, unless, case and cond are not credited but reported" do
+  test "tests inside for, Enum.each, if, unless, case and cond are not credited and not errors" do
     source =
       module_source("""
         for n <- [1, 2] do
@@ -89,17 +89,15 @@ defmodule Covenant.StaticTagsContractTest do
       """)
 
     assert tags(source) == []
+    assert messages(source) == []
 
-    problems = messages(source)
-    assert length(problems) == 6
-
-    for construct <- ["for", "Enum.each", "if", "unless", "case", "cond"] do
-      assert Enum.any?(problems, &(&1 =~ "inside `#{construct}`" and &1 =~ "compiled code"))
-    end
+    assert %{generated: generated} = scan(source)
+    assert length(generated) == 6
+    assert %{file: "x_test.exs", line: 6, name: ~S(test "in for #{n}")} = hd(generated)
   end
 
   @tag obligation: "covenant.static.I3"
-  test "a literal test name inside for is not reported as a duplicate" do
+  test "a literal test name inside for is not a duplicate" do
     source =
       module_source("""
         for i <- [1] do
@@ -107,10 +105,8 @@ defmodule Covenant.StaticTagsContractTest do
         end
       """)
 
-    problems = messages(source)
-    assert [only] = problems
-    refute only =~ "duplicate"
-    assert only =~ "zero or many"
+    assert messages(source) == []
+    assert [%{name: "test fixed"}] = scan(source).generated
   end
 
   @tag obligation: "covenant.static.I1"
