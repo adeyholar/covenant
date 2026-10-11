@@ -147,7 +147,7 @@ defmodule Covenant.SiblingE2EContractTest do
     assert output =~ "Survivors (2; 0 unsorted)"
 
     assert output =~
-             "comparison_swap `<` → `<=`  equivalent — At a bound, the bound is n When `n` equals `lo`"
+             "comparison_swap `<` → `<=`  equivalent — At a bound, the bound is n: When `n` equals `lo`"
 
     assert output =~ "covenant.mutate: every mutant is caught or sorted"
   end

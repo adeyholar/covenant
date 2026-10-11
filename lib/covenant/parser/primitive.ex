@@ -292,11 +292,8 @@ defmodule Covenant.Parser.Primitive do
        [Error.new(file, line, "the #{info} block has no heading above it to give its reason")]}
 
   defp declare(%{info: info, body: body}, heading, prose, file) do
-    reason =
-      [heading | prose]
-      |> Enum.join(" ")
-      |> String.replace(~r/\s+/, " ")
-      |> String.trim()
+    prose = prose |> Enum.join(" ") |> String.replace(~r/\s+/, " ") |> String.trim()
+    reason = if prose == "", do: heading, else: "#{heading}: #{prose}"
 
     Enum.reduce(body, {[], []}, fn {text, n}, {found, errors} ->
       case declaration(String.trim(text), info) do

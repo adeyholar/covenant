@@ -492,7 +492,7 @@ defmodule Covenant.PrimitiveContractTest do
     {:ok, [lt, gt, step, parse]} = Primitive.declarations(text, "mutants.md")
 
     assert %{unit: "Calc.clamp/3", from: "<", to: "<=", sort: "equivalent", line: 9} = lt
-    assert lt.reason == "At a bound, the bound is n When `n` equals `lo`, `<` and `<=` agree."
+    assert lt.reason == "At a bound, the bound is n: When `n` equals `lo`, `<` and `<=` agree."
     assert %{from: ">", to: ">=", sort: "equivalent"} = gt
 
     assert %{
