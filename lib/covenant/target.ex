@@ -37,9 +37,17 @@ defmodule Covenant.Target do
         {:ok, {:module, to_module(target)}}
 
       String.contains?(target, "/") or String.ends_with?(target, [".ex", ".exs"]) ->
-        if within?(target, "/project"),
-          do: {:ok, {:file, target}},
-          else: {:error, "target `#{target}` is outside the project root"}
+        cond do
+          Path.type(target) == :absolute or String.starts_with?(target, "~") ->
+            {:error,
+             "target `#{target}` must be a path relative to the project root, not an absolute or `~` path"}
+
+          within?(target, "/project") ->
+            {:ok, {:file, target}}
+
+          true ->
+            {:error, "target `#{target}` is outside the project root"}
+        end
 
       true ->
         {:error,
@@ -49,7 +57,7 @@ defmodule Covenant.Target do
 
   # No new atom: the module's atom if it already exists, else its name.
   defp to_module(name) do
-    String.to_existing_atom("Elixir." <> name)
+    String.to_existing_atom("Elixir." <> String.replace_prefix(name, "Elixir.", ""))
   rescue
     ArgumentError -> name
   end

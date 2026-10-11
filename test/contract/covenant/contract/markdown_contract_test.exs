@@ -357,10 +357,10 @@ defmodule Covenant.Contract.MarkdownContractTest do
     test "an indented block's fields are not merged into the block above" do
       text =
         intent()
-        |> String.replace("### demo.widget.I2", "  ### I2")
+        |> String.replace("### demo.widget.I2", "  ### demo.widget.I2")
         |> String.replace("- **status:** retired", "- **status:** active")
 
-      assert Enum.any?(messages(parse(text)), &(&1 =~ ":34: obligation heading `I2`"))
+      assert Enum.any?(messages(parse(text)), &(&1 =~ ":34: obligation heading `demo.widget.I2`"))
     end
 
     @tag obligation: "covenant.contract.I10"
@@ -417,6 +417,98 @@ defmodule Covenant.Contract.MarkdownContractTest do
       assert messages(parse(text)) == [
                "demo/widget.intent.md:40: obligation `demo.widget.I2` repeats `status` (first at line 39)"
              ]
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "lowercase bold-label bullets in prose are prose; a known field there still fails" do
+      prose =
+        String.replace(
+          intent(),
+          "## Decisions\n",
+          "## Decisions\n\n- **note:** prose\n- **input:** a list\n"
+        )
+
+      assert {:ok, _} = parse(prose)
+
+      stray =
+        String.replace(intent(), "## Decisions\n", "## Decisions\n\n- **status:** retired\n")
+
+      assert [message] = messages(parse(stray))
+      assert message =~ "field `status` is outside an obligation block"
+
+      under_h3 =
+        String.replace(
+          intent(),
+          "## Decisions\n",
+          "## Decisions\n\n### Notes\n- **note:** prose\n"
+        )
+
+      assert {:ok, _} = parse(under_h3)
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "a closing fence is indented at most three spaces more than the opening" do
+      nested =
+        String.replace(
+          intent(),
+          "## Orderings\n",
+          "## Orderings\n\n```markdown\n    ```\n## Not a section\n```\n"
+        )
+
+      assert {:ok, component} = parse(nested)
+      refute Enum.any?(component.sections, &(&1.title == "Not a section"))
+
+      indented =
+        String.replace(
+          intent(),
+          "## Orderings\n",
+          "## Orderings\n\n  ```\n  ## Not a section\n  ```\n"
+        )
+
+      assert {:ok, component} = parse(indented)
+      refute Enum.any?(component.sections, &(&1.title == "Not a section"))
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "a bare `## I1 - Overview` heading is not an obligation heading" do
+      text = String.replace(intent(), "## Decisions\n", "## Decisions\n\n## I1 - Overview\n")
+      assert {:ok, _} = parse(text)
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "a `+` bullet is a field" do
+      text = String.replace(intent(), "- **record:** keep-size", "+ **record:** keep-size")
+      assert {:ok, component} = parse(text)
+      assert hd(component.obligations).record == "keep-size"
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "a known field in the wrong case or with the colon outside the bold is an error" do
+      case_text = String.replace(intent(), "- **record:** keep-size", "- **Record:** keep-size")
+
+      assert messages(parse(case_text)) == [
+               "demo/widget.intent.md:31: field `Record:` must be written `- **record:** <value>`"
+             ]
+
+      colon_text = String.replace(intent(), "- **record:** keep-size", "- **record**: keep-size")
+
+      assert messages(parse(colon_text)) == [
+               "demo/widget.intent.md:31: field `record**:` must be written `- **record:** <value>`"
+             ]
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "a block whose fields are all malformed variants does not vanish" do
+      text =
+        String.replace(intent(), "### demo.widget.I2", "### Notes")
+        |> String.replace("- **kind:** exception", "- **kind:** functional")
+
+      text = text |> String.replace("- **status:** retired", "- **Status:** retired")
+      assert Enum.any?(messages(parse(text)), &(&1 =~ "must be written `- **status:** <value>`"))
+
+      light = "# X\n\n## Purpose\nP\n\n### demo.widget.I1 — T\n+ **Scope:** a\n+ **must**: b\n"
+      assert {:error, errors} = parse(light, :light)
+      assert length(errors) >= 2
     end
 
     @tag obligation: "covenant.contract.I2"

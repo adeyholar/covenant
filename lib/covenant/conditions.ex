@@ -176,7 +176,7 @@ defmodule Covenant.Conditions do
 
   # No new atom: the module's atom if it already exists, else its name.
   defp existing_module(name) do
-    String.to_existing_atom("Elixir." <> name)
+    String.to_existing_atom("Elixir." <> String.replace_prefix(name, "Elixir.", ""))
   rescue
     ArgumentError -> name
   end

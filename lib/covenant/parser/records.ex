@@ -119,6 +119,7 @@ defmodule Covenant.Parser.Records do
     {problems, _seen} =
       Enum.reduce(pairs, {[], %{}}, fn {key, value}, {problems, seen} ->
         name = key_name(key)
+        id = key_id(key)
         line = node_line(key)
 
         found =
@@ -126,14 +127,14 @@ defmodule Covenant.Parser.Records do
             name == "<<" ->
               [{line, "merge keys (`<<`) are not supported"}]
 
-            is_map_key(seen, name) ->
-              [{line, "key `#{name}` is repeated (first at line #{seen[name]})"}]
+            is_map_key(seen, id) ->
+              [{line, "key `#{name}` is repeated (first at line #{seen[id]})"}]
 
             true ->
               []
           end
 
-        {problems ++ found ++ map_problems(value), Map.put_new(seen, name, line)}
+        {problems ++ found ++ map_problems(value), Map.put_new(seen, id, line)}
       end)
 
     problems
@@ -144,6 +145,10 @@ defmodule Covenant.Parser.Records do
   defp key_name({:yamerl_str, _, _, _, name}), do: name
   defp key_name(node) when tuple_size(node) > 4, do: inspect(elem(node, 4))
   defp key_name(_node), do: "~"
+
+  # Keys are the same when they have the same type and value: `1` and `"1"` are different keys.
+  defp key_id(node) when tuple_size(node) > 4, do: {elem(node, 0), elem(node, 4)}
+  defp key_id(node), do: node
 
   defp node_line(node), do: node |> elem(3) |> Keyword.get(:line, 1)
 

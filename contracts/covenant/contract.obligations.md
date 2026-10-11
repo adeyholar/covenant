@@ -19,7 +19,7 @@ problem anchored to a file and line.
 
 ### covenant.contract.I2 — Obligation blocks are read in the convention's shape
 - **scope:** `Covenant.Parser.Markdown`
-- **must:** read `### <id> — <title>` (em dash, en dash or hyphen) followed by `- **field:** value` lines, joining indented continuation lines, keeping unknown fields, stripping backticks from `record` and `target`, ignoring headings and fields inside fenced code (a fence closes only with the same character and at least the same length), ignoring a leading byte-order mark, in every form
+- **must:** read `### <id> — <title>` (em dash, en dash or hyphen) followed by `- **field:** value` lines (`-`, `*` or `+` bullets), joining indented continuation lines, keeping unknown fields, stripping backticks from `record` and `target`, ignoring headings and fields inside fenced code (a fence closes only with the same character, at least the same length and an indent of at most three spaces more than its opening), ignoring a leading byte-order mark, in every form
 - **kind:** functional
 - **status:** active
 
@@ -68,12 +68,12 @@ problem anchored to a file and line.
 
 ### covenant.contract.I10 — A malformed obligation block is rejected, never skipped
 - **scope:** `Covenant.Parser.Markdown`
-- **must:** fail, at the offending line, an obligation-shaped heading (`<id>.I<n> — <title>`) at any level but `###`, an obligation heading indented by one to three spaces, a code fence never closed, a field line outside an obligation block, and a field repeated within one block; an obligation must not vanish or change because of how its neighbours are written
+- **must:** fail, at the offending line, an obligation-shaped heading (`<id>.I<n> — <title>`) at any level but `###`, an obligation heading indented by one to three spaces, a code fence never closed, a field line outside an obligation block (only a known obligation field — `scope`, `must`, `why`, `kind`, `status`, `record`, `target`; other bold-label bullets are prose), a field repeated within one block, and a known field written as `- **Record:**` (wrong case) or `- **record**:` (colon outside the bold), naming the right spelling, so that a block of such fields never vanishes; a heading is flagged as misplaced only when its id is a full `<component>.I<n>` (`## I1 - Overview` is not). Not covered, by design: fields inside a 4-space indented code block are read as fields, a `~~~` line in prose opens a fence, and an obligation inside a blockquote or an HTML comment is not recognised or is read as live; an obligation must not vanish or change because of how its neighbours are written
 - **kind:** functional
 - **status:** active
 
 ### covenant.contract.I11 — A YAML Contract file is read whole or rejected
 - **scope:** `Covenant.Parser.Records`, `Covenant.Parser.Scope`
-- **must:** fail, at the offending line and without raising, a file holding more than one YAML document, a `<<` merge key, a mapping key repeated within one mapping, and a field whose value is a mapping or list where text is expected (`decision`, `driver`, `approved_by`, `evidence`, `expires`, `notes`, an alternative's `rejected`, a ceiling's `why` and `record`); a ceiling or record must not vanish or change because the YAML reader would drop, ignore or pick between values
+- **must:** fail, at the offending line and without raising, a file holding more than one YAML document, a `<<` merge key, a mapping key repeated within one mapping (keys are the same only with the same type and value: `1` and `"1"` differ), and a field whose value is a mapping or list where text is expected (`decision`, `driver`, `approved_by`, `evidence`, `expires`, `notes`, an alternative's `rejected`, a ceiling's `why` and `record`); a ceiling or record must not vanish or change because the YAML reader would drop, ignore or pick between values
 - **kind:** functional
 - **status:** active
