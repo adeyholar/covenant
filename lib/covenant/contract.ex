@@ -77,7 +77,7 @@ defmodule Covenant.Contract do
       if File.regular?(scope_path), do: Parser.Scope.parse_file(scope_path), else: {:ok, []}
 
     errors =
-      Enum.flat_map(component_results ++ record_results ++ [scope_result], fn
+      Enum.flat_map(component_results ++ record_results ++ [scope_result] ++ unread(dir), fn
         {:error, errors} -> errors
         _ -> []
       end)
@@ -98,6 +98,38 @@ defmodule Covenant.Contract do
       {:ok, components} -> Enum.map(components, &{:ok, &1})
       error -> [error]
     end
+  end
+
+  # Markdown and YAML files the loader never reads (a nested directory, a
+  # misnamed `x.obligation.md`) would take whole components with them.
+  defp unread(dir) do
+    if File.dir?(dir) do
+      read = MapSet.new(for({f, _} <- component_files(dir), do: f) ++ record_files(dir))
+      scope = Path.join([dir, "system", "scope.yml"])
+
+      for file <- Path.wildcard(Path.join(dir, "**/*.{md,yml,yaml}")) |> Enum.sort(),
+          not MapSet.member?(read, file),
+          file != scope,
+          not known_file?(file) do
+        {:error,
+         [
+           Error.new(
+             file,
+             1,
+             "this file is not read: a component is `<app>/<name>.obligations.md` (or `.intent.md`) " <>
+               "directly under the contracts directory's app folder, and records are " <>
+               "`<app>/<name>.decisions.yml`; rename or move it"
+           )
+         ]}
+      end
+    else
+      []
+    end
+  end
+
+  defp known_file?(file) do
+    base = Path.basename(file)
+    base == "README.md" or String.ends_with?(base, ".survivors.yml") or base == "survivors.yml"
   end
 
   defp tag({:ok, records}, file), do: {:ok, {file, records}}

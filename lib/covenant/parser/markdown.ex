@@ -44,9 +44,10 @@ defmodule Covenant.Parser.Markdown do
   @near_field ~r/^[ \t]*[-*+][ \t]+\*\*([A-Za-z_]+)(:\*\*|\*\*:)/
   # The fields the convention gives a meaning to; only these are policed outside prose.
   @known_fields ~w(scope must why kind status record target)
+  @single_value_fields ~w(kind status)
   @block_heading ~r/^(\S+)[ \t]+(?:—|–|--|-)[ \t]+(.+)$/
   @block_id_like ~r/^[a-z0-9_.]+\.I[0-9]+$/
-  @fence ~r/^[ \t]*(`{3,}|~{3,})(.*)$/
+  @fence ~r/^ {0,3}(`{3,}|~{3,})(.*)$/
   @indented_heading ~r/^ {1,3}(\#{1,6})[ \t]+(.+?)[ \t]*\#*[ \t]*$/
 
   @typep token ::
@@ -140,7 +141,7 @@ defmodule Covenant.Parser.Markdown do
   defp front_matter(lines, _file), do: {%{}, [], lines}
 
   defp parse_front_matter(yaml, file) do
-    case YamlElixir.read_from_string(yaml) do
+    case Covenant.Parser.Records.read_document(yaml, file) do
       {:ok, nil} ->
         {:ok, %{}}
 
@@ -172,11 +173,9 @@ defmodule Covenant.Parser.Markdown do
       {:ok, _other} ->
         {:error, [Error.new(file, 1, "front matter must be a YAML mapping")]}
 
-      {:error, %{line: line, message: message}} ->
-        {:error, [Error.new(file, line + 1, "invalid front matter YAML: #{message}")]}
-
-      {:error, error} ->
-        {:error, [Error.new(file, 1, "invalid front matter YAML: #{Exception.message(error)}")]}
+      # The YAML starts on line 2 of the file; an error may carry no line at all.
+      {:error, errors} ->
+        {:error, Enum.map(errors, &%{&1 | line: (&1.line || 0) + 1})}
     end
   end
 
@@ -428,7 +427,7 @@ defmodule Covenant.Parser.Markdown do
           end
 
         nil ->
-          if known?,
+          if known? or id_shaped?(title),
             do: {:error, [Error.new(file, n, bad_heading(component_id))]},
             else: :skip
       end
@@ -442,6 +441,12 @@ defmodule Covenant.Parser.Markdown do
 
   defp bad_field_error(file, line, written, correct) do
     Error.new(file, line, "field `#{written}` must be written `- **#{correct}:** <value>`")
+  end
+
+  # `### example.greeter.I9: title`: an id, but not written `<id> — <title>`.
+  defp id_shaped?(title) do
+    first = title |> String.split(~r/\s+/, parts: 2) |> hd() |> String.trim_trailing(":")
+    Regex.match?(@block_id_like, first)
   end
 
   defp bad_heading(component_id),
@@ -459,6 +464,10 @@ defmodule Covenant.Parser.Markdown do
             end
 
           {Map.put_new(acc, key, {value, n}), key, repeats}
+
+        # An enum field is one word: nothing after it continues it, nested bullets included.
+        {:text, _line, _}, {acc, key, repeats} when key in @single_value_fields ->
+          {acc, nil, repeats}
 
         {:text, line, _}, {acc, key, repeats} when is_binary(key) ->
           if Regex.match?(~r/^[ \t]{2,}\S/, line) do
