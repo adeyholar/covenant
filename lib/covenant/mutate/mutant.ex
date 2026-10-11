@@ -131,15 +131,37 @@ defmodule Covenant.Mutate.Mutant do
   defp credit("partial"), do: :partial
   defp credit(_), do: :exact
 
-  @doc "Rebuilds a mutant from `to_map/1` output (without its replacement AST)."
+  @doc """
+  Rebuilds a mutant from `to_map/1` output (without its replacement AST), or
+  answers an error naming the operator when it is not one of the thirteen.
+  """
+  @spec decode(map()) :: {:ok, t()} | {:error, String.t()}
+  def decode(map) do
+    case Enum.find(@operators, &(Atom.to_string(&1) == map["operator"])) do
+      nil ->
+        {:error, "mutant #{inspect(map["id"])}: unknown operator #{inspect(map["operator"])}"}
+
+      operator ->
+        {:ok, build(map, operator)}
+    end
+  end
+
+  @doc "`decode/1`, raising `ArgumentError` for an unknown operator instead of guessing one."
   @spec from_map(map()) :: t()
   def from_map(map) do
+    case decode(map) do
+      {:ok, mutant} -> mutant
+      {:error, message} -> raise ArgumentError, message
+    end
+  end
+
+  defp build(map, operator) do
     %__MODULE__{
       id: map["id"],
       file: map["file"],
       line: map["line"],
       column: map["column"],
-      operator: Enum.find(@operators, :boolean_flip, &(Atom.to_string(&1) == map["operator"])),
+      operator: operator,
       from: map["from"],
       to: map["to"],
       module: map["module"],

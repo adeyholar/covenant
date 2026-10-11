@@ -31,6 +31,12 @@ defmodule Covenant.Mutate.Runner do
   # what the baseline runs under when the plan gives no timeout: ExUnit's own default
   @baseline_timeout 60_000
 
+  # a mutant's wall-clock budget: ExUnit's per-test timeout does not bound a
+  # `setup_all`, nor a test tagged `timeout: :infinity`
+  @budget_factor 10
+  @budget_extra_ms 5_000
+  @timeout_exit 3
+
   defmodule Collector do
     @moduledoc """
     The ExUnit formatter of a mutant run: collects every finished test and
@@ -92,9 +98,17 @@ defmodule Covenant.Mutate.Runner do
     after every 25th mutant of the slice (`Covenant.Mutate.progress_due?/2`);
   * `:fail_fast` — (optional, default `false`) stop each mutant's run at its
     first failing test: exact verdict, `credit: :partial` on a kill;
-  * `:isolate` — (optional, default `false`) run the tests from a private
-    working directory (`Covenant.Mutate.Workdir`), so that parallel workers
-    never share ExUnit's `:tmp_dir` paths.
+  * `:on_timeout` — (optional) called with the results so far, the timed-out
+    mutant included with the verdict `:timeout`, and that mutant when a
+    mutant's run outlasts its wall-clock budget (`budget_ms/2`); it is meant to
+    write the results to disk and `System.halt(timeout_exit())`. If it returns,
+    the run is an error;
+  * `:skip` — (optional) ids of mutants not to run (those a worker that was
+    stopped had already judged);
+  * `:isolate` — (optional, default `true`) run the tests from a private copy
+    of the project (`Covenant.Mutate.Workdir`), so that a mutant's relative
+    writes and deletes never reach the project and parallel workers never
+    share ExUnit's `:tmp_dir` paths; `false` runs in the project root.
   """
   @type plan :: %{
           required(:component) => String.t(),
@@ -108,6 +122,8 @@ defmodule Covenant.Mutate.Runner do
           optional(:on_eta) => (map() -> any()),
           optional(:fail_fast) => boolean(),
           optional(:keep) => (Mutant.t() -> boolean()),
+          optional(:on_timeout) => (result(), Mutant.t() -> any()),
+          optional(:skip) => [String.t()],
           optional(:isolate) => boolean()
         }
 
@@ -125,7 +141,10 @@ defmodule Covenant.Mutate.Runner do
   def run(plan) do
     with {:ok, files} <- prepare_files(plan),
          {:ok, modules} <- boot_suite(plan) do
-      isolated(plan, fn -> run_suite(plan, files, modules) end)
+      case isolated(plan, fn -> run_suite(plan, files, modules) end) do
+        {:timeout, result, mutant} -> expired(plan, result, mutant)
+        other -> other
+      end
     end
   end
 
@@ -133,6 +152,8 @@ defmodule Covenant.Mutate.Runner do
     with {:ok, tests, baseline_ms} <- baseline(modules) do
       timeout = plan.timeout || Mutate.default_timeout(tests)
       ExUnit.configure(timeout: timeout)
+      apps = started_apps()
+      budget = budget_ms(baseline_ms, timeout)
 
       mutants =
         files
@@ -141,36 +162,205 @@ defmodule Covenant.Mutate.Runner do
         |> Mutator.numbered()
 
       {i, n} = plan.slice
+      skip = Map.get(plan, :skip, [])
 
       slice =
         mutants
         |> Enum.with_index()
         |> Enum.filter(fn {_, position} -> rem(position, n) == i - 1 end)
+        |> Enum.reject(fn {mutant, _} -> mutant.id in skip end)
 
-      started = System.monotonic_time(:millisecond)
+      result = fn verdicts ->
+        %{
+          tests: tests,
+          mutants: verdicts,
+          all: length(mutants),
+          baseline_ms: baseline_ms,
+          timeout_ms: timeout,
+          files: Enum.map(files, & &1.relative)
+        }
+      end
 
-      verdicts =
-        slice
-        |> Enum.with_index(1)
-        |> Enum.map(fn {{mutant, _}, done} ->
-          file = Enum.find(files, &(&1.relative == mutant.file))
-          mutant = run_mutant(mutant, file, modules, Map.get(plan, :fail_fast, false))
-          plan.on_progress.(mutant)
-          eta(plan, done, length(slice), started)
-          mutant
-        end)
+      env = %{
+        plan: plan,
+        files: files,
+        modules: modules,
+        apps: apps,
+        budget: budget,
+        total: length(slice),
+        started: System.monotonic_time(:millisecond),
+        result: result
+      }
 
-      {:ok,
-       %{
-         tests: tests,
-         mutants: verdicts,
-         all: length(mutants),
-         baseline_ms: baseline_ms,
-         timeout_ms: timeout,
-         files: Enum.map(files, & &1.relative)
-       }}
+      slice
+      |> Enum.with_index(1)
+      |> Enum.reduce_while([], fn {{mutant, _}, done}, verdicts ->
+        case step(mutant, done, verdicts, env) do
+          {:ok, ran} -> {:cont, [ran | verdicts]}
+          other -> {:halt, other}
+        end
+      end)
+      |> finish(modules, env)
     end
   end
+
+  # One mutant: run it, then check that the VM still holds what the baseline had.
+  defp step(mutant, done, verdicts, env) do
+    file = Enum.find(env.files, &(&1.relative == mutant.file))
+    fail_fast = Map.get(env.plan, :fail_fast, false)
+
+    case run_mutant(mutant, file, env.modules, fail_fast, env.budget) do
+      {:ok, ran} ->
+        with :ok <- healthy(ran, env) do
+          env.plan.on_progress.(ran)
+          eta(env.plan, done, env.total, env.started)
+          {:ok, ran}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+
+      :budget ->
+        timed_out(mutant, verdicts, env)
+    end
+  end
+
+  defp finish({:error, reason}, _modules, _env), do: {:error, reason}
+  defp finish({:timeout, _, _} = timeout, _modules, _env), do: timeout
+
+  defp finish([], _modules, env), do: {:ok, env.result.([])}
+
+  defp finish([last | _] = verdicts, modules, env) do
+    case run_tests(modules, :infinity, env.budget) do
+      {:ok, tests} ->
+        if red(tests) == [] do
+          {:ok, env.result.(Enum.reverse(verdicts))}
+        else
+          {:error,
+           "the unmutated suite is red after the last mutant, #{describe(last)}; " <>
+             "this worker's results are unreliable:\n#{format_red(tests)}"}
+        end
+
+      {:error, reason} ->
+        {:error, "after the last mutant, #{describe(last)}: #{reason}"}
+
+      :budget ->
+        {:error,
+         "the unmutated suite did not finish within #{env.budget} ms after the last mutant, " <>
+           "#{describe(last)}; this worker's results are unreliable"}
+    end
+  end
+
+  # What the mutant that outran its time budget leaves behind: it is a timeout (a
+  # survivor, never a kill). The VM is suspect (a test may still be spinning), so
+  # nothing more runs: `run/1` hands the results to the plan's `:on_timeout`.
+  defp timed_out(mutant, verdicts, env) do
+    timed_out = %{
+      mutant
+      | verdict: :timeout,
+        reason: "ran past its time budget of #{env.budget} ms (a watchdog stopped the worker)",
+        replacement: nil
+    }
+
+    {:timeout, env.result.(Enum.reverse([timed_out | verdicts])), timed_out}
+  end
+
+  # The working directory is the project's again here. `:on_timeout` persists the
+  # results and halts the worker with `timeout_exit/0`; without one, or if it
+  # returns, the run is an error.
+  defp expired(plan, result, mutant) do
+    with %{on_timeout: on_timeout} <- plan, do: on_timeout.(result, mutant)
+
+    {:error,
+     "#{describe(mutant)} ran past its time budget (#{mutant.reason}); a test loops outside " <>
+       "ExUnit's per-test timeout"}
+  end
+
+  @doc "The wall-clock budget of one mutant's run, in ms, given the baseline's duration and per-test timeout."
+  @spec budget_ms(non_neg_integer(), pos_integer()) :: pos_integer()
+  def budget_ms(baseline_ms, timeout_ms),
+    do: @budget_factor * baseline_ms + @budget_extra_ms + timeout_ms
+
+  @doc "The exit status of a worker its watchdog stopped."
+  @spec timeout_exit() :: pos_integer()
+  def timeout_exit, do: @timeout_exit
+
+  # -- health -----------------------------------------------------------------
+
+  defp started_apps,
+    do: 10_000 |> Application.started_applications() |> MapSet.new(&elem(&1, 0))
+
+  # A mutant can take the VM with it: purging its module kills a process running
+  # the old code, a supervisor gives up, an application stops, and every later
+  # mutant then "fails" its tests, which would be credited as kills. So after each
+  # mutant's restore the applications the baseline had must all still run (else
+  # they are restarted and the unmutated suite must be green again), and the
+  # worker's directory must still exist. The mutant whose run did it keeps its verdict.
+  defp healthy(mutant, env) do
+    with :ok <- directory(mutant) do
+      case MapSet.to_list(MapSet.difference(env.apps, started_apps())) do
+        [] -> :ok
+        missing -> recover(mutant, missing, env)
+      end
+    end
+  end
+
+  defp directory(mutant) do
+    case File.cwd() do
+      {:ok, cwd} ->
+        if File.dir?(cwd),
+          do: :ok,
+          else: {:error, "#{describe(mutant)} broke the VM: it deleted the working directory"}
+
+      {:error, _} ->
+        {:error, "#{describe(mutant)} broke the VM: it deleted the working directory"}
+    end
+  end
+
+  defp recover(mutant, missing, env) do
+    names = Enum.map_join(missing, ", ", &inspect/1)
+
+    failed =
+      Enum.find_value(missing, fn app ->
+        case Application.ensure_all_started(app) do
+          {:ok, _} -> nil
+          {:error, reason} -> {app, reason}
+        end
+      end)
+
+    with nil <- failed,
+         {:ok, tests} <- run_tests(env.modules, :infinity, env.budget),
+         [] <- red(tests) do
+      :ok
+    else
+      {:error, reason} ->
+        {:error, "#{describe(mutant)} broke the VM: it stopped #{names}: #{reason}"}
+
+      {app, reason} ->
+        {:error,
+         "#{describe(mutant)} broke the VM: it stopped #{names} and #{inspect(app)} " <>
+           "would not restart (#{inspect(reason)})"}
+
+      :budget ->
+        {:error,
+         "#{describe(mutant)} broke the VM: it stopped #{names}, and the unmutated suite " <>
+           "did not finish within #{env.budget} ms after they restarted"}
+
+      red ->
+        {:error,
+         "#{describe(mutant)} broke the VM: it stopped #{names}, and the unmutated suite " <>
+           "is red after they restarted:\n#{format_red(red)}"}
+    end
+  end
+
+  defp red(tests), do: Enum.filter(tests, &(&1.outcome in [:failed, :timeout, :invalid]))
+
+  defp format_red(tests),
+    do:
+      Enum.map_join(red(tests) |> List.wrap(), "\n", &"  #{&1.name} (#{&1.module}) #{&1.outcome}")
+
+  defp describe(%Mutant{} = mutant),
+    do: "mutant #{mutant.id} (#{Mutant.at(mutant)} #{mutant.operator})"
 
   defp eta(%{on_eta: on_eta}, done, total, started) do
     if Mutate.progress_due?(done, total) do
@@ -184,11 +374,14 @@ defmodule Covenant.Mutate.Runner do
 
   defp eta(_plan, _done, _total, _started), do: :ok
 
-  # ExUnit puts a test's `:tmp_dir` under `tmp/` in the OS process's working
-  # directory, so workers running side by side must not share it. The suite is
-  # already compiled and loaded, so only what the tests do at run time sees the
-  # private directory.
-  defp isolated(%{isolate: true, root: root}, fun) do
+  # A mutant runs the project's own code, so it must not run in the project
+  # root, and ExUnit puts a test's `:tmp_dir` under `tmp/` in the OS process's
+  # working directory, so workers running side by side must not share it. The
+  # suite is already compiled and loaded, so only what the tests do at run time
+  # sees the private copy.
+  defp isolated(%{isolate: false}, fun), do: fun.()
+
+  defp isolated(%{root: root}, fun) do
     workdir = Workdir.build(root)
 
     try do
@@ -197,8 +390,6 @@ defmodule Covenant.Mutate.Runner do
       Workdir.remove(workdir)
     end
   end
-
-  defp isolated(_plan, fun), do: fun.()
 
   # -- files ------------------------------------------------------------------
 
@@ -214,7 +405,22 @@ defmodule Covenant.Mutate.Runner do
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
+    |> nothing_to_mutate(plan)
   end
+
+  # A run without a single mutant site proves nothing, and is usually a module
+  # that is not defined where it was said to be.
+  defp nothing_to_mutate({:ok, files}, plan) do
+    if Enum.all?(files, &(&1.mutants == [])) do
+      {:error,
+       "no mutant to run: there is nothing to mutate in #{Enum.map_join(plan.modules, ", ", fn {m, _} -> inspect(m) end)} " <>
+         "where #{if match?([_], plan.modules), do: "it was", else: "they were"} found"}
+    else
+      {:ok, files}
+    end
+  end
+
+  defp nothing_to_mutate(error, _plan), do: error
 
   defp prepare_file(file, modules, root) do
     relative = Path.relative_to(file, root)
@@ -223,12 +429,27 @@ defmodule Covenant.Mutate.Runner do
          {:ok, ast} <- Mutator.parse(source, file),
          {:ok, compiled} <- roundtrip(ast, file) do
       originals = Enum.map(compiled, fn {module, bin} -> original(module, bin) end)
-      restore(originals)
       targets = Enum.map(modules, &inspect/1)
       mutants = Mutator.sites(ast, file: relative, modules: targets)
 
-      {:ok, %{file: file, relative: relative, ast: ast, originals: originals, mutants: mutants}}
+      with :ok <- restore(originals) do
+        for module <- without_mutants(targets, mutants) do
+          IO.puts(
+            :stderr,
+            "warning: no mutant in #{module} (#{relative}): it is not defined there or has nothing to mutate"
+          )
+        end
+
+        {:ok, %{file: file, relative: relative, ast: ast, originals: originals, mutants: mutants}}
+      end
     end
+  end
+
+  @doc false
+  @spec without_mutants([String.t()], [Mutant.t()]) :: [String.t()]
+  def without_mutants(targets, mutants) do
+    present = MapSet.new(mutants, & &1.module)
+    Enum.reject(targets, &MapSet.member?(present, &1))
   end
 
   defp read(file) do
@@ -258,12 +479,25 @@ defmodule Covenant.Mutate.Runner do
 
   defp purge(originals), do: Enum.each(originals, fn {module, _, _} -> :code.purge(module) end)
 
-  defp restore(originals) do
+  # Loads every original back and answers an error naming those that would not
+  # load (a NIF `on_load` that fails on a second load, say); the others are restored.
+  @doc false
+  @spec restore([{module(), binary(), charlist()}]) :: :ok | {:error, String.t()}
+  def restore(originals) do
     purge(originals)
 
-    Enum.each(originals, fn {module, bin, beam} ->
-      {:module, ^module} = :code.load_binary(module, beam, bin)
-    end)
+    failed =
+      Enum.flat_map(originals, fn {module, bin, beam} ->
+        case :code.load_binary(module, beam, bin) do
+          {:module, ^module} -> []
+          {:error, reason} -> ["#{inspect(module)} (#{inspect(reason)})"]
+        end
+      end)
+
+    case failed do
+      [] -> :ok
+      _ -> {:error, "cannot reload #{Enum.join(failed, ", ")}; the module is left unloaded"}
+    end
   end
 
   # -- suite ------------------------------------------------------------------
@@ -310,61 +544,85 @@ defmodule Covenant.Mutate.Runner do
   end
 
   defp baseline(modules) do
-    {us, tests} = :timer.tc(fn -> run_tests(modules) end)
-    red = Enum.filter(tests, &(&1.outcome in [:failed, :timeout, :invalid]))
+    {us, ran} = :timer.tc(fn -> run_tests(modules, :infinity, :infinity) end)
 
-    cond do
-      tests == [] ->
-        {:error, "the contract test modules #{inspect(modules)} define no tests"}
+    with {:ok, tests} <- ran do
+      red = red(tests)
 
-      red != [] ->
-        {:error,
-         "the baseline is red; fix the suite before mutating:\n" <>
-           Enum.map_join(red, "\n", &"  #{&1.name} (#{&1.module}) #{&1.outcome}")}
+      cond do
+        tests == [] ->
+          {:error, "the contract test modules #{inspect(modules)} define no tests"}
 
-      true ->
-        {:ok, tests, div(us, 1000)}
+        red != [] ->
+          {:error,
+           "the baseline is red; fix the suite before mutating:\n" <>
+             Enum.map_join(red, "\n", &"  #{&1.name} (#{&1.module}) #{&1.outcome}")}
+
+        true ->
+          {:ok, tests, div(us, 1000)}
+      end
     end
   end
 
+  # The suite runs in a task, so a suite that never ends (a `setup_all` that loops) is
+  # `:budget`, not a hang; and a run that ends without the collector's report is an
+  # error, not a wait.
   @doc false
-  @spec run_tests([module()], pos_integer() | :infinity) :: [entry()]
-  def run_tests(modules, max_failures \\ :infinity) do
+  @spec run_tests([module()], pos_integer() | :infinity, pos_integer() | :infinity) ::
+          {:ok, [entry()]} | {:error, String.t()} | :budget
+  def run_tests(modules, max_failures, budget) do
     ExUnit.configure(max_failures: max_failures)
-    ExUnit.run(modules)
+    task = Task.async(fn -> ExUnit.run(modules) end)
 
-    receive do
-      {:covenant_mutate_run, tests} -> tests
-    after
-      5_000 -> raise "the mutant run finished but the collector reported nothing"
+    case Task.yield(task, budget) || Task.shutdown(task, :brutal_kill) do
+      {:ok, _} ->
+        receive do
+          {:covenant_mutate_run, tests} -> {:ok, tests}
+        after
+          5_000 -> {:error, "the mutant run finished but the collector reported nothing"}
+        end
+
+      nil ->
+        :budget
+
+      {:exit, reason} ->
+        exit(reason)
     end
   end
 
   # -- mutants ----------------------------------------------------------------
 
-  defp run_mutant(mutant, file, modules, fail_fast) do
+  defp run_mutant(mutant, file, modules, fail_fast, budget) do
     purge(file.originals)
 
-    result =
+    judged =
       case Mutator.compile(Mutator.apply(file.ast, mutant), file.file) do
-        {:error, reason} -> %{mutant | verdict: :invalid, reason: reason}
-        {:ok, _} -> judge(mutant, modules, fail_fast)
+        {:error, reason} -> {:ok, %{mutant | verdict: :invalid, reason: reason}}
+        {:ok, _} -> judge(mutant, modules, fail_fast, budget)
       end
 
-    restore(file.originals)
-    %{result | replacement: nil}
+    case {judged, restore(file.originals)} do
+      {_, {:error, reason}} -> {:error, "#{describe(mutant)}: #{reason}"}
+      {{:error, reason}, :ok} -> {:error, "#{describe(mutant)}: #{reason}"}
+      {{:ok, result}, :ok} -> {:ok, %{result | replacement: nil}}
+      {:budget, :ok} -> :budget
+    end
   end
 
-  defp judge(mutant, modules, false), do: verdict(mutant, run_tests(modules))
+  defp judge(mutant, modules, false, budget) do
+    with {:ok, tests} <- run_tests(modules, :infinity, budget), do: {:ok, verdict(mutant, tests)}
+  end
 
   # Stopping at the first failure leaves a kill's credit partial; a survivor ran every test.
   # A timeout is a failure to ExUnit, so a run that stopped on one proves nothing about the
   # tests it skipped (a later one may kill the mutant): the whole suite settles it.
-  defp judge(mutant, modules, true) do
-    case verdict(mutant, run_tests(modules, 1)) do
-      %Mutant{verdict: :killed} = killed -> %{killed | credit: :partial}
-      %Mutant{verdict: :timeout} -> verdict(mutant, run_tests(modules))
-      survived -> survived
+  defp judge(mutant, modules, true, budget) do
+    with {:ok, tests} <- run_tests(modules, 1, budget) do
+      case verdict(mutant, tests) do
+        %Mutant{verdict: :killed} = killed -> {:ok, %{killed | credit: :partial}}
+        %Mutant{verdict: :timeout} -> judge(mutant, modules, false, budget)
+        survived -> {:ok, survived}
+      end
     end
   end
 

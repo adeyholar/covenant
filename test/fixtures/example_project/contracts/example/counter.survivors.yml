@@ -2,16 +2,6 @@
 # Every surviving mutant is either caught by a new test or annotated here with
 # the judgment behind letting it live. Sorts: equivalent | log-only |
 # dead-code | timeout | evaluation-gap | decision-hole.
-- at: lib/example/counter.ex:18:20
-  operator: integer_shift
-  mutation: "`0` → `1`"
-  sort: equivalent
-  reason: new/1 sets value explicitly; the defstruct default is never read.
-- at: lib/example/counter.ex:18:20
-  operator: integer_shift
-  mutation: "`0` → `-1`"
-  sort: equivalent
-  reason: new/1 sets value explicitly; the defstruct default is never read.
 - at: lib/example/counter.ex:25:29
   operator: logical_swap
   sort: evaluation-gap

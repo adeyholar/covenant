@@ -10,8 +10,10 @@ defmodule Covenant.Mutate.Mutator do
   functions of the source, the mutant set, its order and its ids are the same
   on every machine for the same commit.
 
-  Nothing is mutated inside documentation and typespec attributes, macro and
-  guard definitions (their bodies expand in *callers*, compiled long before
+  Nothing is mutated inside documentation and typespec attributes, `defstruct`
+  and `defexception` (a struct literal in a test file is expanded when the test
+  compiles, before any mutant is loaded, so its defaults cannot be killed),
+  macro and guard definitions (their bodies expand in *callers*, compiled long before
   the mutant exists), `use`/`import`/`alias`/`require`, `quote` blocks and
   sigils.
 
@@ -26,7 +28,7 @@ defmodule Covenant.Mutate.Mutator do
     macrocallback impl behaviour derive external_resource compile dialyzer deprecated
     optional_callbacks before_compile after_compile on_definition on_load)a
 
-  @skipped_forms ~w(defmacro defmacrop defguard defguardp defdelegate defoverridable use
+  @skipped_forms ~w(defmacro defmacrop defguard defguardp defdelegate defoverridable defstruct defexception use
     import alias require quote)a
 
   @doc "Parses `source` with positions on every literal."
@@ -141,6 +143,15 @@ defmodule Covenant.Mutate.Mutator do
   defp targeted?(%{targets: nil}), do: false
   defp targeted?(%{targets: targets, modules: [current | _]}), do: current in targets
   defp targeted?(_), do: false
+
+  # `__MODULE__.Inner` is the enclosing module's own name, and `Elixir.Standalone`
+  # is absolute: neither is nested under the module around it
+  defp module_name({:__aliases__, _, [{:__MODULE__, _, context} | parts]}, [outer | _])
+       when is_atom(context) and is_binary(outer),
+       do: Enum.join([outer | Enum.map(parts, &part_name/1)], ".")
+
+  defp module_name({:__aliases__, _, [:"Elixir" | [_ | _] = parts]}, _),
+    do: Enum.map_join(parts, ".", &part_name/1)
 
   defp module_name({:__aliases__, _, parts}, [outer | _]) when is_binary(outer),
     do: Enum.join([outer | Enum.map(parts, &part_name/1)], ".")

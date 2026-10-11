@@ -240,6 +240,8 @@ defmodule Covenant.MutateContractTest do
     import Bar, only: [a: 1]
     alias Baz.Qux, as: Q
     require Logger
+    defstruct count: 0, tags: [:a, :b], name: "x"
+    defexception message: "boom", code: 1
     """
 
     assert mutants(skipped) == []
@@ -276,6 +278,44 @@ defmodule Covenant.MutateContractTest do
     assert where.(["A.Inner"]) == [{"A.Inner", "g/0"}]
     assert where.(["B", "A.Inner"]) == [{"A.Inner", "g/0"}, {"B", "h/0"}]
     assert where.(["C"]) == []
+  end
+
+  @tag obligation: "covenant.mutate.I2"
+  test "a nested module is named by its expanded alias: __MODULE__ and an absolute Elixir. alias" do
+    source = """
+    defmodule Outer do
+      def f, do: 1
+
+      defmodule __MODULE__.Inner do
+        def g, do: 2
+
+        defmodule __MODULE__.Deep do
+          def h, do: 3
+        end
+      end
+
+      defmodule Elixir.Standalone do
+        def s, do: 4
+      end
+
+      defmodule Sibling do
+        def t, do: 5
+      end
+    end
+    """
+
+    ast = parse!(source)
+
+    names = fn modules ->
+      ast |> Mutator.sites(modules: modules) |> Enum.map(& &1.module) |> Enum.uniq()
+    end
+
+    assert names.(nil) ==
+             ["Outer", "Outer.Inner", "Outer.Inner.Deep", "Standalone", "Outer.Sibling"]
+
+    assert names.(["Outer.Inner"]) == ["Outer.Inner"]
+    assert names.(["Standalone"]) == ["Standalone"]
+    assert names.(["Outer.Standalone"]) == []
   end
 
   @tag obligation: "covenant.mutate.I2"
@@ -594,6 +634,21 @@ defmodule Covenant.MutateContractTest do
     assert [%{sort: "timeout"}] = timed_out.survivors
   end
 
+  @tag obligation: "covenant.mutate.I11"
+  test "a mutant with an unknown operator is an error, not a boolean_flip" do
+    assert {:ok, %Mutant{operator: :guard_removal}} =
+             Mutant.decode(%{"operator" => "guard_removal"})
+
+    for map <- [%{"id" => "m007", "operator" => "frobnicate"}, %{"id" => "m008"}] do
+      assert {:error, message} = Mutant.decode(map)
+
+      assert message =~
+               "mutant #{inspect(map["id"])}: unknown operator #{inspect(map["operator"])}"
+
+      assert_raise ArgumentError, message, fn -> Mutant.from_map(map) end
+    end
+  end
+
   @tag obligation: "covenant.mutate.I9"
   test "an unannotated survivor or timeout is a problem naming the mutant", %{counter: counter} do
     matrix = build(counter, [mutant("m001", :survived), mutant("m002", :timeout, line: 9)], [])
@@ -632,8 +687,10 @@ defmodule Covenant.MutateContractTest do
 
     invalid = build(counter, [mutant("m001", :invalid)], [annotation([])])
 
-    assert [%{message: "annotation for lib/x.ex:4:7 integer_shift (m001) is stale" <> _}] =
-             invalid.problems
+    assert [%{message: message}] = invalid.problems
+
+    assert message ==
+             "annotation for lib/x.ex:4:7 integer_shift (m001) is stale: that mutant is invalid (it does not compile) — delete it"
   end
 
   @tag obligation: "covenant.mutate.I9"
@@ -1236,8 +1293,8 @@ defmodule Covenant.MutateContractTest do
 
   @tag obligation: "covenant.mutate.I11"
   test "from_map takes the index when it is given" do
-    assert Mutant.from_map(%{"index" => 7}).index == 7
-    assert Mutant.from_map(%{}).index == 0
+    assert Mutant.from_map(%{"operator" => "integer_shift", "index" => 7}).index == 7
+    assert Mutant.from_map(%{"operator" => "integer_shift"}).index == 0
   end
 
   @tag obligation: "covenant.mutate.I8"
@@ -1524,16 +1581,19 @@ defmodule Covenant.MutateContractTest do
              |> Map.fetch!(:operator) == operator
     end
 
-    assert Mutant.from_map(%{"verdict" => "weird"}).verdict == nil
-    assert Mutant.from_map(%{}).killed_by == []
-    assert Mutant.from_map(%{}).timeouts == []
+    assert Mutant.from_map(%{"operator" => "integer_shift", "verdict" => "weird"}).verdict == nil
+    assert Mutant.from_map(%{"operator" => "integer_shift"}).killed_by == []
+    assert Mutant.from_map(%{"operator" => "integer_shift"}).timeouts == []
 
     assert Mutant.to_map(mutant("m001", :killed, credit: :partial))["credit"] == "partial"
     assert Mutant.to_map(mutant("m001", :killed))["credit"] == "exact"
-    assert Mutant.from_map(%{"credit" => "partial"}).credit == :partial
-    assert Mutant.from_map(%{"credit" => "exact"}).credit == :exact
-    assert Mutant.from_map(%{"credit" => "weird"}).credit == :exact
-    assert Mutant.from_map(%{}).credit == :exact
+
+    assert Mutant.from_map(%{"operator" => "integer_shift", "credit" => "partial"}).credit ==
+             :partial
+
+    assert Mutant.from_map(%{"operator" => "integer_shift", "credit" => "exact"}).credit == :exact
+    assert Mutant.from_map(%{"operator" => "integer_shift", "credit" => "weird"}).credit == :exact
+    assert Mutant.from_map(%{"operator" => "integer_shift"}).credit == :exact
   end
 
   @tag obligation: "covenant.mutate.I2"
@@ -1584,7 +1644,11 @@ defmodule Covenant.MutateContractTest do
               all: 0
             }} = Mutate.decode_raw(path)
 
-    File.write!(path, ~s({"tests": [], "mutants": [{"id": "m1"}, {"id": "m2"}]}))
+    File.write!(
+      path,
+      ~s({"tests": [], "mutants": [{"id": "m1", "operator": "integer_shift"}, {"id": "m2", "operator": "integer_shift"}]})
+    )
+
     assert {:ok, %{all: 2, files: [], modules: []}} = Mutate.decode_raw(path)
 
     File.write!(path, ~s({"tests": [], "mutants": 5}))
@@ -1872,31 +1936,113 @@ defmodule Covenant.MutateWorkdirContractTest do
   end
 
   @tag obligation: "covenant.mutate.I15"
-  test "a worker directory links every root entry but tmp and has a tmp of its own", %{
+  test "a worker directory holds copies of the sources, links the big dirs and has a tmp of its own",
+       %{root: root, base: base} do
+    File.mkdir_p!(Path.join(root, "_build/test"))
+    File.mkdir_p!(Path.join(root, "deps"))
+    File.mkdir_p!(Path.join(root, ".git"))
+    File.mkdir_p!(Path.join(root, ".elixir_ls"))
+    File.write!(Path.join(root, "_build/test/x"), "x")
+
+    dir = Workdir.build(root, base)
+    assert Path.dirname(dir) == base
+    assert Path.basename(dir) =~ ~r/^covenant-mutate-#{System.pid()}-[0-9a-z]+$/
+    assert dir |> File.ls!() |> Enum.sort() == ["_build", "deps", "lib", "mix.exs", "tmp"]
+    assert File.read!(Path.join(dir, "mix.exs")) == "mix"
+    assert File.read!(Path.join(dir, "lib/a.ex")) == "a"
+    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "lib"))
+    assert {:ok, %File.Stat{type: :regular}} = File.lstat(Path.join(dir, "mix.exs"))
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "_build"))
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "deps"))
+    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "tmp"))
+    assert File.ls!(Path.join(dir, "tmp")) == []
+    assert File.stat!(dir).mode |> Bitwise.band(0o777) == 0o700
+
+    # a second worker never reuses or clears the first one's directory
+    File.write!(Path.join(dir, "tmp/stale.txt"), "stale")
+    other = Workdir.build(root, base)
+    refute other == dir
+    assert File.exists?(Path.join(dir, "tmp/stale.txt"))
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "build and dependency trees are links at any depth, a nested .git is left out, links are copied as links",
+       %{root: root, base: base} do
+    File.mkdir_p!(Path.join(root, "assets/node_modules/pkg"))
+    File.write!(Path.join(root, "assets/node_modules/pkg/index.js"), "js")
+    File.write!(Path.join(root, "assets/app.js"), "app")
+    File.mkdir_p!(Path.join(root, "apps/x/_build/dev"))
+    File.write!(Path.join(root, "apps/x/_build/dev/x.beam"), "beam")
+    File.mkdir_p!(Path.join(root, "apps/x/lib"))
+    File.write!(Path.join(root, "apps/x/lib/x.ex"), "x")
+    File.write!(Path.join(root, "apps/x/.git"), "gitdir: elsewhere")
+    File.mkdir_p!(Path.join(root, "apps/y/.elixir_ls"))
+    File.ln_s!("a.ex", Path.join(root, "lib/link.ex"))
+
+    dir = Workdir.build(root, base)
+
+    for link <- ["assets/node_modules", "apps/x/_build"] do
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, link))
+    end
+
+    assert File.read!(Path.join(dir, "assets/app.js")) == "app"
+    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "assets"))
+    assert File.read!(Path.join(dir, "apps/x/lib/x.ex")) == "x"
+    refute File.exists?(Path.join(dir, "apps/x/.git"))
+    refute File.exists?(Path.join(dir, "apps/y/.elixir_ls"))
+    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "lib/link.ex"))
+    assert File.read_link!(Path.join(dir, "lib/link.ex")) == "a.ex"
+
+    Workdir.within(dir, fn ->
+      File.rm_rf!("assets")
+      File.rm_rf!("apps")
+    end)
+
+    assert File.read!(Path.join(root, "assets/node_modules/pkg/index.js")) == "js"
+    assert File.read!(Path.join(root, "apps/x/_build/dev/x.beam")) == "beam"
+    assert File.read!(Path.join(root, "apps/x/lib/x.ex")) == "x"
+    assert File.read!(Path.join(root, "apps/x/.git")) == "gitdir: elsewhere"
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "writes and deletes by relative path land in the copy, never in the project", %{
     root: root,
     base: base
   } do
+    File.mkdir_p!(Path.join(root, "deps"))
+    File.write!(Path.join(root, "deps/dep.txt"), "dep")
     dir = Workdir.build(root, base)
-    assert dir == Path.join(base, "covenant-mutate-#{System.pid()}")
-    assert dir |> File.ls!() |> Enum.sort() == ["lib", "mix.exs", "tmp"]
-    assert File.read!(Path.join(dir, "mix.exs")) == "mix"
-    assert File.read!(Path.join(dir, "lib/a.ex")) == "a"
-    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "lib"))
-    assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "mix.exs"))
-    assert {:ok, %File.Stat{type: :directory}} = File.lstat(Path.join(dir, "tmp"))
-    assert File.ls!(Path.join(dir, "tmp")) == []
 
-    # building again starts clean
-    File.write!(Path.join(dir, "tmp/stale.txt"), "stale")
-    assert ^dir = Workdir.build(root, base)
-    assert File.ls!(Path.join(dir, "tmp")) == []
+    Workdir.within(dir, fn ->
+      File.write!("lib/a.ex", "mutated")
+      File.rm_rf!(Path.expand(""))
+    end)
+
+    refute File.exists?(dir)
+    assert File.read!(Path.join(root, "lib/a.ex")) == "a"
+    assert File.read!(Path.join(root, "mix.exs")) == "mix"
+    assert File.read!(Path.join(root, "deps/dep.txt")) == "dep"
+  end
+
+  @tag obligation: "covenant.mutate.I15"
+  test "building refuses a directory that already exists", %{root: root, base: base} do
+    existing = Path.join(base, "covenant-mutate-#{System.pid()}-fixed")
+    File.mkdir_p!(existing)
+    File.write!(Path.join(existing, "keep"), "keep")
+
+    assert_raise File.Error, ~r/file already exists/, fn -> Workdir.build(root, base, "fixed") end
+    assert File.read!(Path.join(existing, "keep")) == "keep"
   end
 
   @tag obligation: "covenant.mutate.I15"
   test "removing it deletes the links, never what they point at", %{root: root, base: base} do
+    File.mkdir_p!(Path.join(root, "deps"))
+    File.write!(Path.join(root, "deps/dep.txt"), "dep")
     dir = Workdir.build(root, base)
     File.write!(Path.join(dir, "tmp/mine.txt"), "mine")
     File.write!(Path.join(dir, "loose.txt"), "loose")
+    # a link nested in a copied entry points outside the project
+    File.ln_s!(Path.join(root, "deps"), Path.join(dir, "lib/nested"))
 
     assert :ok = Workdir.remove(dir)
 
@@ -1904,6 +2050,10 @@ defmodule Covenant.MutateWorkdirContractTest do
     assert File.read!(Path.join(root, "lib/a.ex")) == "a"
     assert File.read!(Path.join(root, "mix.exs")) == "mix"
     assert File.read!(Path.join(root, "tmp/theirs.txt")) == "theirs"
+    assert File.read!(Path.join(root, "deps/dep.txt")) == "dep"
+
+    # a mutant may have deleted it already
+    assert :ok = Workdir.remove(dir)
   end
 
   @tag obligation: "covenant.mutate.I15"

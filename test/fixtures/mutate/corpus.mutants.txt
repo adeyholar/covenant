@@ -1,210 +1,205 @@
-m001 corpus.ex:11:20 Corpus  integer_shift `0` → `1` => -defstruct count: 0, tags: [:a, :b] ¦ +defstruct count: 1, tags: [:a, :b]
-m002 corpus.ex:11:20 Corpus  integer_shift `0` → `-1` => -defstruct count: 0, tags: [:a, :b] ¦ +defstruct count: -1, tags: [:a, :b]
-m003 corpus.ex:11:30 Corpus  element_removal `:a` → `(removed)` => -defstruct count: 0, tags: [:a, :b] ¦ +defstruct count: 0, tags: [:b]
-m004 corpus.ex:11:34 Corpus  element_removal `:b` → `(removed)` => -defstruct count: 0, tags: [:a, :b] ¦ +defstruct count: 0, tags: [:a]
-m005 corpus.ex:24:7 Corpus plain/1 return_nil `y / 2` → `nil` => -y / 2 ¦ +nil
-m006 corpus.ex:19:16 Corpus plain/1 guard_removal `when x > 0 and x < 10` → `(no guard)` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) do
-m007 corpus.ex:19:27 Corpus plain/1 logical_swap `and` → `or` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 or x < 10 do
-m008 corpus.ex:19:23 Corpus plain/1 comparison_swap `>` → `>=` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x >= 0 and x < 10 do
-m009 corpus.ex:19:23 Corpus plain/1 comparison_swap `>` → `<=` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x <= 0 and x < 10 do
-m010 corpus.ex:19:25 Corpus plain/1 integer_shift `0` → `1` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 1 and x < 10 do
-m011 corpus.ex:19:25 Corpus plain/1 integer_shift `0` → `-1` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > -1 and x < 10 do
-m012 corpus.ex:19:33 Corpus plain/1 comparison_swap `<` → `<=` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 and x <= 10 do
-m013 corpus.ex:19:33 Corpus plain/1 comparison_swap `<` → `>=` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 and x >= 10 do
-m014 corpus.ex:19:35 Corpus plain/1 integer_shift `10` → `11` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 and x < 11 do
-m015 corpus.ex:19:35 Corpus plain/1 integer_shift `10` → `9` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 and x < 9 do
-m016 corpus.ex:21:8 Corpus plain/1 statement_removal `IO.puts(y)` → `(removed)` => -IO.puts(y)
-m017 corpus.ex:23:5 Corpus plain/1 statement_removal `send(self(), z)` → `(removed)` => -send(self(), z)
-m018 corpus.ex:20:11 Corpus plain/1 arithmetic_swap `+` → `-` => -y = x + 1 ¦ +y = x - 1
-m019 corpus.ex:20:13 Corpus plain/1 integer_shift `1` → `2` => -y = x + 1 ¦ +y = x + 2
-m020 corpus.ex:20:13 Corpus plain/1 integer_shift `1` → `0` => -y = x + 1 ¦ +y = x + 0
-m021 corpus.ex:22:15 Corpus plain/1 arithmetic_swap `-` → `+` => -z = y * 2 - 1 ¦ +z = y * 2 + 1
-m022 corpus.ex:22:11 Corpus plain/1 arithmetic_swap `*` → `/` => -z = y * 2 - 1 ¦ +z = y / 2 - 1
-m023 corpus.ex:22:13 Corpus plain/1 integer_shift `2` → `3` => -z = y * 2 - 1 ¦ +z = y * 3 - 1
-m024 corpus.ex:22:13 Corpus plain/1 integer_shift `2` → `1` => -z = y * 2 - 1 ¦ +z = y * 1 - 1
-m025 corpus.ex:22:17 Corpus plain/1 integer_shift `1` → `2` => -z = y * 2 - 1 ¦ +z = y * 2 - 2
-m026 corpus.ex:22:17 Corpus plain/1 integer_shift `1` → `0` => -z = y * 2 - 1 ¦ +z = y * 2 - 0
-m027 corpus.ex:24:7 Corpus plain/1 arithmetic_swap `/` → `*` => -y / 2 ¦ +y * 2
-m028 corpus.ex:24:9 Corpus plain/1 integer_shift `2` → `3` => -y / 2 ¦ +y / 3
-m029 corpus.ex:24:9 Corpus plain/1 integer_shift `2` → `1` => -y / 2 ¦ +y / 1
-m030 corpus.ex:38:5 Corpus flags/2 return_nil `not a` → `nil` => -not a ¦ +nil
-m031 corpus.ex:32:12 Corpus flags/2 statement_removal `a == b or a != b` → `(removed)` => -a == b or a != b
-m032 corpus.ex:33:13 Corpus flags/2 statement_removal `a === b and a !== b` → `(removed)` => -a === b and a !== b
-m033 corpus.ex:34:7 Corpus flags/2 statement_removal `a <= b` → `(removed)` => -a <= b
-m034 corpus.ex:35:7 Corpus flags/2 statement_removal `a >= b` → `(removed)` => -a >= b
-m035 corpus.ex:36:7 Corpus flags/2 statement_removal `a > b` → `(removed)` => -a > b
-m036 corpus.ex:37:7 Corpus flags/2 statement_removal `a < b` → `(removed)` => -a < b
-m037 corpus.ex:30:5 Corpus flags/2 condition_negate `if a && b` → `if !(a && b)` => -if a && b do ¦ +if !(a && b) do
-m038 corpus.ex:30:10 Corpus flags/2 logical_swap `&&` → `||` => -if a && b do ¦ +if a || b do
-m039 corpus.ex:30:20 Corpus flags/2 boolean_flip `true` → `false` => -true ¦ +false
-m040 corpus.ex:30:32 Corpus flags/2 boolean_flip `false` → `true` => -false ¦ +true
-m041 corpus.ex:31:5 Corpus flags/2 condition_negate `unless a || b` → `unless !(a || b)` => -unless a || b do ¦ +unless !(a || b) do
-m042 corpus.ex:31:14 Corpus flags/2 logical_swap `||` → `&&` => -unless a || b do ¦ +unless a && b do
-m043 corpus.ex:31:24 Corpus flags/2 integer_shift `1` → `2` => -1 ¦ +2
-m044 corpus.ex:31:24 Corpus flags/2 integer_shift `1` → `0` => -1 ¦ +0
-m045 corpus.ex:31:33 Corpus flags/2 integer_shift `2` → `3` => -2 ¦ +3
-m046 corpus.ex:31:33 Corpus flags/2 integer_shift `2` → `1` => -2 ¦ +1
-m047 corpus.ex:32:12 Corpus flags/2 logical_swap `or` → `and` => -a == b or a != b ¦ +a == b and a != b
-m048 corpus.ex:32:7 Corpus flags/2 comparison_swap `==` → `!=` => -a == b or a != b ¦ +a != b or a != b
-m049 corpus.ex:32:17 Corpus flags/2 comparison_swap `!=` → `==` => -a == b or a != b ¦ +a == b or a == b
-m050 corpus.ex:33:13 Corpus flags/2 logical_swap `and` → `or` => -a === b and a !== b ¦ +a === b or a !== b
-m051 corpus.ex:33:7 Corpus flags/2 comparison_swap `===` → `!==` => -a === b and a !== b ¦ +a !== b and a !== b
-m052 corpus.ex:33:19 Corpus flags/2 comparison_swap `!==` → `===` => -a === b and a !== b ¦ +a === b and a === b
-m053 corpus.ex:34:7 Corpus flags/2 comparison_swap `<=` → `<` => -a <= b ¦ +a < b
-m054 corpus.ex:34:7 Corpus flags/2 comparison_swap `<=` → `>` => -a <= b ¦ +a > b
-m055 corpus.ex:35:7 Corpus flags/2 comparison_swap `>=` → `>` => -a >= b ¦ +a > b
-m056 corpus.ex:35:7 Corpus flags/2 comparison_swap `>=` → `<` => -a >= b ¦ +a < b
-m057 corpus.ex:36:7 Corpus flags/2 comparison_swap `>` → `>=` => -a > b ¦ +a >= b
-m058 corpus.ex:36:7 Corpus flags/2 comparison_swap `>` → `<=` => -a > b ¦ +a <= b
-m059 corpus.ex:37:7 Corpus flags/2 comparison_swap `<` → `<=` => -a < b ¦ +a <= b
-m060 corpus.ex:37:7 Corpus flags/2 comparison_swap `<` → `>=` => -a < b ¦ +a >= b
-m061 corpus.ex:73:6 Corpus clauses/1 return_nil `f.(g.(x))` → `nil` => -f.(g.(x)) ¦ +nil
-m062 corpus.ex:43:9 Corpus clauses/1 clause_removal `case 1 ->` → `(removed)` => -1 -> :one
-m063 corpus.ex:44:9 Corpus clauses/1 clause_removal `case 2 ->` → `(removed)` => -2 -> :two
-m064 corpus.ex:45:9 Corpus clauses/1 clause_removal `case _ ->` → `(removed)` => -_ -> :many
-m065 corpus.ex:43:7 Corpus clauses/1 integer_shift `1` → `2` => -1 -> :one ¦ +2 -> :one
-m066 corpus.ex:43:7 Corpus clauses/1 integer_shift `1` → `0` => -1 -> :one ¦ +0 -> :one
-m067 corpus.ex:44:7 Corpus clauses/1 integer_shift `2` → `3` => -2 -> :two ¦ +3 -> :two
-m068 corpus.ex:44:7 Corpus clauses/1 integer_shift `2` → `1` => -2 -> :two ¦ +1 -> :two
-m069 corpus.ex:49:13 Corpus clauses/1 clause_removal `cond x > 1 ->` → `(removed)` => -x > 1 -> :big
-m070 corpus.ex:50:12 Corpus clauses/1 clause_removal `cond true ->` → `(removed)` => -true -> :small
-m071 corpus.ex:49:9 Corpus clauses/1 comparison_swap `>` → `>=` => -x > 1 -> :big ¦ +x >= 1 -> :big
-m072 corpus.ex:49:9 Corpus clauses/1 comparison_swap `>` → `<=` => -x > 1 -> :big ¦ +x <= 1 -> :big
-m073 corpus.ex:49:11 Corpus clauses/1 integer_shift `1` → `2` => -x > 1 -> :big ¦ +x > 2 -> :big
-m074 corpus.ex:49:11 Corpus clauses/1 integer_shift `1` → `0` => -x > 1 -> :big ¦ +x > 0 -> :big
-m075 corpus.ex:50:7 Corpus clauses/1 boolean_flip `true` → `false` => -true -> :small ¦ +false -> :small
-m076 corpus.ex:54:15 Corpus clauses/1 element_removal `1` → `(removed)` => -for i <- [1, 2, 3] do ¦ +for i <- [2, 3] do
-m077 corpus.ex:54:18 Corpus clauses/1 element_removal `2` → `(removed)` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 3] do
-m078 corpus.ex:54:21 Corpus clauses/1 element_removal `3` → `(removed)` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 2] do
-m079 corpus.ex:54:15 Corpus clauses/1 integer_shift `1` → `2` => -for i <- [1, 2, 3] do ¦ +for i <- [2, 2, 3] do
-m080 corpus.ex:54:15 Corpus clauses/1 integer_shift `1` → `0` => -for i <- [1, 2, 3] do ¦ +for i <- [0, 2, 3] do
-m081 corpus.ex:54:18 Corpus clauses/1 integer_shift `2` → `3` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 3, 3] do
-m082 corpus.ex:54:18 Corpus clauses/1 integer_shift `2` → `1` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 1, 3] do
-m083 corpus.ex:54:21 Corpus clauses/1 integer_shift `3` → `4` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 2, 4] do
-m084 corpus.ex:54:21 Corpus clauses/1 integer_shift `3` → `2` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 2, 2] do
-m085 corpus.ex:54:31 Corpus clauses/1 arithmetic_swap `*` → `/` => -i * 2 ¦ +i / 2
-m086 corpus.ex:54:33 Corpus clauses/1 integer_shift `2` → `3` => -i * 2 ¦ +i * 3
-m087 corpus.ex:54:33 Corpus clauses/1 integer_shift `2` → `1` => -i * 2 ¦ +i * 1
-m088 corpus.ex:58:7 Corpus clauses/1 integer_shift `10` → `11` => -10 -> :timeout ¦ +11 -> :timeout
-m089 corpus.ex:58:7 Corpus clauses/1 integer_shift `10` → `9` => -10 -> :timeout ¦ +9 -> :timeout
-m090 corpus.ex:64:12 Corpus clauses/1 integer_shift `0` → `1` => -_ -> 0 ¦ +_ -> 1
-m091 corpus.ex:64:12 Corpus clauses/1 integer_shift `0` → `-1` => -_ -> 0 ¦ +_ -> -1
-m092 corpus.ex:68:9 Corpus clauses/1 clause_removal `fn 1 ->` → `(removed)` => -1 -> :a
-m093 corpus.ex:69:9 Corpus clauses/1 clause_removal `fn _ ->` → `(removed)` => -_ -> :b
-m094 corpus.ex:68:7 Corpus clauses/1 integer_shift `1` → `2` => -1 -> :a ¦ +2 -> :a
-m095 corpus.ex:68:7 Corpus clauses/1 integer_shift `1` → `0` => -1 -> :a ¦ +0 -> :a
-m096 corpus.ex:87:5 Corpus collections/1 return_nil `{head, tail, updated, struct, tuple, bin, cap, pin}` → `nil` => -{head, tail, updated, struct, tuple, bin, cap, pin} ¦ +nil
-m097 corpus.ex:77:13 Corpus collections/1 element_removal `1` → `(removed)` => -list = [1, 2, 3] ¦ +list = [2, 3]
-m098 corpus.ex:77:16 Corpus collections/1 element_removal `2` → `(removed)` => -list = [1, 2, 3] ¦ +list = [1, 3]
-m099 corpus.ex:77:19 Corpus collections/1 element_removal `3` → `(removed)` => -list = [1, 2, 3] ¦ +list = [1, 2]
-m100 corpus.ex:77:13 Corpus collections/1 integer_shift `1` → `2` => -list = [1, 2, 3] ¦ +list = [2, 2, 3]
-m101 corpus.ex:77:13 Corpus collections/1 integer_shift `1` → `0` => -list = [1, 2, 3] ¦ +list = [0, 2, 3]
-m102 corpus.ex:77:16 Corpus collections/1 integer_shift `2` → `3` => -list = [1, 2, 3] ¦ +list = [1, 3, 3]
-m103 corpus.ex:77:16 Corpus collections/1 integer_shift `2` → `1` => -list = [1, 2, 3] ¦ +list = [1, 1, 3]
-m104 corpus.ex:77:19 Corpus collections/1 integer_shift `3` → `4` => -list = [1, 2, 3] ¦ +list = [1, 2, 4]
-m105 corpus.ex:77:19 Corpus collections/1 integer_shift `3` → `2` => -list = [1, 2, 3] ¦ +list = [1, 2, 2]
-m106 corpus.ex:79:13 Corpus collections/1 element_removal `"b" => 2` → `(removed)` => -map = %{"b" => 2, a: 1} ¦ +map = %{a: 1}
-m107 corpus.ex:79:23 Corpus collections/1 element_removal `a: 1` → `(removed)` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 2}
-m108 corpus.ex:79:13 Corpus collections/1 string_empty `"b"` → `""` => -map = %{"b" => 2, a: 1} ¦ +map = %{"" => 2, a: 1}
-m109 corpus.ex:79:20 Corpus collections/1 integer_shift `2` → `3` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 3, a: 1}
-m110 corpus.ex:79:20 Corpus collections/1 integer_shift `2` → `1` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 1, a: 1}
-m111 corpus.ex:79:26 Corpus collections/1 integer_shift `1` → `2` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 2, a: 2}
-m112 corpus.ex:79:26 Corpus collections/1 integer_shift `1` → `0` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 2, a: 0}
-m113 corpus.ex:80:26 Corpus collections/1 integer_shift `3` → `4` => -updated = %{map | a: 3} ¦ +updated = %{map | a: 4}
-m114 corpus.ex:80:26 Corpus collections/1 integer_shift `3` → `2` => -updated = %{map | a: 3} ¦ +updated = %{map | a: 2}
-m115 corpus.ex:81:22 Corpus collections/1 element_removal `count: 1` → `(removed)` => -struct = %Corpus{count: 1} ¦ +struct = %Corpus{}
-m116 corpus.ex:81:29 Corpus collections/1 integer_shift `1` → `2` => -struct = %Corpus{count: 1} ¦ +struct = %Corpus{count: 2}
-m117 corpus.ex:81:29 Corpus collections/1 integer_shift `1` → `0` => -struct = %Corpus{count: 1} ¦ +struct = %Corpus{count: 0}
-m118 corpus.ex:82:14 Corpus collections/1 integer_shift `1` → `2` => -tuple = {1, 2} ¦ +tuple = {2, 2}
-m119 corpus.ex:82:14 Corpus collections/1 integer_shift `1` → `0` => -tuple = {1, 2} ¦ +tuple = {0, 2}
-m120 corpus.ex:82:17 Corpus collections/1 integer_shift `2` → `3` => -tuple = {1, 2} ¦ +tuple = {1, 3}
-m121 corpus.ex:82:17 Corpus collections/1 integer_shift `2` → `1` => -tuple = {1, 2} ¦ +tuple = {1, 1}
-m122 corpus.ex:83:13 Corpus collections/1 integer_shift `1` → `2` => -bin = <<1, 2>> ¦ +bin = <<2, 2>>
-m123 corpus.ex:83:13 Corpus collections/1 integer_shift `1` → `0` => -bin = <<1, 2>> ¦ +bin = <<0, 2>>
-m124 corpus.ex:83:16 Corpus collections/1 integer_shift `2` → `3` => -bin = <<1, 2>> ¦ +bin = <<1, 3>>
-m125 corpus.ex:83:16 Corpus collections/1 integer_shift `2` → `1` => -bin = <<1, 2>> ¦ +bin = <<1, 1>>
-m126 corpus.ex:84:15 Corpus collections/1 string_empty `"a"` → `""` => -mixed = <<"a", 1>> ¦ +mixed = <<"", 1>>
-m127 corpus.ex:84:20 Corpus collections/1 integer_shift `1` → `2` => -mixed = <<"a", 1>> ¦ +mixed = <<"a", 2>>
-m128 corpus.ex:84:20 Corpus collections/1 integer_shift `1` → `0` => -mixed = <<"a", 1>> ¦ +mixed = <<"a", 0>>
-m129 corpus.ex:85:16 Corpus collections/1 arithmetic_swap `+` → `-` => -cap = &(&1 + 1) ¦ +cap = &(&1 - 1)
-m130 corpus.ex:85:18 Corpus collections/1 integer_shift `1` → `2` => -cap = &(&1 + 1) ¦ +cap = &(&1 + 2)
-m131 corpus.ex:85:18 Corpus collections/1 integer_shift `1` → `0` => -cap = &(&1 + 1) ¦ +cap = &(&1 + 0)
-m132 corpus.ex:96:12 Corpus strings/1 return_nil `String.upcase(name)` → `nil` => -String.upcase(name) ¦ +nil
-m133 corpus.ex:91:5 Corpus strings/1 string_empty `"plain"` → `""` => -"plain" ¦ +""
-m134 corpus.ex:92:5 Corpus strings/1 string_empty `"hello #{name}"` → `""` => -"hello #{name}" ¦ +""
-m135 corpus.ex:102:5 Corpus query/1 return_nil `from(p in Post, select: p)` → `nil` => -from(p in Post, select: p) ¦ +nil
-m136 corpus.ex:100:24 Corpus query/1 statement_removal `q |> where(x == 1) |> or_where(y == 2)` → `(removed)` => -q |> where(x == 1) |> or_where(y == 2)
-m137 corpus.ex:101:5 Corpus query/1 statement_removal `from(p in Post, where: p.id == 1, or_where: p.id == 2, sele…` → `(removed)` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p)
-m138 corpus.ex:100:24 Corpus query/1 ecto_where_removal `|> or_where(y == 2)` → `(removed)` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 1)
-m139 corpus.ex:100:7 Corpus query/1 ecto_where_removal `|> where(x == 1)` → `(removed)` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> or_where(y == 2)
-m140 corpus.ex:100:18 Corpus query/1 comparison_swap `==` → `!=` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x != 1) |> or_where(y == 2)
-m141 corpus.ex:100:21 Corpus query/1 integer_shift `1` → `2` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 2) |> or_where(y == 2)
-m142 corpus.ex:100:21 Corpus query/1 integer_shift `1` → `0` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 0) |> or_where(y == 2)
-m143 corpus.ex:100:38 Corpus query/1 comparison_swap `==` → `!=` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 1) |> or_where(y != 2)
-m144 corpus.ex:100:41 Corpus query/1 integer_shift `2` → `3` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 1) |> or_where(y == 3)
-m145 corpus.ex:100:41 Corpus query/1 integer_shift `2` → `1` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 1) |> or_where(y == 1)
-m146 corpus.ex:101:21 Corpus query/1 ecto_where_removal `where: p.id == 1` → `(removed)` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, or_where: p.id == 2, select: p)
-m147 corpus.ex:101:39 Corpus query/1 ecto_where_removal `or_where: p.id == 2` → `(removed)` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 1, select: p)
-m148 corpus.ex:101:33 Corpus query/1 comparison_swap `==` → `!=` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id != 1, or_where: p.id == 2, select: p)
-m149 corpus.ex:101:36 Corpus query/1 integer_shift `1` → `2` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 2, or_where: p.id == 2, select: p)
-m150 corpus.ex:101:36 Corpus query/1 integer_shift `1` → `0` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 0, or_where: p.id == 2, select: p)
-m151 corpus.ex:101:54 Corpus query/1 comparison_swap `==` → `!=` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 1, or_where: p.id != 2, select: p)
-m152 corpus.ex:101:57 Corpus query/1 integer_shift `2` → `3` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 1, or_where: p.id == 3, select: p)
-m153 corpus.ex:101:57 Corpus query/1 integer_shift `2` → `1` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 1, or_where: p.id == 1, select: p)
-m154 corpus.ex:122:5 Corpus extras/2 return_nil `m` → `nil` => -m ¦ +nil
-m155 corpus.ex:118:7 Corpus extras/2 statement_removal `q |> where` → `(removed)` => -q |> where
-m156 corpus.ex:119:7 Corpus extras/2 statement_removal `q |> limit(1)` → `(removed)` => -q |> limit(1)
-m157 corpus.ex:120:5 Corpus extras/2 statement_removal `from(Post)` → `(removed)` => -from(Post)
-m158 corpus.ex:110:7 Corpus extras/2 element_removal `k: 1` → `(removed)` => -%{k: 1} ¦ +%{}
-m159 corpus.ex:110:10 Corpus extras/2 integer_shift `1` → `2` => -%{k: 1} ¦ +%{k: 2}
-m160 corpus.ex:110:10 Corpus extras/2 integer_shift `1` → `0` => -%{k: 1} ¦ +%{k: 0}
-m161 corpus.ex:112:6 Corpus extras/2 integer_shift `1` → `2` => -{1, 2, 3} ¦ +{2, 2, 3}
-m162 corpus.ex:112:6 Corpus extras/2 integer_shift `1` → `0` => -{1, 2, 3} ¦ +{0, 2, 3}
-m163 corpus.ex:112:9 Corpus extras/2 integer_shift `2` → `3` => -{1, 2, 3} ¦ +{1, 3, 3}
-m164 corpus.ex:112:9 Corpus extras/2 integer_shift `2` → `1` => -{1, 2, 3} ¦ +{1, 1, 3}
-m165 corpus.ex:112:12 Corpus extras/2 integer_shift `3` → `4` => -{1, 2, 3} ¦ +{1, 2, 4}
-m166 corpus.ex:112:12 Corpus extras/2 integer_shift `3` → `2` => -{1, 2, 3} ¦ +{1, 2, 2}
-m167 corpus.ex:116:7 Corpus extras/2 guard_removal `when b` → `(no guard)` => -a when b ¦ +a
-m168 corpus.ex:119:16 Corpus extras/2 integer_shift `1` → `2` => -q |> limit(1) ¦ +q |> limit(2)
-m169 corpus.ex:119:16 Corpus extras/2 integer_shift `1` → `0` => -q |> limit(1) ¦ +q |> limit(0)
-m170 corpus.ex:127:5 Corpus two/0 return_nil `:b` → `nil` => -:b ¦ +nil
-m171 corpus.ex:126:8 Corpus two/0 statement_removal `IO.puts("a")` → `(removed)` => -IO.puts("a")
-m172 corpus.ex:126:13 Corpus two/0 string_empty `"a"` → `""` => -IO.puts("a") ¦ +IO.puts("")
-m173 corpus.ex:131:5 Corpus multi/0 return_nil `fn 1, 2 -> :x _, _ -> :y end` → `nil` => -fn ¦ -1, 2 -> :x ¦ -_, _ -> :y ¦ -end ¦ +nil
-m174 corpus.ex:132:12 Corpus multi/0 clause_removal `fn 1, 2 ->` → `(removed)` => -1, 2 -> :x
-m175 corpus.ex:133:12 Corpus multi/0 clause_removal `fn _, _ ->` → `(removed)` => -_, _ -> :y
-m176 corpus.ex:132:7 Corpus multi/0 integer_shift `1` → `2` => -1, 2 -> :x ¦ +2, 2 -> :x
-m177 corpus.ex:132:7 Corpus multi/0 integer_shift `1` → `0` => -1, 2 -> :x ¦ +0, 2 -> :x
-m178 corpus.ex:132:10 Corpus multi/0 integer_shift `2` → `3` => -1, 2 -> :x ¦ +1, 3 -> :x
-m179 corpus.ex:132:10 Corpus multi/0 integer_shift `2` → `1` => -1, 2 -> :x ¦ +1, 1 -> :x
-m180 corpus.ex:137:24 Corpus private/1 return_nil `x` → `nil` => -x ¦ +nil
-m181 corpus.ex:139:43 Corpus guarded/1 return_nil `x` → `nil` => -x ¦ +nil
-m182 corpus.ex:139:19 Corpus guarded/1 guard_removal `when is_integer(x)` → `(no guard)` => -defp guarded(x) when is_integer(x) do ¦ +defp guarded(x) do
-m183 corpus.ex:140:20 Corpus unnamed/0 return_nil `5` → `nil` => -5 ¦ +nil
-m184 corpus.ex:140:20 Corpus unnamed/0 integer_shift `5` → `6` => -5 ¦ +6
-m185 corpus.ex:140:20 Corpus unnamed/0 integer_shift `5` → `4` => -5 ¦ +4
-m186 corpus.ex:143:8 Corpus block_nil/0 statement_removal `IO.puts("x")` → `(removed)` => -IO.puts("x")
-m187 corpus.ex:143:13 Corpus block_nil/0 string_empty `"x"` → `""` => -IO.puts("x") ¦ +IO.puts("")
-m188 corpus.ex:148:5 Corpus unquoted/1 return_nil `def unquote(name)(x) do x end` → `nil` => -def unquote(name)(x) do ¦ -x ¦ -end ¦ +nil
-m189 corpus.ex:148:31 Corpus  return_nil `x` → `nil` => -x ¦ +nil
-m190 corpus.ex:152:24 Corpus.Inner deep/1 return_nil `x - 1` → `nil` => -x - 1 ¦ +nil
-m191 corpus.ex:152:24 Corpus.Inner deep/1 arithmetic_swap `-` → `+` => -x - 1 ¦ +x + 1
-m192 corpus.ex:152:26 Corpus.Inner deep/1 integer_shift `1` → `2` => -x - 1 ¦ +x - 2
-m193 corpus.ex:152:26 Corpus.Inner deep/1 integer_shift `1` → `0` => -x - 1 ¦ +x - 0
-m194 corpus.ex:153:39 Corpus.Inner.Deeper go/0 return_nil `0` → `nil` => -0 ¦ +nil
-m195 corpus.ex:153:39 Corpus.Inner.Deeper go/0 integer_shift `0` → `1` => -0 ¦ +1
-m196 corpus.ex:153:39 Corpus.Inner.Deeper go/0 integer_shift `0` → `-1` => -0 ¦ +-1
-m197 corpus.ex:157:20 Corpus.__MODULE__.Child child/0 return_nil `1` → `nil` => -1 ¦ +nil
-m198 corpus.ex:157:20 Corpus.__MODULE__.Child child/0 integer_shift `1` → `2` => -1 ¦ +2
-m199 corpus.ex:157:20 Corpus.__MODULE__.Child child/0 integer_shift `1` → `0` => -1 ¦ +0
-m200 corpus.ex:161:18 ? dyn/0 return_nil `1` → `nil` => -1 ¦ +nil
-m201 corpus.ex:161:18 ? dyn/0 integer_shift `1` → `2` => -1 ¦ +2
-m202 corpus.ex:161:18 ? dyn/0 integer_shift `1` → `0` => -1 ¦ +0
-m203 corpus.ex:165:27 Corpus to_string/1 return_nil `"corpus #{c.count}"` → `nil` => -"corpus #{c.count}" ¦ +nil
-m204 corpus.ex:165:27 Corpus to_string/1 string_empty `"corpus #{c.count}"` → `""` => -"corpus #{c.count}" ¦ +""
-m205 corpus.ex:173:25 Corpus  string_empty `"boom"` → `""` => -defexception message: "boom" ¦ +defexception message: ""
-m206 corpus.ex:174:25 Corpus last_call/0 return_nil `IO.puts("last")` → `nil` => -IO.puts("last") ¦ +nil
-m207 corpus.ex:174:30 Corpus last_call/0 string_empty `"last"` → `""` => -IO.puts("last") ¦ +IO.puts("")
-m208 corpus.ex:178:14 :erlang_style f/0 return_nil `1` → `nil` => -1 ¦ +nil
-m209 corpus.ex:178:14 :erlang_style f/0 integer_shift `1` → `2` => -1 ¦ +2
-m210 corpus.ex:178:14 :erlang_style f/0 integer_shift `1` → `0` => -1 ¦ +0
+m001 corpus.ex:24:7 Corpus plain/1 return_nil `y / 2` → `nil` => -y / 2 ¦ +nil
+m002 corpus.ex:19:16 Corpus plain/1 guard_removal `when x > 0 and x < 10` → `(no guard)` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) do
+m003 corpus.ex:19:27 Corpus plain/1 logical_swap `and` → `or` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 or x < 10 do
+m004 corpus.ex:19:23 Corpus plain/1 comparison_swap `>` → `>=` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x >= 0 and x < 10 do
+m005 corpus.ex:19:23 Corpus plain/1 comparison_swap `>` → `<=` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x <= 0 and x < 10 do
+m006 corpus.ex:19:25 Corpus plain/1 integer_shift `0` → `1` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 1 and x < 10 do
+m007 corpus.ex:19:25 Corpus plain/1 integer_shift `0` → `-1` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > -1 and x < 10 do
+m008 corpus.ex:19:33 Corpus plain/1 comparison_swap `<` → `<=` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 and x <= 10 do
+m009 corpus.ex:19:33 Corpus plain/1 comparison_swap `<` → `>=` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 and x >= 10 do
+m010 corpus.ex:19:35 Corpus plain/1 integer_shift `10` → `11` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 and x < 11 do
+m011 corpus.ex:19:35 Corpus plain/1 integer_shift `10` → `9` => -def plain(x) when x > 0 and x < 10 do ¦ +def plain(x) when x > 0 and x < 9 do
+m012 corpus.ex:21:8 Corpus plain/1 statement_removal `IO.puts(y)` → `(removed)` => -IO.puts(y)
+m013 corpus.ex:23:5 Corpus plain/1 statement_removal `send(self(), z)` → `(removed)` => -send(self(), z)
+m014 corpus.ex:20:11 Corpus plain/1 arithmetic_swap `+` → `-` => -y = x + 1 ¦ +y = x - 1
+m015 corpus.ex:20:13 Corpus plain/1 integer_shift `1` → `2` => -y = x + 1 ¦ +y = x + 2
+m016 corpus.ex:20:13 Corpus plain/1 integer_shift `1` → `0` => -y = x + 1 ¦ +y = x + 0
+m017 corpus.ex:22:15 Corpus plain/1 arithmetic_swap `-` → `+` => -z = y * 2 - 1 ¦ +z = y * 2 + 1
+m018 corpus.ex:22:11 Corpus plain/1 arithmetic_swap `*` → `/` => -z = y * 2 - 1 ¦ +z = y / 2 - 1
+m019 corpus.ex:22:13 Corpus plain/1 integer_shift `2` → `3` => -z = y * 2 - 1 ¦ +z = y * 3 - 1
+m020 corpus.ex:22:13 Corpus plain/1 integer_shift `2` → `1` => -z = y * 2 - 1 ¦ +z = y * 1 - 1
+m021 corpus.ex:22:17 Corpus plain/1 integer_shift `1` → `2` => -z = y * 2 - 1 ¦ +z = y * 2 - 2
+m022 corpus.ex:22:17 Corpus plain/1 integer_shift `1` → `0` => -z = y * 2 - 1 ¦ +z = y * 2 - 0
+m023 corpus.ex:24:7 Corpus plain/1 arithmetic_swap `/` → `*` => -y / 2 ¦ +y * 2
+m024 corpus.ex:24:9 Corpus plain/1 integer_shift `2` → `3` => -y / 2 ¦ +y / 3
+m025 corpus.ex:24:9 Corpus plain/1 integer_shift `2` → `1` => -y / 2 ¦ +y / 1
+m026 corpus.ex:38:5 Corpus flags/2 return_nil `not a` → `nil` => -not a ¦ +nil
+m027 corpus.ex:32:12 Corpus flags/2 statement_removal `a == b or a != b` → `(removed)` => -a == b or a != b
+m028 corpus.ex:33:13 Corpus flags/2 statement_removal `a === b and a !== b` → `(removed)` => -a === b and a !== b
+m029 corpus.ex:34:7 Corpus flags/2 statement_removal `a <= b` → `(removed)` => -a <= b
+m030 corpus.ex:35:7 Corpus flags/2 statement_removal `a >= b` → `(removed)` => -a >= b
+m031 corpus.ex:36:7 Corpus flags/2 statement_removal `a > b` → `(removed)` => -a > b
+m032 corpus.ex:37:7 Corpus flags/2 statement_removal `a < b` → `(removed)` => -a < b
+m033 corpus.ex:30:5 Corpus flags/2 condition_negate `if a && b` → `if !(a && b)` => -if a && b do ¦ +if !(a && b) do
+m034 corpus.ex:30:10 Corpus flags/2 logical_swap `&&` → `||` => -if a && b do ¦ +if a || b do
+m035 corpus.ex:30:20 Corpus flags/2 boolean_flip `true` → `false` => -true ¦ +false
+m036 corpus.ex:30:32 Corpus flags/2 boolean_flip `false` → `true` => -false ¦ +true
+m037 corpus.ex:31:5 Corpus flags/2 condition_negate `unless a || b` → `unless !(a || b)` => -unless a || b do ¦ +unless !(a || b) do
+m038 corpus.ex:31:14 Corpus flags/2 logical_swap `||` → `&&` => -unless a || b do ¦ +unless a && b do
+m039 corpus.ex:31:24 Corpus flags/2 integer_shift `1` → `2` => -1 ¦ +2
+m040 corpus.ex:31:24 Corpus flags/2 integer_shift `1` → `0` => -1 ¦ +0
+m041 corpus.ex:31:33 Corpus flags/2 integer_shift `2` → `3` => -2 ¦ +3
+m042 corpus.ex:31:33 Corpus flags/2 integer_shift `2` → `1` => -2 ¦ +1
+m043 corpus.ex:32:12 Corpus flags/2 logical_swap `or` → `and` => -a == b or a != b ¦ +a == b and a != b
+m044 corpus.ex:32:7 Corpus flags/2 comparison_swap `==` → `!=` => -a == b or a != b ¦ +a != b or a != b
+m045 corpus.ex:32:17 Corpus flags/2 comparison_swap `!=` → `==` => -a == b or a != b ¦ +a == b or a == b
+m046 corpus.ex:33:13 Corpus flags/2 logical_swap `and` → `or` => -a === b and a !== b ¦ +a === b or a !== b
+m047 corpus.ex:33:7 Corpus flags/2 comparison_swap `===` → `!==` => -a === b and a !== b ¦ +a !== b and a !== b
+m048 corpus.ex:33:19 Corpus flags/2 comparison_swap `!==` → `===` => -a === b and a !== b ¦ +a === b and a === b
+m049 corpus.ex:34:7 Corpus flags/2 comparison_swap `<=` → `<` => -a <= b ¦ +a < b
+m050 corpus.ex:34:7 Corpus flags/2 comparison_swap `<=` → `>` => -a <= b ¦ +a > b
+m051 corpus.ex:35:7 Corpus flags/2 comparison_swap `>=` → `>` => -a >= b ¦ +a > b
+m052 corpus.ex:35:7 Corpus flags/2 comparison_swap `>=` → `<` => -a >= b ¦ +a < b
+m053 corpus.ex:36:7 Corpus flags/2 comparison_swap `>` → `>=` => -a > b ¦ +a >= b
+m054 corpus.ex:36:7 Corpus flags/2 comparison_swap `>` → `<=` => -a > b ¦ +a <= b
+m055 corpus.ex:37:7 Corpus flags/2 comparison_swap `<` → `<=` => -a < b ¦ +a <= b
+m056 corpus.ex:37:7 Corpus flags/2 comparison_swap `<` → `>=` => -a < b ¦ +a >= b
+m057 corpus.ex:73:6 Corpus clauses/1 return_nil `f.(g.(x))` → `nil` => -f.(g.(x)) ¦ +nil
+m058 corpus.ex:43:9 Corpus clauses/1 clause_removal `case 1 ->` → `(removed)` => -1 -> :one
+m059 corpus.ex:44:9 Corpus clauses/1 clause_removal `case 2 ->` → `(removed)` => -2 -> :two
+m060 corpus.ex:45:9 Corpus clauses/1 clause_removal `case _ ->` → `(removed)` => -_ -> :many
+m061 corpus.ex:43:7 Corpus clauses/1 integer_shift `1` → `2` => -1 -> :one ¦ +2 -> :one
+m062 corpus.ex:43:7 Corpus clauses/1 integer_shift `1` → `0` => -1 -> :one ¦ +0 -> :one
+m063 corpus.ex:44:7 Corpus clauses/1 integer_shift `2` → `3` => -2 -> :two ¦ +3 -> :two
+m064 corpus.ex:44:7 Corpus clauses/1 integer_shift `2` → `1` => -2 -> :two ¦ +1 -> :two
+m065 corpus.ex:49:13 Corpus clauses/1 clause_removal `cond x > 1 ->` → `(removed)` => -x > 1 -> :big
+m066 corpus.ex:50:12 Corpus clauses/1 clause_removal `cond true ->` → `(removed)` => -true -> :small
+m067 corpus.ex:49:9 Corpus clauses/1 comparison_swap `>` → `>=` => -x > 1 -> :big ¦ +x >= 1 -> :big
+m068 corpus.ex:49:9 Corpus clauses/1 comparison_swap `>` → `<=` => -x > 1 -> :big ¦ +x <= 1 -> :big
+m069 corpus.ex:49:11 Corpus clauses/1 integer_shift `1` → `2` => -x > 1 -> :big ¦ +x > 2 -> :big
+m070 corpus.ex:49:11 Corpus clauses/1 integer_shift `1` → `0` => -x > 1 -> :big ¦ +x > 0 -> :big
+m071 corpus.ex:50:7 Corpus clauses/1 boolean_flip `true` → `false` => -true -> :small ¦ +false -> :small
+m072 corpus.ex:54:15 Corpus clauses/1 element_removal `1` → `(removed)` => -for i <- [1, 2, 3] do ¦ +for i <- [2, 3] do
+m073 corpus.ex:54:18 Corpus clauses/1 element_removal `2` → `(removed)` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 3] do
+m074 corpus.ex:54:21 Corpus clauses/1 element_removal `3` → `(removed)` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 2] do
+m075 corpus.ex:54:15 Corpus clauses/1 integer_shift `1` → `2` => -for i <- [1, 2, 3] do ¦ +for i <- [2, 2, 3] do
+m076 corpus.ex:54:15 Corpus clauses/1 integer_shift `1` → `0` => -for i <- [1, 2, 3] do ¦ +for i <- [0, 2, 3] do
+m077 corpus.ex:54:18 Corpus clauses/1 integer_shift `2` → `3` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 3, 3] do
+m078 corpus.ex:54:18 Corpus clauses/1 integer_shift `2` → `1` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 1, 3] do
+m079 corpus.ex:54:21 Corpus clauses/1 integer_shift `3` → `4` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 2, 4] do
+m080 corpus.ex:54:21 Corpus clauses/1 integer_shift `3` → `2` => -for i <- [1, 2, 3] do ¦ +for i <- [1, 2, 2] do
+m081 corpus.ex:54:31 Corpus clauses/1 arithmetic_swap `*` → `/` => -i * 2 ¦ +i / 2
+m082 corpus.ex:54:33 Corpus clauses/1 integer_shift `2` → `3` => -i * 2 ¦ +i * 3
+m083 corpus.ex:54:33 Corpus clauses/1 integer_shift `2` → `1` => -i * 2 ¦ +i * 1
+m084 corpus.ex:58:7 Corpus clauses/1 integer_shift `10` → `11` => -10 -> :timeout ¦ +11 -> :timeout
+m085 corpus.ex:58:7 Corpus clauses/1 integer_shift `10` → `9` => -10 -> :timeout ¦ +9 -> :timeout
+m086 corpus.ex:64:12 Corpus clauses/1 integer_shift `0` → `1` => -_ -> 0 ¦ +_ -> 1
+m087 corpus.ex:64:12 Corpus clauses/1 integer_shift `0` → `-1` => -_ -> 0 ¦ +_ -> -1
+m088 corpus.ex:68:9 Corpus clauses/1 clause_removal `fn 1 ->` → `(removed)` => -1 -> :a
+m089 corpus.ex:69:9 Corpus clauses/1 clause_removal `fn _ ->` → `(removed)` => -_ -> :b
+m090 corpus.ex:68:7 Corpus clauses/1 integer_shift `1` → `2` => -1 -> :a ¦ +2 -> :a
+m091 corpus.ex:68:7 Corpus clauses/1 integer_shift `1` → `0` => -1 -> :a ¦ +0 -> :a
+m092 corpus.ex:87:5 Corpus collections/1 return_nil `{head, tail, updated, struct, tuple, bin, cap, pin}` → `nil` => -{head, tail, updated, struct, tuple, bin, cap, pin} ¦ +nil
+m093 corpus.ex:77:13 Corpus collections/1 element_removal `1` → `(removed)` => -list = [1, 2, 3] ¦ +list = [2, 3]
+m094 corpus.ex:77:16 Corpus collections/1 element_removal `2` → `(removed)` => -list = [1, 2, 3] ¦ +list = [1, 3]
+m095 corpus.ex:77:19 Corpus collections/1 element_removal `3` → `(removed)` => -list = [1, 2, 3] ¦ +list = [1, 2]
+m096 corpus.ex:77:13 Corpus collections/1 integer_shift `1` → `2` => -list = [1, 2, 3] ¦ +list = [2, 2, 3]
+m097 corpus.ex:77:13 Corpus collections/1 integer_shift `1` → `0` => -list = [1, 2, 3] ¦ +list = [0, 2, 3]
+m098 corpus.ex:77:16 Corpus collections/1 integer_shift `2` → `3` => -list = [1, 2, 3] ¦ +list = [1, 3, 3]
+m099 corpus.ex:77:16 Corpus collections/1 integer_shift `2` → `1` => -list = [1, 2, 3] ¦ +list = [1, 1, 3]
+m100 corpus.ex:77:19 Corpus collections/1 integer_shift `3` → `4` => -list = [1, 2, 3] ¦ +list = [1, 2, 4]
+m101 corpus.ex:77:19 Corpus collections/1 integer_shift `3` → `2` => -list = [1, 2, 3] ¦ +list = [1, 2, 2]
+m102 corpus.ex:79:13 Corpus collections/1 element_removal `"b" => 2` → `(removed)` => -map = %{"b" => 2, a: 1} ¦ +map = %{a: 1}
+m103 corpus.ex:79:23 Corpus collections/1 element_removal `a: 1` → `(removed)` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 2}
+m104 corpus.ex:79:13 Corpus collections/1 string_empty `"b"` → `""` => -map = %{"b" => 2, a: 1} ¦ +map = %{"" => 2, a: 1}
+m105 corpus.ex:79:20 Corpus collections/1 integer_shift `2` → `3` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 3, a: 1}
+m106 corpus.ex:79:20 Corpus collections/1 integer_shift `2` → `1` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 1, a: 1}
+m107 corpus.ex:79:26 Corpus collections/1 integer_shift `1` → `2` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 2, a: 2}
+m108 corpus.ex:79:26 Corpus collections/1 integer_shift `1` → `0` => -map = %{"b" => 2, a: 1} ¦ +map = %{"b" => 2, a: 0}
+m109 corpus.ex:80:26 Corpus collections/1 integer_shift `3` → `4` => -updated = %{map | a: 3} ¦ +updated = %{map | a: 4}
+m110 corpus.ex:80:26 Corpus collections/1 integer_shift `3` → `2` => -updated = %{map | a: 3} ¦ +updated = %{map | a: 2}
+m111 corpus.ex:81:22 Corpus collections/1 element_removal `count: 1` → `(removed)` => -struct = %Corpus{count: 1} ¦ +struct = %Corpus{}
+m112 corpus.ex:81:29 Corpus collections/1 integer_shift `1` → `2` => -struct = %Corpus{count: 1} ¦ +struct = %Corpus{count: 2}
+m113 corpus.ex:81:29 Corpus collections/1 integer_shift `1` → `0` => -struct = %Corpus{count: 1} ¦ +struct = %Corpus{count: 0}
+m114 corpus.ex:82:14 Corpus collections/1 integer_shift `1` → `2` => -tuple = {1, 2} ¦ +tuple = {2, 2}
+m115 corpus.ex:82:14 Corpus collections/1 integer_shift `1` → `0` => -tuple = {1, 2} ¦ +tuple = {0, 2}
+m116 corpus.ex:82:17 Corpus collections/1 integer_shift `2` → `3` => -tuple = {1, 2} ¦ +tuple = {1, 3}
+m117 corpus.ex:82:17 Corpus collections/1 integer_shift `2` → `1` => -tuple = {1, 2} ¦ +tuple = {1, 1}
+m118 corpus.ex:83:13 Corpus collections/1 integer_shift `1` → `2` => -bin = <<1, 2>> ¦ +bin = <<2, 2>>
+m119 corpus.ex:83:13 Corpus collections/1 integer_shift `1` → `0` => -bin = <<1, 2>> ¦ +bin = <<0, 2>>
+m120 corpus.ex:83:16 Corpus collections/1 integer_shift `2` → `3` => -bin = <<1, 2>> ¦ +bin = <<1, 3>>
+m121 corpus.ex:83:16 Corpus collections/1 integer_shift `2` → `1` => -bin = <<1, 2>> ¦ +bin = <<1, 1>>
+m122 corpus.ex:84:15 Corpus collections/1 string_empty `"a"` → `""` => -mixed = <<"a", 1>> ¦ +mixed = <<"", 1>>
+m123 corpus.ex:84:20 Corpus collections/1 integer_shift `1` → `2` => -mixed = <<"a", 1>> ¦ +mixed = <<"a", 2>>
+m124 corpus.ex:84:20 Corpus collections/1 integer_shift `1` → `0` => -mixed = <<"a", 1>> ¦ +mixed = <<"a", 0>>
+m125 corpus.ex:85:16 Corpus collections/1 arithmetic_swap `+` → `-` => -cap = &(&1 + 1) ¦ +cap = &(&1 - 1)
+m126 corpus.ex:85:18 Corpus collections/1 integer_shift `1` → `2` => -cap = &(&1 + 1) ¦ +cap = &(&1 + 2)
+m127 corpus.ex:85:18 Corpus collections/1 integer_shift `1` → `0` => -cap = &(&1 + 1) ¦ +cap = &(&1 + 0)
+m128 corpus.ex:96:12 Corpus strings/1 return_nil `String.upcase(name)` → `nil` => -String.upcase(name) ¦ +nil
+m129 corpus.ex:91:5 Corpus strings/1 string_empty `"plain"` → `""` => -"plain" ¦ +""
+m130 corpus.ex:92:5 Corpus strings/1 string_empty `"hello #{name}"` → `""` => -"hello #{name}" ¦ +""
+m131 corpus.ex:102:5 Corpus query/1 return_nil `from(p in Post, select: p)` → `nil` => -from(p in Post, select: p) ¦ +nil
+m132 corpus.ex:100:24 Corpus query/1 statement_removal `q |> where(x == 1) |> or_where(y == 2)` → `(removed)` => -q |> where(x == 1) |> or_where(y == 2)
+m133 corpus.ex:101:5 Corpus query/1 statement_removal `from(p in Post, where: p.id == 1, or_where: p.id == 2, sele…` → `(removed)` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p)
+m134 corpus.ex:100:24 Corpus query/1 ecto_where_removal `|> or_where(y == 2)` → `(removed)` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 1)
+m135 corpus.ex:100:7 Corpus query/1 ecto_where_removal `|> where(x == 1)` → `(removed)` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> or_where(y == 2)
+m136 corpus.ex:100:18 Corpus query/1 comparison_swap `==` → `!=` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x != 1) |> or_where(y == 2)
+m137 corpus.ex:100:21 Corpus query/1 integer_shift `1` → `2` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 2) |> or_where(y == 2)
+m138 corpus.ex:100:21 Corpus query/1 integer_shift `1` → `0` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 0) |> or_where(y == 2)
+m139 corpus.ex:100:38 Corpus query/1 comparison_swap `==` → `!=` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 1) |> or_where(y != 2)
+m140 corpus.ex:100:41 Corpus query/1 integer_shift `2` → `3` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 1) |> or_where(y == 3)
+m141 corpus.ex:100:41 Corpus query/1 integer_shift `2` → `1` => -q |> where(x == 1) |> or_where(y == 2) ¦ +q |> where(x == 1) |> or_where(y == 1)
+m142 corpus.ex:101:21 Corpus query/1 ecto_where_removal `where: p.id == 1` → `(removed)` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, or_where: p.id == 2, select: p)
+m143 corpus.ex:101:39 Corpus query/1 ecto_where_removal `or_where: p.id == 2` → `(removed)` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 1, select: p)
+m144 corpus.ex:101:33 Corpus query/1 comparison_swap `==` → `!=` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id != 1, or_where: p.id == 2, select: p)
+m145 corpus.ex:101:36 Corpus query/1 integer_shift `1` → `2` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 2, or_where: p.id == 2, select: p)
+m146 corpus.ex:101:36 Corpus query/1 integer_shift `1` → `0` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 0, or_where: p.id == 2, select: p)
+m147 corpus.ex:101:54 Corpus query/1 comparison_swap `==` → `!=` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 1, or_where: p.id != 2, select: p)
+m148 corpus.ex:101:57 Corpus query/1 integer_shift `2` → `3` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 1, or_where: p.id == 3, select: p)
+m149 corpus.ex:101:57 Corpus query/1 integer_shift `2` → `1` => -from(p in Post, where: p.id == 1, or_where: p.id == 2, select: p) ¦ +from(p in Post, where: p.id == 1, or_where: p.id == 1, select: p)
+m150 corpus.ex:122:5 Corpus extras/2 return_nil `m` → `nil` => -m ¦ +nil
+m151 corpus.ex:118:7 Corpus extras/2 statement_removal `q |> where` → `(removed)` => -q |> where
+m152 corpus.ex:119:7 Corpus extras/2 statement_removal `q |> limit(1)` → `(removed)` => -q |> limit(1)
+m153 corpus.ex:120:5 Corpus extras/2 statement_removal `from(Post)` → `(removed)` => -from(Post)
+m154 corpus.ex:110:7 Corpus extras/2 element_removal `k: 1` → `(removed)` => -%{k: 1} ¦ +%{}
+m155 corpus.ex:110:10 Corpus extras/2 integer_shift `1` → `2` => -%{k: 1} ¦ +%{k: 2}
+m156 corpus.ex:110:10 Corpus extras/2 integer_shift `1` → `0` => -%{k: 1} ¦ +%{k: 0}
+m157 corpus.ex:112:6 Corpus extras/2 integer_shift `1` → `2` => -{1, 2, 3} ¦ +{2, 2, 3}
+m158 corpus.ex:112:6 Corpus extras/2 integer_shift `1` → `0` => -{1, 2, 3} ¦ +{0, 2, 3}
+m159 corpus.ex:112:9 Corpus extras/2 integer_shift `2` → `3` => -{1, 2, 3} ¦ +{1, 3, 3}
+m160 corpus.ex:112:9 Corpus extras/2 integer_shift `2` → `1` => -{1, 2, 3} ¦ +{1, 1, 3}
+m161 corpus.ex:112:12 Corpus extras/2 integer_shift `3` → `4` => -{1, 2, 3} ¦ +{1, 2, 4}
+m162 corpus.ex:112:12 Corpus extras/2 integer_shift `3` → `2` => -{1, 2, 3} ¦ +{1, 2, 2}
+m163 corpus.ex:116:7 Corpus extras/2 guard_removal `when b` → `(no guard)` => -a when b ¦ +a
+m164 corpus.ex:119:16 Corpus extras/2 integer_shift `1` → `2` => -q |> limit(1) ¦ +q |> limit(2)
+m165 corpus.ex:119:16 Corpus extras/2 integer_shift `1` → `0` => -q |> limit(1) ¦ +q |> limit(0)
+m166 corpus.ex:127:5 Corpus two/0 return_nil `:b` → `nil` => -:b ¦ +nil
+m167 corpus.ex:126:8 Corpus two/0 statement_removal `IO.puts("a")` → `(removed)` => -IO.puts("a")
+m168 corpus.ex:126:13 Corpus two/0 string_empty `"a"` → `""` => -IO.puts("a") ¦ +IO.puts("")
+m169 corpus.ex:131:5 Corpus multi/0 return_nil `fn 1, 2 -> :x _, _ -> :y end` → `nil` => -fn ¦ -1, 2 -> :x ¦ -_, _ -> :y ¦ -end ¦ +nil
+m170 corpus.ex:132:12 Corpus multi/0 clause_removal `fn 1, 2 ->` → `(removed)` => -1, 2 -> :x
+m171 corpus.ex:133:12 Corpus multi/0 clause_removal `fn _, _ ->` → `(removed)` => -_, _ -> :y
+m172 corpus.ex:132:7 Corpus multi/0 integer_shift `1` → `2` => -1, 2 -> :x ¦ +2, 2 -> :x
+m173 corpus.ex:132:7 Corpus multi/0 integer_shift `1` → `0` => -1, 2 -> :x ¦ +0, 2 -> :x
+m174 corpus.ex:132:10 Corpus multi/0 integer_shift `2` → `3` => -1, 2 -> :x ¦ +1, 3 -> :x
+m175 corpus.ex:132:10 Corpus multi/0 integer_shift `2` → `1` => -1, 2 -> :x ¦ +1, 1 -> :x
+m176 corpus.ex:137:24 Corpus private/1 return_nil `x` → `nil` => -x ¦ +nil
+m177 corpus.ex:139:43 Corpus guarded/1 return_nil `x` → `nil` => -x ¦ +nil
+m178 corpus.ex:139:19 Corpus guarded/1 guard_removal `when is_integer(x)` → `(no guard)` => -defp guarded(x) when is_integer(x) do ¦ +defp guarded(x) do
+m179 corpus.ex:140:20 Corpus unnamed/0 return_nil `5` → `nil` => -5 ¦ +nil
+m180 corpus.ex:140:20 Corpus unnamed/0 integer_shift `5` → `6` => -5 ¦ +6
+m181 corpus.ex:140:20 Corpus unnamed/0 integer_shift `5` → `4` => -5 ¦ +4
+m182 corpus.ex:143:8 Corpus block_nil/0 statement_removal `IO.puts("x")` → `(removed)` => -IO.puts("x")
+m183 corpus.ex:143:13 Corpus block_nil/0 string_empty `"x"` → `""` => -IO.puts("x") ¦ +IO.puts("")
+m184 corpus.ex:148:5 Corpus unquoted/1 return_nil `def unquote(name)(x) do x end` → `nil` => -def unquote(name)(x) do ¦ -x ¦ -end ¦ +nil
+m185 corpus.ex:148:31 Corpus  return_nil `x` → `nil` => -x ¦ +nil
+m186 corpus.ex:152:24 Corpus.Inner deep/1 return_nil `x - 1` → `nil` => -x - 1 ¦ +nil
+m187 corpus.ex:152:24 Corpus.Inner deep/1 arithmetic_swap `-` → `+` => -x - 1 ¦ +x + 1
+m188 corpus.ex:152:26 Corpus.Inner deep/1 integer_shift `1` → `2` => -x - 1 ¦ +x - 2
+m189 corpus.ex:152:26 Corpus.Inner deep/1 integer_shift `1` → `0` => -x - 1 ¦ +x - 0
+m190 corpus.ex:153:39 Corpus.Inner.Deeper go/0 return_nil `0` → `nil` => -0 ¦ +nil
+m191 corpus.ex:153:39 Corpus.Inner.Deeper go/0 integer_shift `0` → `1` => -0 ¦ +1
+m192 corpus.ex:153:39 Corpus.Inner.Deeper go/0 integer_shift `0` → `-1` => -0 ¦ +-1
+m193 corpus.ex:157:20 Corpus.Child child/0 return_nil `1` → `nil` => -1 ¦ +nil
+m194 corpus.ex:157:20 Corpus.Child child/0 integer_shift `1` → `2` => -1 ¦ +2
+m195 corpus.ex:157:20 Corpus.Child child/0 integer_shift `1` → `0` => -1 ¦ +0
+m196 corpus.ex:161:18 ? dyn/0 return_nil `1` → `nil` => -1 ¦ +nil
+m197 corpus.ex:161:18 ? dyn/0 integer_shift `1` → `2` => -1 ¦ +2
+m198 corpus.ex:161:18 ? dyn/0 integer_shift `1` → `0` => -1 ¦ +0
+m199 corpus.ex:165:27 Corpus to_string/1 return_nil `"corpus #{c.count}"` → `nil` => -"corpus #{c.count}" ¦ +nil
+m200 corpus.ex:165:27 Corpus to_string/1 string_empty `"corpus #{c.count}"` → `""` => -"corpus #{c.count}" ¦ +""
+m201 corpus.ex:174:25 Corpus last_call/0 return_nil `IO.puts("last")` → `nil` => -IO.puts("last") ¦ +nil
+m202 corpus.ex:174:30 Corpus last_call/0 string_empty `"last"` → `""` => -IO.puts("last") ¦ +IO.puts("")
+m203 corpus.ex:178:14 :erlang_style f/0 return_nil `1` → `nil` => -1 ¦ +nil
+m204 corpus.ex:178:14 :erlang_style f/0 integer_shift `1` → `2` => -1 ¦ +2
+m205 corpus.ex:178:14 :erlang_style f/0 integer_shift `1` → `0` => -1 ¦ +0
