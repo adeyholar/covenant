@@ -45,7 +45,7 @@ defmodule Covenant.Parser.Primitive do
   @setext ~r/^ {0,3}(=+|-+)[ \t]*$/
   @contract_comment ~r/^\s*#\s*Contract:\s*(.*)$/
   @above ~r/^\s*(#|@)/
-  @unit ~S"[A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*\.[a-z_][A-Za-z0-9_]*[?!]?/\d+"
+  @unit ~S"[A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*(?:\.[a-z_][A-Za-z0-9_]*[?!]?/\d+)?"
   @declaration Regex.compile!("^(#{@unit}):[ \\t]+(.+)$")
   @occurrence ~r/^(.*\S)[ \t]+#([1-9][0-9]*)$/
   @arrow ~r/\s(?:->|→)\s/u
@@ -275,8 +275,19 @@ defmodule Covenant.Parser.Primitive do
     end
   end
 
-  defp setext_above?([%{kind: :line, text: text} | _]), do: String.trim(text) != ""
+  # CommonMark: a Setext underline belongs to a plain paragraph. A paragraph holding a list item
+  # (or a block quote) is not one: `- **A1** must ...` then `---` is an item and a thematic break.
+  defp setext_above?([%{kind: :line, text: text} | _] = acc) do
+    String.trim(text) != "" and
+      not (acc
+           |> Enum.take_while(&(&1.kind == :line and String.trim(&1.text) != ""))
+           |> Enum.any?(&container_start?(&1.text)))
+  end
+
   defp setext_above?(_), do: false
+
+  defp container_start?(text),
+    do: Regex.match?(~r/^\s*(?:[-*+]|\d{1,9}[.)]|>)(?:\s|$)/, text)
 
   defp closes?(text, marker) do
     char = String.first(marker)
@@ -293,7 +304,8 @@ defmodule Covenant.Parser.Primitive do
   `unpromised` block declares a survivor.
 
   * `Unit: from -> to` declares the one mutant of the unit with that change.
-    A unit is `Module.function/arity`; the change is the mutation as
+    A unit is `Module.function/arity`, or a bare `Module` for a mutation outside
+    any function (`@label "hello"`); the change is the mutation as
     `mix covenant.mutate` prints it (`→` and backticks around `from` and `to`
     accepted). When several of the unit's mutants share the change, an
     occurrence suffix picks one: `Unit: from -> to #2` is the second of them in
