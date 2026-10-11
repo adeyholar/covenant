@@ -354,7 +354,7 @@
         "covenant.contract.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 6,
           "status": "active",
           "testable": true,
           "tests": [
@@ -362,6 +362,7 @@
             "test derives component ids from paths",
             "test loads the fixture Contract: components, records, ceilings, provenance",
             "test looks obligations up by id",
+            "test prose under the contracts directory (notes, ADRs, other YAML) is not an error",
             "test records without a component file are still loaded"
           ]
         },
@@ -656,12 +657,13 @@
         "covenant.mutate.I16": {
           "failing": 0,
           "kind": "functional",
-          "passing": 3,
+          "passing": 4,
           "status": "active",
           "testable": true,
           "tests": [
             "test a finished test reports its duration in milliseconds, rounded up",
             "test a mutant that loops the timeout is measured from the baseline, --timeout wins, and --fail-fast judges a timeout by the whole suite",
+            "test the baseline runs under --timeout, else the project's ExUnit timeout, else 60 seconds",
             "test the default timeout is five times the slowest baseline test, never under a second"
           ]
         },
@@ -907,12 +909,13 @@
         "covenant.primitive.I2": {
           "failing": 0,
           "kind": "functional",
-          "passing": 3,
+          "passing": 4,
           "status": "active",
           "testable": true,
           "tests": [
             "test a covers function reference is satisfied by a public macro and creates no atom",
             "test a covers line is a module, a tree or a function, and nothing else",
+            "test a covers module whose atom is new but whose beam is on the code path exists",
             "test covers blocks count only in README.md, and declaration blocks only in mutants.md"
           ]
         },
@@ -1042,14 +1045,17 @@
         "covenant.regen.I4": {
           "failing": 0,
           "kind": "functional",
-          "passing": 11,
+          "passing": 14,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a contract test outside the root is recorded relative to the pack, and a re-run succeeds",
             "test a file at the out path is refused",
+            "test a marker listing paths outside the pack never deletes them",
             "test a missing or empty directory is written, and the pack carries the marker",
             "test a re-run clears exactly the files the marker lists and prunes the emptied directories",
             "test a re-run refuses a pack directory that holds the agent's files and deletes nothing",
+            "test an empty or blank marker is not a pack: refused, nothing deleted",
             "test an unknown component is an error listing the known ones",
             "test clearing a pack unlinks symlinks without following them",
             "test find_tests matches on the component declaration, through globs",
@@ -1260,10 +1266,11 @@
         "covenant.static.I7": {
           "failing": 0,
           "kind": "functional",
-          "passing": 1,
+          "passing": 2,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a brace test_pattern is an alternation, not literal text",
             "test expand follows the project's test_pattern"
           ]
         }
@@ -1373,14 +1380,18 @@
         "covenant.tasks.I9": {
           "failing": 0,
           "kind": "functional",
-          "passing": 13,
+          "passing": 18,
           "status": "active",
           "testable": true,
           "tests": [
             "test COVENANT_CONTRACTS_DIR outranks the configured contracts_dir",
             "test a --test-path typed on the command line is relative to the working directory",
             "test a Mix project nested in another repository is its own root, never the parent's",
+            "test a commented-out apps_path declares nothing",
+            "test a computed apps_path counts only for a directory named apps",
+            "test a literal apps_path naming another directory is not this app's umbrella",
             "test an umbrella app's root is the umbrella root, and a nested contracts_dir keeps the root",
+            "test apps_path is read as a double-quoted, single-quoted or ~c string",
             "test mix covenant.check --contracts DIR keeps the root: a glob ceiling is counted from the project",
             "test mix covenant.check --static run from an app reads the tests of every app (two of them)",
             "test mix covenant.check run from an app counts a glob ceiling against the root",
@@ -1389,7 +1400,8 @@
             "test mix covenant.conditions run from an app resolves file conditions and mix.lock against the root",
             "test mix covenant.mutate run from an app finds the app's contract tests and mutates its module",
             "test mix covenant.regen run from an app finds the app's contract tests and lays them out from the root",
-            "test sibling_dir: false (or nil) turns the sibling layout off"
+            "test sibling_dir: false (or nil) turns the sibling layout off",
+            "test sibling_dir: false in a project's config: check, conditions and regen all run"
           ]
         }
       }
