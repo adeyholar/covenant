@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 85,
+      "active": 96,
       "coverage": 1.0,
-      "covered": 85
+      "covered": 96
     },
     "system": {
       "active": 0,
@@ -133,37 +133,45 @@
         "covenant.check.I3": {
           "failing": 0,
           "kind": "functional",
-          "passing": 2,
+          "passing": 4,
           "status": "active",
           "testable": true,
           "tests": [
             "test a failing or invalid tagged test fails; the obligation is not covered",
-            "test skipped and excluded tests count as tagged but not as coverage"
+            "test a passing test beside a skipped one is enough; static mode asks only for a tagged test",
+            "test an obligation whose tagged tests were all skipped or excluded has no passing test and fails",
+            "test every failed run of a parameterized test is reported, whichever result comes first"
           ]
         },
         "covenant.check.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 11,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a file target that leaves the project root is an error, never resolved",
+            "test a retired exception is not checked",
+            "test a stale exception fails: missing function, missing module, missing file",
+            "test an `Elixir.`-prefixed name is the same module",
+            "test an absolute or `~` file target is rejected as not relative to the root",
+            "test an unreadable exception target is reported",
+            "test describe renders the parsed target",
+            "test exception targets that exist pass: a function, a module, a file",
+            "test exists? checks loaded code and the file system",
+            "test parses functions, modules and files",
+            "test target names never become atoms; an unknown module is not a crash"
+          ]
+        },
+        "covenant.check.I5": {
           "failing": 0,
           "kind": "functional",
           "passing": 7,
           "status": "active",
           "testable": true,
           "tests": [
-            "test a retired exception is not checked",
-            "test a stale exception fails: missing function, missing module, missing file",
-            "test an unreadable exception target is reported",
-            "test describe renders the parsed target",
-            "test exception targets that exist pass: a function, a module, a file",
-            "test exists? checks loaded code and the file system",
-            "test parses functions, modules and files"
-          ]
-        },
-        "covenant.check.I5": {
-          "failing": 0,
-          "kind": "functional",
-          "passing": 5,
-          "status": "active",
-          "testable": true,
-          "tests": [
+            "test a glob counter that is absolute or climbs out of the root cannot be counted",
+            "test a glob pattern that is absolute or contains .. is an error naming it",
             "test a module counter that raises leaves its ceiling unchecked, a warning and never a problem",
             "test a module counter that raises, throws or exits is unchecked, naming what happened",
             "test a scope ceiling exceeded fails, one at the limit passes, an uncountable one fails",
@@ -219,19 +227,20 @@
       }
     },
     "covenant.conditions": {
-      "active": 6,
+      "active": 9,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 6,
+      "covered": 9,
       "form": "light",
       "obligations": {
         "covenant.conditions.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 6,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a map or list in name, version or path is suspect with a message, never a crash",
             "test a requirement may leave out the minor and patch numbers after a comparison operator",
             "test dep: present, present with a matching or failing requirement, missing, unversioned",
             "test env: set or not",
@@ -242,11 +251,12 @@
         "covenant.conditions.I2": {
           "failing": 0,
           "kind": "functional",
-          "passing": 4,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
             "test a condition without a check is unchecked",
+            "test a file check whose path is not a string is incomplete, not evaluated",
             "test a requirement that cannot be parsed and a version that cannot be compared are suspect",
             "test unknown or incomplete checks are suspect, never silently ok",
             "test value: only Module.fun/0 with equals and a path of keys is a complete check"
@@ -295,33 +305,116 @@
             "test value: a module that is not compiled in this VM is unchecked with a reason, not suspect",
             "test value: a value that equals the record holds, and the outcome says what was found"
           ]
+        },
+        "covenant.conditions.I7": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a module counter in Elixir or OTP is refused, never called",
+            "test value: a call into Elixir or OTP is refused as suspect, never made"
+          ]
+        },
+        "covenant.conditions.I8": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test an absolute file path inside the root is checked where it is",
+            "test file: a path that leaves the project root is suspect even when the file exists"
+          ]
+        },
+        "covenant.conditions.I9": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a module counter written `Elixir.Example.Scope` is found",
+            "test a module counter's names never become atoms, and an unknown module is an error",
+            "test value: a string key whose atom does not exist is still found",
+            "test value: an `Elixir.`-prefixed module name is the same module",
+            "test value: names from a record never become atoms"
+          ]
         }
       }
     },
     "covenant.contract": {
-      "active": 9,
+      "active": 11,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 9,
+      "covered": 11,
       "form": "light",
       "obligations": {
         "covenant.contract.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 4,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a nested or misnamed Markdown/YAML file is an error naming it, known files are not",
             "test derives component ids from paths",
             "test loads the fixture Contract: components, records, ceilings, provenance",
             "test looks obligations up by id",
             "test records without a component file are still loaded"
           ]
         },
+        "covenant.contract.I10": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 16,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a fence indented four spaces opens nothing",
+            "test a nested bullet under an enum field does not join its value",
+            "test an id-shaped heading written with a colon is an error, even with plain bullets after it",
+            "test malformed obligation blocks are rejected, never skipped a `+` bullet is a field",
+            "test malformed obligation blocks are rejected, never skipped a bare `## I1 - Overview` heading is not an obligation heading",
+            "test malformed obligation blocks are rejected, never skipped a block whose fields are all malformed variants does not vanish",
+            "test malformed obligation blocks are rejected, never skipped a closing fence is indented at most three spaces more than the opening",
+            "test malformed obligation blocks are rejected, never skipped a code fence that is never closed is an error at its opening line",
+            "test malformed obligation blocks are rejected, never skipped a fence closes only with the same character and at least the same length",
+            "test malformed obligation blocks are rejected, never skipped a field line outside any obligation block is an error",
+            "test malformed obligation blocks are rejected, never skipped a field repeated in one block is an error at the repeat",
+            "test malformed obligation blocks are rejected, never skipped a known field in the wrong case or with the colon outside the bold is an error",
+            "test malformed obligation blocks are rejected, never skipped an id-shaped heading at the wrong level is an error",
+            "test malformed obligation blocks are rejected, never skipped an indented block's fields are not merged into the block above",
+            "test malformed obligation blocks are rejected, never skipped an obligation heading indented by one to three spaces is an error",
+            "test malformed obligation blocks are rejected, never skipped lowercase bold-label bullets in prose are prose; a known field there still fails"
+          ]
+        },
+        "covenant.contract.I11": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 12,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a front matter YAML error without a line is an error, not a crash",
+            "test a mapping where text is expected is an error, not a crash",
+            "test a merge key is an error, not silently ignored",
+            "test a merge key is an error, not silently ignored",
+            "test a repeated mapping key is an error, not silently resolved",
+            "test a repeated mapping key is an error, not silently resolved",
+            "test a second YAML document is an error, not silently dropped",
+            "test a second YAML document is an error, not silently dropped",
+            "test an alternative's rejected reason must be text",
+            "test fields of the wrong type are errors, not crashes",
+            "test front matter with duplicate keys or several documents is an error",
+            "test keys of different type are not repeats: 1 and \"1\", true and \"true\""
+          ]
+        },
         "covenant.contract.I2": {
           "failing": 0,
           "kind": "functional",
-          "passing": 7,
+          "passing": 8,
           "status": "active",
           "testable": true,
           "tests": [
@@ -331,6 +424,7 @@
             "test heavy form keeps unknown fields and strips backticks from record and target",
             "test heavy form parses the baseline intent into a component with obligations and sections",
             "test light form parses obligations anywhere after Purpose, including exception blocks",
+            "test malformed obligation blocks are rejected, never skipped a leading byte-order mark does not hide the front matter",
             "test system form requires no sections and reads obligations under any heading"
           ]
         },
@@ -444,10 +538,10 @@
       }
     },
     "covenant.mutate": {
-      "active": 18,
+      "active": 23,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 18,
+      "covered": 23,
       "form": "light",
       "obligations": {
         "covenant.mutate.I1": {
@@ -487,13 +581,15 @@
         "covenant.mutate.I11": {
           "failing": 0,
           "kind": "functional",
-          "passing": 7,
+          "passing": 9,
           "status": "active",
           "testable": true,
           "tests": [
             "test a component that names no module cannot be planned",
             "test a mutant survives to_map and from_map, whatever its verdict",
+            "test a mutant with an unknown operator is an error, not a boolean_flip",
             "test a primitive's plan takes the tests beside its README, and covered_by? applies the most specific covers",
+            "test a results file with a mutant of an unknown operator is an error naming the file, not a crash",
             "test a worker's results survive JSON and merging puts the mutants in id order",
             "test every outcome and the defaults of a worker's results survive JSON",
             "test from_map takes the index when it is given",
@@ -539,13 +635,22 @@
         "covenant.mutate.I15": {
           "failing": 0,
           "kind": "functional",
-          "passing": 3,
+          "passing": 12,
           "status": "active",
           "testable": true,
           "tests": [
-            "test a worker directory links every root entry but tmp and has a tmp of its own",
+            "test a _build or deps directory is linked only beside a mix.exs; node_modules anywhere",
+            "test a base directory under the project root is refused, except under its top-level tmp",
+            "test a worker directory holds copies of the sources, links the big dirs and has a tmp of its own",
+            "test an unreadable entry is left out with a warning, and a failed build leaves no directory",
+            "test build and dependency trees are links at any depth, a nested .git is left out, links are copied as links",
+            "test building refuses a directory that already exists",
             "test removing it deletes the links, never what they point at",
-            "test within runs in the directory and restores the previous one, even on a raise"
+            "test removing it survives a read-only directory a test left behind",
+            "test symlinks never lead a write into the project, and none dangles",
+            "test the copy leaves out the caches and tools' directories at the top level, and the dialyzer PLTs",
+            "test within runs in the directory and restores the previous one, even on a raise",
+            "test writes and deletes by relative path land in the copy, never in the project"
           ]
         },
         "covenant.mutate.I16": {
@@ -587,10 +692,24 @@
             "test the time left is rounded to the nearest second"
           ]
         },
+        "covenant.mutate.I19": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a mutant that stops an application it can restart does not stop the run",
+            "test a mutant that stops an application that will not restart ends the run, naming the mutant",
+            "test a suite whose teardown outlasts a mutant's timeout is measured with it: no unreliable worker, no timeout survivor",
+            "test a test that leaves a read-only directory in its tmp_dir does not make the next run of it fail",
+            "test restore reloads every original it can and names those that will not load"
+          ]
+        },
         "covenant.mutate.I2": {
           "failing": 0,
           "kind": "functional",
-          "passing": 9,
+          "passing": 11,
           "status": "active",
           "testable": true,
           "tests": [
@@ -598,11 +717,65 @@
             "test a module whose name is not an alias or an atom is reported as ?",
             "test a mutant needs its location, operator, change and index",
             "test a mutant reports the file, line and column of its node, its module and its function",
+            "test a nested module is named by its expanded alias: __MODULE__ and an absolute Elixir. alias",
             "test a nested skipped form does not end the skipping early, and a source without a file name says nofile",
+            "test an absolute alias keeps its dots, a computed alias part is described, and code after a def has no function",
             "test an attribute read is not a documentation attribute, other attributes are mutated, code outside a module is not",
             "test documentation, specs, types, compiler attributes, macros, guards, use and quote are not mutated",
             "test ids run m001, m002, ... in walk order and widen past m999; the walk is deterministic",
             "test only the target modules are mutated, nested modules by their own name"
+          ]
+        },
+        "covenant.mutate.I20": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 7,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a failing :on_timeout callback does not let a stray mutant process write into the project",
+            "test a mutant killed by an early test that a later one then hangs is a partial kill, not a timeout",
+            "test a mutant that loops outside ExUnit's timeouts is a timeout, and the worker stops with exit 3",
+            "test a mutant's budget is ten baselines, five seconds and the per-test timeout, and a stopped worker exits 3",
+            "test a stopped worker leaves no directory behind: the copy is removed, and the halt follows",
+            "test a timed-out mutant's stray processes never write into the project",
+            "test many tests that each hit the per-test timeout finish, and are not a hang"
+          ]
+        },
+        "covenant.mutate.I21": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a run with nothing to mutate is an error, and a module without mutants is warned about",
+            "test the modules of a file that yield no mutant are the ones to warn about"
+          ]
+        },
+        "covenant.mutate.I22": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test --jobs 1 runs the mutants in a private copy: a mutant that writes by a relative path leaves the project untouched",
+            "test a mutant that never ends is a timeout, the worker is respawned for the rest, and every mutant is reported",
+            "test two runs of one component at once do not clobber each other's raw results"
+          ]
+        },
+        "covenant.mutate.I23": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a worker halts with status 1 when its standard input ends, and a port's program sees that end when the port closes",
+            "test a worker whose parent dies removes its copy of the project",
+            "test jobs are capped at the number of mutants, and a count over the schedulers is warned about",
+            "test when one worker fails the others are stopped, not waited for"
           ]
         },
         "covenant.mutate.I3": {
@@ -684,15 +857,18 @@
         "covenant.mutate.I9": {
           "failing": 0,
           "kind": "functional",
-          "passing": 14,
+          "passing": 17,
           "status": "active",
           "testable": true,
           "tests": [
             "test #k counts every mutant of the unit sharing the change in source order, killed or not",
             "test a change is matched as written, arrows of its own and all, and a wildcard is a declaration without one",
             "test a declaration a test kills is contradicted, and one matching no survivor is unmatched",
+            "test a declaration is pinned to the one mutant of its unit with that change",
             "test a declaration matches the survivors of its unit by from and to, or all of them as a wildcard",
             "test a declaration names exactly one mutant, and is ambiguous when several share its change",
+            "test a declaration that several mutants share needs its occurrence, counted in source order",
+            "test a pinned declaration matches its one mutant, and an unmatched one matches none",
             "test a survivor inside the target of an active exception is a decision-hole without an entry",
             "test a survivor's mutants.md line carries #k when other mutants of its unit share the change",
             "test an ambiguity names the change as the line wrote it",
@@ -716,7 +892,7 @@
         "covenant.primitive.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 6,
           "status": "active",
           "testable": true,
           "tests": [
@@ -724,16 +900,18 @@
             "test a fence that is never closed is an error in a README and in mutants.md",
             "test a line holding a bold id that isn't `- **A1** text` is an error, never skipped",
             "test a primitive is a subdirectory with a README, and its obligations are its `- **A1**` lines",
-            "test an obligation line inside a fence, a repeated id and a bad directory name are refused"
+            "test an obligation line inside a fence, a repeated id and a bad directory name are refused",
+            "test bold words in prose are prose; only a list item opening with a bold id is a candidate"
           ]
         },
         "covenant.primitive.I2": {
           "failing": 0,
           "kind": "functional",
-          "passing": 2,
+          "passing": 3,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a covers function reference is satisfied by a public macro and creates no atom",
             "test a covers line is a module, a tree or a function, and nothing else",
             "test covers blocks count only in README.md, and declaration blocks only in mutants.md"
           ]
@@ -751,15 +929,18 @@
         "covenant.primitive.I4": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 8,
           "status": "active",
           "testable": true,
           "tests": [
             "test Covenant.Case turns the comments into the test's obligation tag, merged with @tag",
+            "test a Contract comment not directly above a test is a compile error at its line",
             "test a test that names nothing, an unknown id or another primitive's id is a compile error",
+            "test ids on a Contract comment are split on commas only",
             "test outside the sibling layout a Contract comment, and a module testing a primitive, are compile errors",
             "test outside the sibling layout a prose `# Contract:` comment is only a comment",
-            "test the ids come from the comment and attribute lines directly above a test"
+            "test the ids come from the comment and attribute lines directly above a test",
+            "test trailing prose on a Contract comment is an unknown obligation, not bogus ids"
           ]
         },
         "covenant.primitive.I5": {
@@ -799,7 +980,7 @@
             "test a declaration whose occurrence is past the last fails the run",
             "test a pack lays a primitive out from the sibling layout's parent, and never replaces the project",
             "test mix covenant.mutate mutates what a primitive covers and sorts its survivors from mutants.md",
-            "test mix covenant.regen packs a primitive with its README, mutants.md, tests and stubs from its covers",
+            "test mix covenant.regen packs a primitive with its README, tests, helper and stubs from its covers, and not mutants.md",
             "test the most specific covers reference decides which primitive a mutant belongs to"
           ]
         },
@@ -825,20 +1006,24 @@
         "covenant.regen.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 1,
+          "passing": 4,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a primitive whose covered code is not loadable says its signatures are unavailable",
+            "test a primitive's pack has its subdirectory tests, convention and helper, and no mutants.md",
+            "test the prompt does not claim there are no signatures when they were all skipped",
             "test writes the full pack for a heavy component"
           ]
         },
         "covenant.regen.I2": {
           "failing": 0,
           "kind": "functional",
-          "passing": 2,
+          "passing": 3,
           "status": "active",
           "testable": true,
           "tests": [
+            "test default arguments render as one head with the defaults and the stub compiles",
             "test reads signatures in both forms from the public surface",
             "test stubs compile and raise until implemented"
           ]
@@ -857,13 +1042,21 @@
         "covenant.regen.I4": {
           "failing": 0,
           "kind": "functional",
-          "passing": 3,
+          "passing": 11,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a file at the out path is refused",
+            "test a missing or empty directory is written, and the pack carries the marker",
+            "test a re-run clears exactly the files the marker lists and prunes the emptied directories",
+            "test a re-run refuses a pack directory that holds the agent's files and deletes nothing",
             "test an unknown component is an error listing the known ones",
+            "test clearing a pack unlinks symlinks without following them",
             "test find_tests matches on the component declaration, through globs",
-            "test rewrites an existing pack directory from scratch"
+            "test find_tests reads the declaration from the syntax tree",
+            "test re-running into its own previous pack replaces it",
+            "test refuses a non-empty directory without the marker and deletes nothing",
+            "test rewrites an existing pack directory, refusing files the marker does not list"
           ]
         },
         "covenant.regen.I5": {
@@ -900,13 +1093,14 @@
         "covenant.regen.I8": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 6,
           "status": "active",
           "testable": true,
           "tests": [
             "test a beam is classified by the directory it lies in, umbrella apps included",
             "test a loadable module whose beam lies anywhere else is stubbed and reported",
             "test a module that is not loadable is foreign in a dependency's namespace, else stubbed or unplaced",
+            "test names in the Contract never become atoms",
             "test the in_umbrella dependencies are read from a deps list",
             "test without a list, ownership follows where a module lives"
           ]
@@ -956,13 +1150,15 @@
         "covenant.results.I3": {
           "failing": 0,
           "kind": "functional",
-          "passing": 3,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
             "test a corrupt file is reported with its path",
+            "test a state that is not a test outcome (even a Covenant one, :tagged) decodes as invalid",
             "test an empty results dir is an error that says what to do",
-            "test decodes an unknown state as invalid"
+            "test decodes an unknown state as invalid",
+            "test read_dir skips JSON files that are not Covenant results documents"
           ]
         },
         "covenant.results.I4": {
@@ -978,44 +1174,54 @@
       }
     },
     "covenant.static": {
-      "active": 6,
+      "active": 7,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 6,
+      "covered": 7,
       "form": "light",
       "obligations": {
         "covenant.static.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 3,
+          "passing": 6,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a @tag before a for does not leak onto the next test",
+            "test a later @tag :obligation overrides an earlier string tag with `true`, which is a problem",
             "test reads string and list tags, @moduletag and @describetag, in ExUnit's precedence",
             "test scan/2 expands directories and globs to *_test.exs files, relative to a root",
+            "test two obligation keys in one @tag: the last wins, as in ExUnit",
             "test within a level the last obligation tag wins, as in ExUnit"
           ]
         },
         "covenant.static.I2": {
           "failing": 0,
           "kind": "functional",
-          "passing": 1,
+          "passing": 4,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a module without tags and without a readable use stays silent",
+            "test a wrapper listed in case_modules is read like use Covenant.Case",
+            "test an unlisted wrapper is a problem naming the module and the literal form static mode reads",
             "test helper modules are ignored and nested modules are read on their own"
           ]
         },
         "covenant.static.I3": {
           "failing": 0,
           "kind": "functional",
-          "passing": 3,
+          "passing": 7,
           "status": "active",
           "testable": true,
           "tests": [
+            "test @describetag outside a describe is an error, inside is fine",
+            "test a literal test name inside for is not a duplicate",
             "test an unparsable file is a problem at its line, not a crash",
-            "test duplicate test names and literal names inside a comprehension are problems",
-            "test non-literal tags and components, untagged and bodyless tests are problems at their lines"
+            "test duplicate test names are problems",
+            "test non-literal tags and components, untagged and bodyless tests are problems at their lines",
+            "test tests inside for, Enum.each, if, unless, case and cond are not credited and not errors",
+            "test two obligation keys in one @tag are a problem (the first is silently lost)"
           ]
         },
         "covenant.static.I4": {
@@ -1036,7 +1242,7 @@
           "testable": true,
           "tests": [
             "test Covenant.root/0 and Covenant.test_paths an absolute contracts_dir, config :root and COVENANT_ROOT win in that order",
-            "test Covenant.root/0 and Covenant.test_paths falls back to the working directory when no contracts directory is found",
+            "test Covenant.root/0 and Covenant.test_paths falls back to the Mix project directory when no contracts directory is found",
             "test Covenant.root/0 and Covenant.test_paths is the parent of the contracts directory from any directory under it"
           ]
         },
@@ -1049,6 +1255,16 @@
           "tests": [
             "test Covenant.root/0 and Covenant.test_paths configured test paths resolve against the root, from any directory under it",
             "test Covenant.root/0 and Covenant.test_paths typed test paths resolve against the working directory; none typed gives the configured ones"
+          ]
+        },
+        "covenant.static.I7": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test expand follows the project's test_pattern"
           ]
         }
       }
@@ -1063,10 +1279,14 @@
         "covenant.tasks.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 4,
+          "passing": 8,
           "status": "active",
           "testable": true,
           "tests": [
+            "test --no-run skips JSON files that are not Covenant results",
+            "test --results-dir naming a file is a clear error, not a File.Error",
+            "test a --test-path that matches nothing runs nothing and keeps the last results",
+            "test mix covenant.check --results-dir deletes only the Covenant result files it finds there",
             "test mix covenant.check relays a suite that prints bytes that aren't UTF-8, and keeps UTF-8 intact",
             "test mix covenant.check runs the contract suite, prints coverage, writes coverage.json and exits 0",
             "test mix covenant.check warns about a ceiling whose counter raises, writes coverage.json and exits 0",
@@ -1120,12 +1340,14 @@
         "covenant.tasks.I6": {
           "failing": 0,
           "kind": "functional",
-          "passing": 2,
+          "passing": 4,
           "status": "active",
           "testable": true,
           "tests": [
+            "test --static lists generated tests as skipped, uncredited, without failing",
             "test mix covenant.check --static passes tests that could not compile and fails bad tags precisely",
-            "test mix covenant.check --static reads the tests, runs none and writes only coverage.static.json"
+            "test mix covenant.check --static reads the tests, runs none and writes only coverage.static.json",
+            "test mix covenant.check --static runs when the project's lib does not compile"
           ]
         },
         "covenant.tasks.I7": {
@@ -1151,16 +1373,23 @@
         "covenant.tasks.I9": {
           "failing": 0,
           "kind": "functional",
-          "passing": 6,
+          "passing": 13,
           "status": "active",
           "testable": true,
           "tests": [
+            "test COVENANT_CONTRACTS_DIR outranks the configured contracts_dir",
             "test a --test-path typed on the command line is relative to the working directory",
-            "test mix covenant.check --static run from an app reads the tests of every app",
-            "test mix covenant.check run from an app runs the configured tests, handed to mix test relative to the app",
+            "test a Mix project nested in another repository is its own root, never the parent's",
+            "test an umbrella app's root is the umbrella root, and a nested contracts_dir keeps the root",
+            "test mix covenant.check --contracts DIR keeps the root: a glob ceiling is counted from the project",
+            "test mix covenant.check --static run from an app reads the tests of every app (two of them)",
+            "test mix covenant.check run from an app counts a glob ceiling against the root",
+            "test mix covenant.check run from an app runs the configured tests, run from the umbrella root, handed to mix test relative to it",
+            "test mix covenant.check run from one umbrella app runs every app's tests in that app's own VM",
             "test mix covenant.conditions run from an app resolves file conditions and mix.lock against the root",
             "test mix covenant.mutate run from an app finds the app's contract tests and mutates its module",
-            "test mix covenant.regen run from an app finds the app's contract tests and lays them out from the root"
+            "test mix covenant.regen run from an app finds the app's contract tests and lays them out from the root",
+            "test sibling_dir: false (or nil) turns the sibling layout off"
           ]
         }
       }
@@ -1176,8 +1405,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 85,
+    "active": 96,
     "coverage": 1.0,
-    "covered": 85
+    "covered": 96
   }
 }
