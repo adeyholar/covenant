@@ -141,6 +141,15 @@ defmodule Covenant.Case do
             known(Contract.component_ids(contract))
         )
 
+    if component.form == :primitive and Primitive.primitive_of(env.file, sibling) != component.id do
+      compile_error(
+        env.file,
+        env.line,
+        "#{inspect(env.module)} tests the primitive `#{component.id}`, whose Contract tests live " <>
+          "beside its README in #{Path.dirname(component.file)}"
+      )
+    end
+
     # The attribute accumulates newest first; tests are checked in definition order.
     {tests, _sources} =
       env.module
