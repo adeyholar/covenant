@@ -87,7 +87,7 @@ defmodule Covenant.Contract.Ceiling do
   defp existing_module(module) when is_atom(module), do: module
 
   defp existing_module(name) do
-    String.to_existing_atom("Elixir." <> name)
+    String.to_existing_atom("Elixir." <> String.replace_prefix(name, "Elixir.", ""))
   rescue
     ArgumentError -> nil
   end

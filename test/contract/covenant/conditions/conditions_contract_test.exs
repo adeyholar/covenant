@@ -424,6 +424,25 @@ defmodule Covenant.ConditionsContractTest do
     assert_raise ArgumentError, fn -> String.to_existing_atom(fun) end
   end
 
+  @tag obligation: "covenant.conditions.I9"
+  test "value: an `Elixir.`-prefixed module name is the same module", %{ctx: ctx} do
+    assert {:ok, "Elixir.Covenant.ExampleLimits.answer/0 is 42"} =
+             Conditions.evaluate(value("Elixir.Covenant.ExampleLimits.answer/0", 42), ctx)
+  end
+
+  @tag obligation: "covenant.conditions.I9"
+  test "a module counter written `Elixir.Example.Scope` is found" do
+    ceiling = %Ceiling{
+      name: "x",
+      ceiling: 5,
+      counter: {:module, "Elixir.Example.Scope", "event_kinds"},
+      file: "system/scope.yml",
+      line: 1
+    }
+
+    assert Ceiling.count(ceiling, []) == {:ok, 3}
+  end
+
   @tag obligation: "covenant.conditions.I6"
   test "value: a module that is not compiled in this VM is unchecked with a reason, not suspect",
        %{ctx: ctx} do

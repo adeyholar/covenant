@@ -32,7 +32,7 @@ defmodule Covenant.TargetContractTest do
 
   @tag obligation: "covenant.check.I4"
   test "a file target that leaves the project root is an error, never resolved" do
-    for path <- ["../elsewhere/lib/thing.ex", "lib/../../thing.ex", "/etc/hosts", "~/x.ex"] do
+    for path <- ["../elsewhere/lib/thing.ex", "lib/../../thing.ex"] do
       assert {:error, message} = Target.parse(path)
       assert message =~ "outside the project root"
     end
@@ -61,6 +61,22 @@ defmodule Covenant.TargetContractTest do
     refute Target.exists?(known, ".")
     assert_raise ArgumentError, fn -> String.to_existing_atom("Elixir." <> module) end
     assert_raise ArgumentError, fn -> String.to_existing_atom(fun) end
+  end
+
+  @tag obligation: "covenant.check.I4"
+  test "an `Elixir.`-prefixed name is the same module" do
+    assert Target.parse("Elixir.Example.Greeter.clamp/1") ==
+             {:ok, {:function, Example.Greeter, "clamp", 1}}
+
+    assert Target.parse("Elixir.Example.Greeter") == {:ok, {:module, Example.Greeter}}
+  end
+
+  @tag obligation: "covenant.check.I4"
+  test "an absolute or `~` file target is rejected as not relative to the root" do
+    for path <- [Path.expand("mix.exs"), "/etc/hosts", "~/x.ex"] do
+      assert {:error, message} = Target.parse(path)
+      assert message =~ "must be a path relative to the project root"
+    end
   end
 
   @tag obligation: "covenant.check.I4"
