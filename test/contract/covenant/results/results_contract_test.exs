@@ -32,7 +32,7 @@ defmodule Covenant.ResultsContractTest do
     assert {:error, message} = Results.read_dir(dir)
     assert message =~ "x.json: invalid JSON"
 
-    File.write!(Path.join(dir, "x.json"), ~s({"tests": "no"}))
+    File.write!(Path.join(dir, "x.json"), ~s({"covenant": "0", "app": "x", "tests": "no"}))
     assert {:error, message} = Results.read_dir(dir)
     assert message =~ "not a Covenant results file"
   end
@@ -79,5 +79,34 @@ defmodule Covenant.ResultsContractTest do
                 on_exit(fn -> File.rm(path) end)
                 Results.read_file(path)
               end).()
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.results.I3"
+  test "a state that is not a test outcome (even a Covenant one, :tagged) decodes as invalid",
+       %{tmp_dir: dir} do
+    path = Path.join(dir, "a.json")
+
+    File.write!(
+      path,
+      ~s({"covenant":"0","app":"a","tests":[{"module":"M","name":"t","obligations":["x.I1"],"state":"tagged"},{"module":"M","name":"u","obligations":["x.I1"],"state":"passed"}]})
+    )
+
+    assert {:ok, "a", [%Entry{state: :invalid}, %Entry{state: :passed}]} = Results.read_file(path)
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.results.I3"
+  test "read_dir skips JSON files that are not Covenant results documents", %{tmp_dir: dir} do
+    %Results{tests: [a]} = ResultsBuilder.results(["demo.widget.I1"])
+    Results.write(dir, "core", [a])
+    File.write!(Path.join(dir, "package.json"), ~s({"name": "someone else's"}))
+    File.write!(Path.join(dir, "list.json"), "[1, 2]")
+
+    assert {:ok, %Results{apps: ["core"], tests: [^a]}} = Results.read_dir(dir)
+
+    File.rm!(Path.join(dir, "core.json"))
+    assert {:error, message} = Results.read_dir(dir)
+    assert message =~ "no contract test results"
   end
 end

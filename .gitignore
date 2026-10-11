@@ -38,6 +38,7 @@ covenant-*.tar
 
 # Umbrella fixture app output (test/fixtures/umbrella_project/apps/shop)
 /test/fixtures/umbrella_project/apps/shop/tmp/
+/test/fixtures/umbrella_project/apps/other/tmp/
 
 # Editor tooling
 .elixir_ls/

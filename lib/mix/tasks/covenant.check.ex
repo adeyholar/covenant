@@ -60,13 +60,19 @@ defmodule Mix.Tasks.Covenant.Check do
   `Covenant.results_dir/0`. With `--no-run` the last results are read instead,
   which also works when `test/test_helper.exs` already lists `Covenant.Formatter`.
 
+  In an umbrella, `mix test` runs from the umbrella root (whichever app the task ran from), so every
+  app's contract tests run in that app's own VM. A `--test-path` that matches nothing runs nothing and
+  leaves the last results alone.
+
   ## Options
 
   * `--no-run` — do not run the suite, read the last results;
-  * `--contracts DIR` — the contracts directory (default: config, then `contracts`);
+  * `--contracts DIR` — the contracts directory (default: config, then `contracts`); it never
+    moves the project root, and the suite is handed it (`COVENANT_CONTRACTS_DIR`, `COVENANT_ROOT`);
   * `--test-path PATH` — a contract test path or glob, relative to the current directory
     (repeatable; default: config, then `test/contract`, relative to `Covenant.root/0`);
-  * `--results-dir DIR` — where results are read from and written to;
+  * `--results-dir DIR` — where results are read from and written to (a file there is an error;
+    with `--no-run` a JSON file that is not a Covenant results document is skipped);
   * `--static` — read the tests instead of running them (see above);
   * `--root DIR` — with `--static`, the root file targets and globs resolve against.
   """
@@ -98,34 +104,46 @@ defmodule Mix.Tasks.Covenant.Check do
     contracts_dir = opts[:contracts] || Covenant.contracts_dir()
     results_dir = opts[:results_dir] || Covenant.results_dir()
 
-    # before the overrides below: `--contracts` redirects the Contract, not the root the
-    # configured test paths resolve against
+    # before the overrides below: `--contracts` redirects the Contract, not the project root
+    # (which the configured test paths, ceilings and exception targets resolve against)
+    root = Covenant.root()
     test_paths = Covenant.test_paths(Keyword.get_values(opts, :test_path))
 
     run? = Keyword.get(opts, :run, true)
 
+    Application.put_env(:covenant, :root, root)
     if opts[:contracts], do: Application.put_env(:covenant, :contracts_dir, opts[:contracts])
     if opts[:results_dir], do: Application.put_env(:covenant, :results_dir, results_dir)
 
     if opts[:static] do
-      static(contracts_dir, test_paths, Path.expand(opts[:root] || Covenant.root()))
+      static(contracts_dir, test_paths, Path.expand(opts[:root] || root))
     else
-      check(contracts_dir, test_paths, results_dir, run?)
+      if File.regular?(results_dir) do
+        fail("the results directory #{results_dir} is a file, not a directory")
+      end
+
+      # what the suite's own VM needs to validate against this Contract, when it is not the default
+      env =
+        if opts[:contracts],
+          do: [{"COVENANT_ROOT", root}, {"COVENANT_CONTRACTS_DIR", Path.expand(contracts_dir)}],
+          else: []
+
+      check(contracts_dir, test_paths, results_dir, run?, root, env)
     end
   end
 
-  defp check(contracts_dir, test_paths, results_dir, run?) do
+  defp check(contracts_dir, test_paths, results_dir, run?, root, env) do
     contract = load_contract(contracts_dir)
     sibling = Covenant.sibling_dir()
 
     {suite_status, results} =
       if run? do
-        run_suite(test_paths ++ sibling_paths(), results_dir)
+        run_suite(test_paths ++ sibling_paths(), results_dir, root, env)
       else
         {:ok, read_results(results_dir)}
       end
 
-    report = Check.run(contract, results, root: Covenant.root(), sibling: sibling)
+    report = Check.run(contract, results, root: root, sibling: sibling)
     report = %{report | problems: Error.sort(report.problems ++ strays(test_paths, sibling))}
 
     Enum.each(report.problems, &Mix.shell().error(Error.format(&1)))
@@ -218,7 +236,7 @@ defmodule Mix.Tasks.Covenant.Check do
   # The sibling layout's directory, when it holds a primitive's tests.
   defp sibling_paths do
     sibling = Covenant.sibling_dir()
-    if Static.expand([sibling]) != [], do: [sibling], else: []
+    if sibling && Static.expand([sibling]) != [], do: [sibling], else: []
   end
 
   # Every test file `mix test` loads and every file of the configured contract test paths,
@@ -257,12 +275,14 @@ defmodule Mix.Tasks.Covenant.Check do
   # Next to the Contract: the contracts directory, or the sibling layout's in a project without one.
   defp coverage_path(contracts_dir, name) do
     dir =
-      if File.dir?(contracts_dir) or not File.dir?(Covenant.sibling_dir()),
+      if File.dir?(contracts_dir) or not sibling_dir?(),
         do: contracts_dir,
         else: Covenant.sibling_dir()
 
     dir |> Path.join(name) |> Path.relative_to_cwd()
   end
+
+  defp sibling_dir?, do: Covenant.sibling_dir() != nil and File.dir?(Covenant.sibling_dir())
 
   defp warn(%Check.Report{warnings: warnings}) do
     Enum.each(
@@ -272,7 +292,9 @@ defmodule Mix.Tasks.Covenant.Check do
   end
 
   defp load_contract(dir) do
-    case Contract.load(dir, sibling: Path.relative_to_cwd(Covenant.sibling_dir())) do
+    sibling = Covenant.sibling_dir()
+
+    case Contract.load(dir, sibling: sibling && Path.relative_to_cwd(sibling)) do
       {:ok, contract} ->
         contract
 
@@ -285,21 +307,24 @@ defmodule Mix.Tasks.Covenant.Check do
   # Runs the suite writing its results to a directory of its own, so a `mix test` running in
   # the background (an editor, a watcher) cannot overwrite them mid-run; then replaces the
   # Covenant result files in `results_dir` with them, for a later `--no-run`.
-  defp run_suite(test_paths, results_dir) do
+  defp run_suite(test_paths, results_dir, root, env) do
+    # an umbrella's tests run from its root, where Mix runs each app's own in that app's context
+    dir = if Covenant.umbrella?(root), do: root, else: File.cwd!()
+
     paths =
       test_paths
       |> Enum.flat_map(&Path.wildcard/1)
       |> Enum.filter(&File.exists?/1)
       |> Enum.sort()
-      |> Enum.map(&Path.relative_to_cwd/1)
+      |> Enum.map(&Path.relative_to(&1, dir))
 
     if paths == [] do
       Mix.shell().info(
         "covenant.check: no contract test paths found (looked for #{Enum.join(Enum.map(test_paths, &Path.relative_to_cwd/1), ", ")})"
       )
 
-      clear_results(results_dir)
-      {:ok, read_results(results_dir)}
+      # nothing runs, so nothing is replaced: the last results stay for a later `--no-run`
+      {:ok, %Results{}}
     else
       mix = System.find_executable("mix") || Mix.raise("cannot find the `mix` executable on PATH")
 
@@ -311,10 +336,11 @@ defmodule Mix.Tasks.Covenant.Check do
       args = paths ++ ["--formatter", "Covenant.Formatter", "--formatter", "ExUnit.CLIFormatter"]
       Mix.shell().info("covenant.check: running mix test #{Enum.join(paths, " ")}")
 
-      env = [{"MIX_ENV", "test"}, {"COVENANT_RESULTS_DIR", Path.expand(run_dir)}]
+      env = [{"MIX_ENV", "test"}, {"COVENANT_RESULTS_DIR", Path.expand(run_dir)} | env]
 
       status =
         case System.cmd(mix, ["test" | args],
+               cd: dir,
                env: env,
                into: Covenant.Relay.new(),
                stderr_to_stdout: true

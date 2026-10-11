@@ -66,4 +66,14 @@ defmodule Covenant.CeilingContractTest do
     assert Ceiling.count(%Ceiling{ceiling | counter: {:module, Example.Scope, :exiter}}, []) ==
              {:unchecked, "exit :stub"}
   end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.check.I5"
+  test "a glob pattern that is absolute or contains .. is an error naming it", %{tmp_dir: dir} do
+    for pattern <- ["../../**", "/etc/*", "lib/../*"] do
+      ceiling = %Ceiling{name: "x", ceiling: 1, counter: {:glob, pattern}, file: @path, line: 1}
+      assert {:error, message} = Ceiling.count(ceiling, root: dir)
+      assert message =~ pattern
+    end
+  end
 end

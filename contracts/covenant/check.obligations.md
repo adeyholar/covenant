@@ -25,7 +25,7 @@ Contract and a test run it returns every problem and the coverage table.
 
 ### covenant.check.I3 — Failed tests fail the check; an obligation needs a passing test
 - **scope:** `Covenant.Check.run/3`
-- **must:** report a tagged test that failed or was invalid; in a run, report an active obligation none of whose tagged tests passed because some were skipped or excluded (`@tag :skip`, `--exclude`, `ExUnit.configure(exclude:)`) as an `active obligation <id> has no passing test: N tagged test(s) were skipped or excluded: <names>` problem, so a skipped or excluded test is never coverage (a proof that lives elsewhere is declared a `kind: exception`); in `mode: :static`, where nothing runs, a tagged test is enough
+- **must:** report every tagged test result that failed or was invalid, each of the results a parameterized test (`parameterize:`) produces under one module and name included (a passing result never hides a failed one, so a `--no-run` over such results cannot hold); in a run, report an active obligation none of whose tagged tests passed because some were skipped or excluded (`@tag :skip`, `--exclude`, `ExUnit.configure(exclude:)`) as an `active obligation <id> has no passing test: N tagged test(s) were skipped or excluded: <names>` problem, so a skipped or excluded test is never coverage (a proof that lives elsewhere is declared a `kind: exception`); in `mode: :static`, where nothing runs, a tagged test is enough
 - **kind:** functional
 - **status:** active
 
@@ -38,7 +38,7 @@ Contract and a test run it returns every problem and the coverage table.
 
 ### covenant.check.I5 — Scope ceilings are counted and enforced
 - **scope:** `Covenant.Check.run/3`, `Covenant.Contract.Ceiling.count/2`
-- **must:** count a `glob` ceiling as the files matching its pattern under the root and a `module` ceiling by calling `module.function/0`; report a count above the ceiling and a counter that cannot be called (module not loaded, function not exported, a return that is not a non-negative integer); a count at the ceiling passes. A `module` counter that raises, throws or exits leaves its ceiling unchecked: a `scope ceiling `<name>` unchecked: <exception module>` warning in `Report.warnings`, never a problem, and the check still completes and writes `coverage.json`
+- **must:** count a `glob` ceiling as the files matching its pattern under the root (a pattern that is absolute or has a `..` segment is a `cannot be counted` problem naming it, never a count of files outside the root) and a `module` ceiling by calling `module.function/0`; report a count above the ceiling and a counter that cannot be called (module not loaded, function not exported, a return that is not a non-negative integer); a count at the ceiling passes. A `module` counter that raises, throws or exits leaves its ceiling unchecked: a `scope ceiling `<name>` unchecked: <exception module>` warning in `Report.warnings`, never a problem, and the check still completes and writes `coverage.json`
 - **kind:** functional
 - **status:** active
 
