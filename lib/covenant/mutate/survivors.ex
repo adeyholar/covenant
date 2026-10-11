@@ -35,9 +35,11 @@ defmodule Covenant.Mutate.Survivors do
   defmodule Annotation do
     @moduledoc """
     One annotated survivor. An entry of a survivors file names a site (`at`,
-    `operator`, optional `mutation`); a declaration in a primitive's
-    `mutants.md` names a `unit` (`Module.function/arity`) and the mutation's
-    `from` and `to`, or neither for a wildcard over the unit.
+    `operator`, `mutation`); a declaration in a primitive's `mutants.md` names
+    a `unit` (`Module.function/arity`) and a `change` (`from -> to`, with an
+    `occurrence` when several of the unit's mutants share it), or no change for
+    a wildcard over the unit. `resolve/2` pins each declaration with a change
+    to the one mutant it names (`pinned`, a mutant id, or `:none`).
     """
 
     @type t :: %__MODULE__{
@@ -49,12 +51,29 @@ defmodule Covenant.Mutate.Survivors do
             file: String.t(),
             line: pos_integer(),
             unit: String.t() | nil,
+            change: String.t() | nil,
+            occurrence: pos_integer() | nil,
             from: String.t() | nil,
-            to: String.t() | nil
+            to: String.t() | nil,
+            pinned: String.t() | :none | nil
           }
 
     @enforce_keys [:at, :operator, :sort, :reason, :file, :line]
-    defstruct [:at, :operator, :mutation, :sort, :reason, :file, :line, :unit, :from, :to]
+    defstruct [
+      :at,
+      :operator,
+      :mutation,
+      :sort,
+      :reason,
+      :file,
+      :line,
+      :unit,
+      :change,
+      :occurrence,
+      :from,
+      :to,
+      :pinned
+    ]
   end
 
   @doc "The sort names, in the order the survivors file documents them."
@@ -218,15 +237,98 @@ defmodule Covenant.Mutate.Survivors do
   wildcard) its `from` and `to`.
   """
   @spec matches?(Annotation.t(), Mutant.t()) :: boolean()
-  def matches?(%Annotation{unit: unit} = annotation, %Mutant{} = mutant) when unit != nil do
-    unit == unit(mutant) and
-      (annotation.from == nil or (annotation.from == mutant.from and annotation.to == mutant.to))
-  end
+  def matches?(%Annotation{pinned: :none}, %Mutant{}), do: false
+  def matches?(%Annotation{pinned: id}, %Mutant{id: mutant}) when is_binary(id), do: id == mutant
+
+  def matches?(%Annotation{unit: unit} = annotation, %Mutant{} = mutant) when unit != nil,
+    do: unit == unit(mutant) and (wildcard?(annotation) or same_change?(annotation, mutant))
 
   def matches?(%Annotation{} = annotation, %Mutant{} = mutant) do
     annotation.at == Mutant.at(mutant) and
       annotation.operator == Atom.to_string(mutant.operator) and
       (annotation.mutation == nil or annotation.mutation == Mutant.mutation(mutant))
+  end
+
+  @doc """
+  Pins every `mutants.md` declaration that names a change to the one mutant it
+  names among `mutants` (the run's mutants, every verdict): the unit's mutants
+  with that change, in source order, of which the declaration's occurrence
+  (`#k`) picks one. Returns the annotations and the errors: a declaration that
+  several mutants share and that gives no occurrence is ambiguous, and one
+  whose occurrence is past the last is out of range; both are left out, so
+  their survivors stay unsorted. A declaration that matches no mutant is
+  pinned to `:none` (the matrix reports it). Wildcards and survivors-file
+  entries pass through.
+  """
+  @spec resolve([Annotation.t()], [Mutant.t()]) :: {[Annotation.t()], [Error.t()]}
+  def resolve(annotations, mutants) do
+    Enum.reduce(annotations, {[], []}, fn annotation, {kept, errors} ->
+      case pin(annotation, mutants) do
+        {:ok, annotation} -> {kept ++ [annotation], errors}
+        {:error, error} -> {kept, errors ++ [error]}
+      end
+    end)
+  end
+
+  defp pin(%Annotation{unit: unit} = annotation, mutants) when unit != nil do
+    if wildcard?(annotation),
+      do: {:ok, annotation},
+      else: pin(annotation, sharing(mutants, unit, &same_change?(annotation, &1)), unit)
+  end
+
+  defp pin(annotation, _mutants), do: {:ok, annotation}
+
+  defp pin(annotation, candidates, unit) do
+    change = annotation.change || "#{annotation.from} -> #{annotation.to}"
+
+    case {candidates, annotation.occurrence} do
+      {[], _} ->
+        {:ok, %{annotation | pinned: :none}}
+
+      {[mutant], nil} ->
+        {:ok, pinned(annotation, mutant)}
+
+      {many, nil} ->
+        {:error,
+         Error.new(
+           annotation.file,
+           annotation.line,
+           "ambiguous: #{length(many)} mutants in #{unit} share #{change}; " <>
+             "add #1 to ##{length(many)} to name one (in source order)"
+         )}
+
+      {many, k} when k <= length(many) ->
+        {:ok, pinned(annotation, Enum.at(many, k - 1))}
+
+      {many, k} ->
+        {:error,
+         Error.new(
+           annotation.file,
+           annotation.line,
+           "##{k}: only #{length(many)} mutant(s) in #{unit} share #{change}"
+         )}
+    end
+  end
+
+  # A declaration names its change as written (`change`) or as `from` and `to`; a
+  # wildcard names neither.
+  defp wildcard?(%Annotation{change: nil, from: nil}), do: true
+  defp wildcard?(%Annotation{}), do: false
+
+  defp same_change?(%Annotation{change: nil, from: from, to: to}, %Mutant{} = mutant),
+    do: from == mutant.from and to == mutant.to
+
+  defp same_change?(%Annotation{change: change}, %Mutant{} = mutant),
+    do: Primitive.change?(change, mutant.from, mutant.to)
+
+  defp pinned(annotation, %Mutant{} = mutant),
+    do: %{annotation | pinned: mutant.id, from: mutant.from, to: mutant.to}
+
+  # The unit's mutants that pass `fun`, in source order.
+  defp sharing(mutants, unit, fun) do
+    mutants
+    |> Enum.filter(&(unit(&1) == unit and fun.(&1)))
+    |> Enum.sort_by(&{&1.file, &1.line, &1.column, &1.id})
   end
 
   @doc "The unit a mutant belongs to, `Module.function/arity`, or the module for code outside a function."
@@ -236,13 +338,24 @@ defmodule Covenant.Mutate.Survivors do
 
   @doc """
   An entry for a survivor, ready to paste: a YAML entry for a survivors file,
-  or (`format: :md`) a declaration line for a primitive's `mutants.md`.
+  or (`format: :md`) a declaration line for a primitive's `mutants.md`. Given
+  the run's mutants (`mutants: [...]`), a declaration that several of the
+  unit's mutants share carries its occurrence, `#k`.
   """
   @spec template(Mutant.t(), keyword()) :: String.t()
   def template(mutant, opts \\ [])
 
-  def template(%Mutant{} = mutant, format: :md),
-    do: "#{unit(mutant)}: #{mutant.from} -> #{mutant.to}"
+  def template(%Mutant{} = mutant, [{:format, :md} | opts]) do
+    line = "#{unit(mutant)}: #{mutant.from} -> #{mutant.to}"
+    same = &(&1.from == mutant.from and &1.to == mutant.to)
+
+    many = sharing(Keyword.get(opts, :mutants, [mutant]), unit(mutant), same)
+
+    case {length(many), Enum.find_index(many, &(&1.id == mutant.id))} do
+      {n, k} when n > 1 and k != nil -> "#{line} ##{k + 1}"
+      _ -> line
+    end
+  end
 
   def template(%Mutant{} = mutant, _opts) do
     """

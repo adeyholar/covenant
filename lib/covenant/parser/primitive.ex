@@ -14,15 +14,21 @@ defmodule Covenant.Parser.Primitive do
   is a primitive named after the directory; names starting with `.` or `_`
   are skipped, and a subdirectory without a README.md holds helpers.
 
-  In a README, an obligation is a line outside a fence that opens with
-  `- **`, an id of uppercase letters and digits, and `**`. Its full id is
-  `<primitive>/<id>` (`calc/A1`). A fenced `covers` block lists the code the
-  primitive covers (`Covenant.Covers`). `covers` blocks count only in
-  README.md, and `equivalent` and `unpromised` blocks only in mutants.md.
+  In a README, an obligation is a line outside a fence of exactly the form
+  `- **A1** text`: a dash, one space, an id of uppercase letters then digits
+  in bold, and the text. Its full id is `<primitive>/<id>` (`calc/A1`). Any
+  other line that holds a bold id (`* **A1**`, `- **A1:**`, an indented or
+  numbered item, a lowercase id, an id with no text) is an error, never
+  silently skipped, and so is a fence that is never closed. A fenced `covers`
+  block lists the code the primitive covers (`Covenant.Covers`). `covers`
+  blocks count only in README.md, and `equivalent` and `unpromised` blocks
+  only in mutants.md.
 
   A Contract test names the obligations it proves with comment lines directly
   above it, `# Contract: calc/A1` (several ids separated by commas, or several
-  lines); `comment_ids/2` reads them.
+  lines); `comment_ids/2` reads them. Outside the sibling layout only a
+  comment naming a primitive id (`claimed_ids/2`) counts, so prose such as
+  `# Contract: never negative` is just a comment.
   """
 
   alias Covenant.Contract.{Component, Obligation}
@@ -32,6 +38,8 @@ defmodule Covenant.Parser.Primitive do
 
   @name ~r/^[a-z][a-z0-9_]*$/
   @obligation ~r/^- \*\*([A-Z]+[0-9]+)\*\*[ \t]+(.+?)[ \t]*$/
+  @bold_id ~r/\*\*[A-Za-z]+[0-9]+[:.]?\*\*/
+  @primitive_id ~r/^[a-z][a-z0-9_]*\/[A-Z]+[0-9]+$/
   @fence_open ~r/^ {0,3}(`{3,}|~{3,})[ \t]*([^`\s]*)/
   @atx ~r/^ {0,3}\#{1,6}[ \t]+(.+?)[ \t]*\#*[ \t]*$/
   @setext ~r/^ {0,3}(=+|-+)[ \t]*$/
@@ -39,6 +47,8 @@ defmodule Covenant.Parser.Primitive do
   @above ~r/^\s*(#|@)/
   @unit ~S"[A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*\.[a-z_][A-Za-z0-9_]*[?!]?/\d+"
   @declaration Regex.compile!("^(#{@unit}):[ \\t]+(.+)$")
+  @occurrence ~r/^(.*\S)[ \t]+#([1-9][0-9]*)$/
+  @arrow ~r/\s(?:->|→)\s/u
 
   @doc "The primitives under `dir`, each as a `Covenant.Contract.Component` of form `:primitive`."
   @spec parse_dir(Path.t()) :: {:ok, [Component.t()]} | {:error, [Error.t()]}
@@ -147,7 +157,12 @@ defmodule Covenant.Parser.Primitive do
         Error.new(file, n, "an #{info} block belongs in mutants.md")
       end
 
-    errors = duplicates(obligations) ++ cover_errors ++ misplaced
+    errors =
+      Enum.sort_by(
+        duplicates(obligations) ++
+          malformed(parts, file) ++ cover_errors ++ misplaced ++ unclosed(parts, file),
+        & &1.line
+      )
 
     if errors == [] do
       {:ok,
@@ -186,6 +201,27 @@ defmodule Covenant.Parser.Primitive do
     |> Enum.sort_by(& &1.line)
   end
 
+  # A line that holds a bold id but is not `- **A1** text` would otherwise be
+  # dropped without a word.
+  defp malformed(parts, file) do
+    for %{kind: :line, text: text, line: n} <- parts,
+        Regex.match?(@bold_id, text),
+        not Regex.match?(@obligation, text) do
+      Error.new(
+        file,
+        n,
+        "`#{String.trim(text)}` looks like an obligation but is not one: write it as " <>
+          "`- **A1** text` (a dash, one space, uppercase letters then digits in bold, then the text)"
+      )
+    end
+  end
+
+  defp unclosed(parts, file) do
+    for %{kind: :fence, unclosed: true, line: n, marker: marker} <- parts do
+      Error.new(file, n, "the fence opened here with #{marker} is never closed")
+    end
+  end
+
   defp purpose(parts) do
     parts
     |> Enum.drop_while(&(&1.kind != :heading))
@@ -211,7 +247,7 @@ defmodule Covenant.Parser.Primitive do
   defp walk([], acc, nil), do: Enum.reverse(acc)
 
   defp walk([], acc, open),
-    do: Enum.reverse([%{open | body: Enum.reverse(open.body)} | acc])
+    do: Enum.reverse([Map.merge(open, %{body: Enum.reverse(open.body), unclosed: true}) | acc])
 
   defp walk([{text, n} | rest], acc, nil) do
     cond do
@@ -254,19 +290,31 @@ defmodule Covenant.Parser.Primitive do
 
   @doc """
   Reads a primitive's `mutants.md`: every line of an `equivalent` or
-  `unpromised` block declares a survivor, `Unit: from -> to` or, in an
-  `unpromised` block, `Unit: *` for every survivor of the unit. A unit is
-  `Module.function/arity`; `from` and `to` are the mutation as
-  `mix covenant.mutate` prints it (backticks and `→` accepted). Each
-  declaration's reason is the nearest heading above its block plus the prose
-  between them, and a block with no heading above it is an error.
+  `unpromised` block declares a survivor.
+
+  * `Unit: from -> to` declares the one mutant of the unit with that change.
+    A unit is `Module.function/arity`; the change is the mutation as
+    `mix covenant.mutate` prints it (`→` and backticks around `from` and `to`
+    accepted). When several of the unit's mutants share the change, an
+    occurrence suffix picks one: `Unit: from -> to #2` is the second of them in
+    source order, counting every one, killed or not.
+  * `Unit: *`, in an `unpromised` block only, declares every survivor of the
+    unit: the Contract promises nothing about it. Equivalence is per mutant,
+    so a wildcard in an `equivalent` block is an error.
+
+  Each declaration's reason is the nearest heading above its block plus the
+  prose between them, and a block with no heading above it is an error, as is
+  a fence that is never closed and a line declaring what another already does.
+  Which mutant a declaration names is settled against the run
+  (`Covenant.Mutate.Survivors.resolve/2`), since a change can contain an arrow
+  of its own (`fn x -> x end`).
   """
   @spec declarations(String.t(), Path.t()) :: {:ok, [Annotation.t()]} | {:error, [Error.t()]}
   def declarations(text, file) do
+    parts = blocks(text)
+
     {annotations, errors, _heading, _prose} =
-      text
-      |> blocks()
-      |> Enum.reduce({[], [], nil, []}, fn
+      Enum.reduce(parts, {[], [], nil, []}, fn
         %{kind: :heading, text: heading}, {acc, errors, _, _} ->
           {acc, errors, heading, []}
 
@@ -282,7 +330,7 @@ defmodule Covenant.Parser.Primitive do
           {acc, errors, heading, []}
       end)
 
-    errors = errors ++ repeated(annotations)
+    errors = Enum.sort_by(errors ++ repeated(annotations) ++ unclosed(parts, file), & &1.line)
     if errors == [], do: {:ok, annotations}, else: {:error, errors}
   end
 
@@ -300,16 +348,20 @@ defmodule Covenant.Parser.Primitive do
         :blank ->
           {found, errors}
 
-        {:ok, unit, from, to} ->
+        {:ok, unit, change, occurrence} ->
+          {from, to} = if change, do: split_change(change), else: {nil, nil}
+
           annotation = %Annotation{
             at: unit,
             operator: "*",
-            mutation: from && "`#{from}` → `#{to}`",
+            mutation: change && "`#{from}` → `#{to}`",
             sort: info,
             reason: reason,
             file: file,
             line: n,
             unit: unit,
+            change: change,
+            occurrence: occurrence,
             from: from,
             to: to
           }
@@ -330,26 +382,30 @@ defmodule Covenant.Parser.Primitive do
         {:ok, unit, nil, nil}
 
       [_, _unit, "*"] ->
-        {:error, "a wildcard can't be equivalent: declare it unpromised, or list the mutants"}
+        {:error,
+         "a wildcard can't be equivalent: equivalence is per mutant, so list them, or declare the unit unpromised"}
 
-      [_, unit, change] ->
-        case split_change(change) do
-          {from, to} when from != "" and to != "" -> {:ok, unit, from, to}
-          _ -> {:error, "`#{text}` is not `Unit: from -> to`"}
-        end
+      [_, unit, rest] ->
+        {change, occurrence} =
+          case Regex.run(@occurrence, rest) do
+            [_, change, k] -> {change, String.to_integer(k)}
+            nil -> {rest, nil}
+          end
+
+        if Regex.match?(@arrow, change),
+          do: {:ok, unit, String.trim(change), occurrence},
+          else: {:error, "`#{text}` is not `Unit: from -> to`"}
 
       nil ->
         {:error, "`#{text}` is not `Module.function/arity: from -> to`"}
     end
   end
 
-  # The mutation's text can hold an arrow of its own (`case _ ->`), so the
-  # last separator splits it.
+  # For display only: which arrow separates `from` from `to` is settled when
+  # the change is matched against a mutant's own text.
   defp split_change(change) do
-    case Regex.run(~r/^(.*)\s(?:->|→)\s(.*)$/u, change) do
-      [_, from, to] -> {unquote_code(from), unquote_code(to)}
-      nil -> :error
-    end
+    [_, from, to] = Regex.run(~r/^(.*)\s(?:->|→)\s(.*)$/u, change)
+    {unquote_code(from), unquote_code(to)}
   end
 
   defp unquote_code(text) do
@@ -361,9 +417,20 @@ defmodule Covenant.Parser.Primitive do
        else: text
   end
 
+  @doc """
+  Whether a declared change (`from -> to`, `→` or backticks allowed) is the
+  mutation `from` → `to`.
+  """
+  @spec change?(String.t(), String.t(), String.t()) :: boolean()
+  def change?(change, from, to) do
+    Enum.any?([" -> ", " → "], fn arrow ->
+      change == from <> arrow <> to or change == "`#{from}`" <> arrow <> "`#{to}`"
+    end)
+  end
+
   defp repeated(annotations) do
     annotations
-    |> Enum.group_by(&{&1.unit, &1.from, &1.to})
+    |> Enum.group_by(&{&1.unit, normalize(&1.change), &1.occurrence})
     |> Enum.flat_map(fn {_, [first | rest]} ->
       Enum.map(
         rest,
@@ -372,6 +439,9 @@ defmodule Covenant.Parser.Primitive do
     end)
     |> Enum.sort_by(& &1.line)
   end
+
+  defp normalize(nil), do: nil
+  defp normalize(change), do: split_change(change)
 
   # -- Contract comments ----------------------------------------------------------
 
@@ -397,9 +467,26 @@ defmodule Covenant.Parser.Primitive do
     |> Enum.uniq()
   end
 
-  @doc "True when `line` is a `# Contract:` comment."
+  @doc """
+  The primitive obligation ids (`calc/A1`) named by `# Contract:` comments
+  directly above line `line`: what counts as a claim outside the sibling
+  layout, where `# Contract: never negative` is only prose.
+  """
+  @spec claimed_ids([String.t()], pos_integer()) :: [String.t()]
+  def claimed_ids(lines, line), do: lines |> comment_ids(line) |> Enum.filter(&primitive_id?/1)
+
+  @doc "True when `line` is a `# Contract:` comment that names a primitive obligation id."
   @spec contract_comment?(String.t()) :: boolean()
-  def contract_comment?(line), do: Regex.match?(@contract_comment, line)
+  def contract_comment?(line) do
+    case Regex.run(@contract_comment, line) do
+      [_, ids] -> ids |> String.split([",", " ", "\t"], trim: true) |> Enum.any?(&primitive_id?/1)
+      nil -> false
+    end
+  end
+
+  @doc "True for a primitive obligation id, `<primitive>/<id>`."
+  @spec primitive_id?(String.t()) :: boolean()
+  def primitive_id?(id), do: Regex.match?(@primitive_id, id)
 
   @doc """
   The primitive a file belongs to: the first directory of its path inside

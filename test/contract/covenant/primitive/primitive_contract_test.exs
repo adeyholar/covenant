@@ -540,7 +540,7 @@ defmodule Covenant.PrimitiveContractTest do
 
     assert messages(Primitive.declarations(text, "mutants.md")) == [
              "mutants.md:1: the unpromised block has no heading above it to give its reason",
-             "mutants.md:8: a wildcard can't be equivalent: declare it unpromised, or list the mutants",
+             "mutants.md:8: a wildcard can't be equivalent: equivalence is per mutant, so list them, or declare the unit unpromised",
              "mutants.md:9: `Calc.add/2 + -> -` is not `Module.function/arity: from -> to`",
              "mutants.md:11: declares what line 10 already declares"
            ]

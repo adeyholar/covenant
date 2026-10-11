@@ -107,8 +107,11 @@ defmodule Mix.Tasks.Covenant.Mutate do
   `contract/<primitive>/mutants.md`, as flinch reads them: under a heading
   that gives the reason, an `equivalent` or `unpromised` block of
   `Module.function/arity: from -> to` lines, the mutation as this task prints
-  it (`unpromised` also takes `Module.function/arity: *`). A declaration that
-  a test kills, or that matches no mutant, fails the task.
+  it. Each line names exactly one mutant: when several of the unit's mutants
+  share the change, `#k` picks the k-th in source order (`Calc.f/1: 1 -> 2 #2`),
+  and a line without one is ambiguous. `unpromised` also takes
+  `Module.function/arity: *`, every survivor of the unit. A declaration that a
+  test kills, that matches no mutant or that is ambiguous fails the task.
   """
 
   use Mix.Task
@@ -229,6 +232,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
       Mix.shell().info("covenant.mutate: ignoring derived module #{name}: #{why}")
     end)
 
+    # Each mutants.md declaration names exactly one mutant of this run, or fails.
+    {annotations, unresolved} = Survivors.resolve(annotations, results.mutants)
+
     matrix =
       Matrix.build(results,
         component: plan.component,
@@ -239,6 +245,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
         jobs: settings.jobs,
         fail_fast: settings.fail_fast
       )
+
+    matrix = %{matrix | problems: Error.sort(unresolved ++ matrix.problems)}
 
     Mix.shell().info("")
     Mix.shell().info(Matrix.format(matrix))
@@ -260,7 +268,11 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
         Mix.shell().info(
           "```unpromised\n" <>
-            Enum.map_join(unsorted, "\n", &Survivors.template(&1, format: :md)) <> "\n```"
+            Enum.map_join(
+              unsorted,
+              "\n",
+              &Survivors.template(&1, format: :md, mutants: results.mutants)
+            ) <> "\n```"
         )
 
       true ->
