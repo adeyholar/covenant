@@ -24,7 +24,7 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I2 — Mutants are enumerated deterministically at reported locations
 - **scope:** `Covenant.Mutate.Mutator.sites/2`, `Covenant.Mutate.Mutator.numbered/1`
-- **must:** list the mutants of an AST in one walk, inside the target modules (every module when none is named), each with the file, line and column of the node it changes and the module and function it sits in; skip documentation, specs and types, compiler attributes, macro and guard definitions, `use`/`import`/`alias`/`require`, `quote` and sigils; number them `m001`, `m002`, ... in walk order (wider than three digits past `m999`); the same source always yields the same mutants in the same order with the same ids
+- **must:** list the mutants of an AST in one walk, inside the target modules (every module when none is named), each with the file, line and column of the node it changes and the module and function it sits in, a nested module by its expanded name (`__MODULE__.Inner` is the enclosing module's name followed by `.Inner`; an absolute `Elixir.Standalone` is `Standalone`); skip documentation, specs and types, compiler attributes, `defstruct` and `defexception` (a struct literal in a test file is expanded when the test compiles, before any mutant is loaded, so a default can never be killed), macro and guard definitions, `use`/`import`/`alias`/`require`, `quote` and sigils; number them `m001`, `m002`, ... in walk order (wider than three digits past `m999`); the same source always yields the same mutants in the same order with the same ids
 - **kind:** functional
 - **status:** active
 

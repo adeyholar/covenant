@@ -240,6 +240,8 @@ defmodule Covenant.MutateContractTest do
     import Bar, only: [a: 1]
     alias Baz.Qux, as: Q
     require Logger
+    defstruct count: 0, tags: [:a, :b], name: "x"
+    defexception message: "boom", code: 1
     """
 
     assert mutants(skipped) == []
@@ -276,6 +278,44 @@ defmodule Covenant.MutateContractTest do
     assert where.(["A.Inner"]) == [{"A.Inner", "g/0"}]
     assert where.(["B", "A.Inner"]) == [{"A.Inner", "g/0"}, {"B", "h/0"}]
     assert where.(["C"]) == []
+  end
+
+  @tag obligation: "covenant.mutate.I2"
+  test "a nested module is named by its expanded alias: __MODULE__ and an absolute Elixir. alias" do
+    source = """
+    defmodule Outer do
+      def f, do: 1
+
+      defmodule __MODULE__.Inner do
+        def g, do: 2
+
+        defmodule __MODULE__.Deep do
+          def h, do: 3
+        end
+      end
+
+      defmodule Elixir.Standalone do
+        def s, do: 4
+      end
+
+      defmodule Sibling do
+        def t, do: 5
+      end
+    end
+    """
+
+    ast = parse!(source)
+
+    names = fn modules ->
+      ast |> Mutator.sites(modules: modules) |> Enum.map(& &1.module) |> Enum.uniq()
+    end
+
+    assert names.(nil) ==
+             ["Outer", "Outer.Inner", "Outer.Inner.Deep", "Standalone", "Outer.Sibling"]
+
+    assert names.(["Outer.Inner"]) == ["Outer.Inner"]
+    assert names.(["Standalone"]) == ["Standalone"]
+    assert names.(["Outer.Standalone"]) == []
   end
 
   @tag obligation: "covenant.mutate.I2"
