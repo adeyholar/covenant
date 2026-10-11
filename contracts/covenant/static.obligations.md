@@ -15,7 +15,7 @@ contract tests resolve paths from.
 
 ### covenant.static.I1 — Tags are read as ExUnit merges them
 - **scope:** `Covenant.Static.scan/2`, `Covenant.Static.scan_source/2`
-- **must:** read every `test` and `property` with a body in a module that has `use Covenant.Case, component: "<literal>"`, including those inside `describe` blocks and `for` comprehensions, with the `obligation` tag ExUnit would give it: a literal string or list of strings from `@tag` over `@describetag` over `@moduletag`, the last value winning within a level; name each test as ExUnit does (`test <describe> <name>`); return each as a `Covenant.Results.Test` with state `:tagged`
+- **must:** read every `test` and `property` with a body in a module that has `use Covenant.Case, component: "<literal>"`, including those inside `describe` blocks, with the `obligation` tag ExUnit would give it: a literal string or list of strings from `@tag` over `@describetag` over `@moduletag`, the last value winning within a level and within one keyword list, and a later tag overriding an earlier one (`@tag :obligation` after `@tag obligation: "x"` leaves `obligation: true`, which is not a literal string); name each test as ExUnit does (`test <describe> <name>`); return each as a `Covenant.Results.Test` with state `:tagged`
 - **kind:** functional
 - **record:** static-reads-literals
 - **status:** active
@@ -28,7 +28,7 @@ contract tests resolve paths from.
 
 ### covenant.static.I3 — What only a reader can see is a problem at the line
 - **scope:** `Covenant.Static.scan_source/2`
-- **must:** report at file and line: a file that does not parse; a `component:` or `obligation` tag that is not a literal; a test with no obligation tag; a second `obligation:` tag at one level (ExUnit keeps the last, so the first is silently lost); a `@tag` before `describe` or at the end of a module; a `test` or `property` with no body; a test name used twice in one module, or a literal name inside a `for` (each a compile error in ExUnit); and never raise on any of these
+- **must:** report at file and line: a file that does not parse; a `component:` or `obligation` tag that is not a literal; a test with no obligation tag; a second `obligation:` tag at one level (ExUnit keeps the last, so the first is silently lost); a `@tag` before `describe` or at the end of a module; a `test` or `property` with no body; a `@describetag` outside a `describe` block (ExUnit raises); a test name used twice in one module (a compile error in ExUnit); a `test` or `property` inside `for`, `Enum.each`, `if`, `unless`, `case`, `cond` or any other expression that can define zero or many of them, which is never credited and is reported as needing compiled code; and never raise on any of these
 - **kind:** functional
 - **record:** static-reads-literals
 - **status:** active

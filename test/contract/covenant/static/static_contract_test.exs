@@ -59,11 +59,13 @@ defmodule Covenant.StaticContractTest do
              {"test a list on @tag wins over @moduletag", ["demo.widget.I2", "demo.widget.I3"]},
              {"test sizes inherits the describe tag", ["demo.widget.I4"]},
              {"property sizes a property is a test too", ["demo.widget.I5"]},
-             {~S(test "size #{size} inside a comprehension"), ["demo.widget.I6"]},
              {"test the module tag again after describe", ["demo.widget.I1"]}
            ]
 
-    %{tests: [first | _], problems: []} = scan(source)
+    %{tests: [first | _], problems: problems} = scan(source)
+
+    assert [problem] = messages(problems)
+    assert problem =~ "inside `for`"
 
     assert %Test{
              module: "Demo.WidgetContractTest",
@@ -223,7 +225,7 @@ defmodule Covenant.StaticContractTest do
   end
 
   @tag obligation: "covenant.static.I3"
-  test "duplicate test names and literal names inside a comprehension are problems" do
+  test "duplicate test names are problems" do
     source = """
     defmodule Demo.DupContractTest do
       use Covenant.Case, component: "demo.widget"
@@ -238,25 +240,11 @@ defmodule Covenant.StaticContractTest do
         @tag obligation: "demo.widget.I1"
         test "same", do: :ok
       end
-
-      for n <- [1, 2] do
-        @tag obligation: "demo.widget.I1"
-        test "fixed name", do: assert(unquote(n))
-
-        @tag obligation: "demo.widget.I1"
-        test "varying \#{n}", do: assert(unquote(n))
-
-        describe "group \#{n}" do
-          @tag obligation: "demo.widget.I1"
-          test "same", do: assert(unquote(n))
-        end
-      end
     end
     """
 
     assert messages(scan(source).problems) == [
-             "test/contract/x_contract_test.exs:8: test same is already defined in Demo.DupContractTest at line 5; ExUnit rejects the duplicate",
-             "test/contract/x_contract_test.exs:17: test fixed name is defined inside a `for` with a literal name, so every iteration repeats it and ExUnit rejects the duplicate; interpolate the generator into the name"
+             "test/contract/x_contract_test.exs:8: test same is already defined in Demo.DupContractTest at line 5; ExUnit rejects the duplicate"
            ]
   end
 
