@@ -127,3 +127,23 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 - **must:** after every 25th mutant of a worker's slice, but not after its last, print `progress: <done>/<total> mutants (<percent>%), <rate> mutants/min, ETA <time>`, the rate being the mutants done over the time since the first of them started and the time left the mutants remaining at that rate, written as hours and minutes from an hour, minutes and seconds from a minute and seconds below; with `--jobs N` each worker prints its own, prefixed `[i/N]`
 - **kind:** functional
 - **status:** active
+
+### covenant.mutate.I19 — A run ends rather than count what a broken VM reports as kills
+- **scope:** `Covenant.Mutate.Runner.run/1`, `Covenant.Mutate.Runner.restore/1`
+- **must:** after the baseline, record the applications that are started; after each mutant's restore, when one of them is no longer started, start it again and run the unmutated suite once more, ending the run with an error that names the mutant (its id, location and operator) when an application will not start or that suite is red, and recording no verdict after that point; ending it likewise when a mutant has deleted the worker's working directory; keep the verdict that the mutant's own tests gave; after the last mutant of a worker, run the unmutated suite once more and end the run with an error naming the last mutant, as unreliable, when it is red; answer a module that will not load back (a NIF `on_load` that fails the second time) with an error naming the module, after loading back every other original, rather than crash
+- **why:** a mutant in a module with a supervised receive loop made `:code.purge` kill the process, the supervisor gave up, the application stopped, and every later mutant counted as killed: the score read 90.5%
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I20 — A mutant that never ends is stopped by a wall-clock budget
+- **scope:** `Covenant.Mutate.Runner.run/1`, `Covenant.Mutate.Runner.budget_ms/2`, `Covenant.Mutate.Runner.timeout_exit/0`
+- **must:** give each run of the suite against a mutant a budget of ten times the baseline's duration, plus five seconds, plus the per-test timeout, in milliseconds (`budget_ms/2`), because a loop in `setup_all` and a test tagged `timeout: :infinity` are not bounded by ExUnit's per-test timeout; when a mutant outruns it, run no further mutant, hand the `:on_timeout` callback of the plan the results so far with that mutant as the last, verdict `timeout`, so that the worker can write them and halt with the status `timeout_exit/0` (3), and return an error naming the mutant when no callback halts the VM
+- **why:** a mutant looping inside `setup_all` hung the run forever
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I21 — An empty run is visible
+- **scope:** `Covenant.Mutate.Runner.run/1`
+- **must:** warn on the standard error stream, naming the module and its file, of every module to mutate in which no mutant was found, and end the run with an error when no mutant was found in any of them, instead of reporting a matrix of nothing
+- **kind:** functional
+- **status:** active
