@@ -188,15 +188,12 @@ defmodule Covenant.Regen do
 
   defp clear_pack(out, marker) do
     manifest = marker |> File.read!() |> String.split("\n", trim: true) |> tl() |> MapSet.new()
-
-    foreign =
-      out
-      |> files_under()
-      |> Enum.map(&Path.relative_to(&1, out))
-      |> Enum.reject(&(&1 == @marker or &1 in manifest))
+    present = out |> files_under() |> Enum.map(&Path.relative_to(&1, out))
+    foreign = Enum.reject(present, &(&1 == @marker or &1 in manifest))
 
     if foreign == [] do
-      for entry <- manifest, do: File.rm(Path.join(out, entry))
+      # only files found under `out` are deleted: a marker entry such as `../lib/x.ex` names nothing here
+      for entry <- present, entry != @marker, do: File.rm(Path.join(out, entry))
       File.rm!(marker)
       prune_empty(out)
       :ok

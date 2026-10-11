@@ -63,6 +63,23 @@ defmodule Covenant.RegenPackContractTest do
     assert File.read!(Path.join(out, "PROMPT.md")) =~ "# Regenerate"
   end
 
+  @tag :tmp_dir
+  @tag obligation: "covenant.regen.I4"
+  test "a marker listing paths outside the pack never deletes them", %{
+    contract: contract,
+    tmp_dir: dir
+  } do
+    out = Path.join(dir, "pack")
+    assert {:ok, _} = pack(contract, out)
+    outside = Path.join(dir, "outside.txt")
+    File.write!(outside, "keep me")
+    marker = Path.join(out, ".covenant-pack")
+    File.write!(marker, File.read!(marker) <> "../outside.txt\n#{outside}\n")
+
+    assert {:ok, _} = pack(contract, out)
+    assert File.read!(outside) == "keep me"
+  end
+
   # -- I1/I2: pack contents and stubs -------------------------------------------
 
   defp sibling_project(dir, extra) do
