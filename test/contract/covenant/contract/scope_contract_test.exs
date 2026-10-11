@@ -64,4 +64,54 @@ defmodule Covenant.Contract.ScopeContractTest do
              "system/scope.yml:1: scope.yml must be a YAML list of ceilings"
            ]
   end
+
+  @ceiling """
+  - name: modules
+    ceiling: 4
+    counter: { kind: glob, pattern: "lib/**" }
+  """
+
+  @tag obligation: "covenant.contract.I11"
+  test "a second YAML document is an error, not silently dropped" do
+    assert messages(Scope.parse(@ceiling <> "---\n[]\n", @path)) == [
+             "system/scope.yml:5: more than one YAML document in the file"
+           ]
+  end
+
+  @tag obligation: "covenant.contract.I11"
+  test "a merge key is an error, not silently ignored" do
+    assert messages(Scope.parse(@ceiling <> "  <<: { ceiling: 1 }\n", @path)) == [
+             "system/scope.yml:4: merge keys (`<<`) are not supported"
+           ]
+  end
+
+  @tag obligation: "covenant.contract.I11"
+  test "a repeated mapping key is an error, not silently resolved" do
+    assert messages(Scope.parse(@ceiling <> "  ceiling: 1\n", @path)) == [
+             "system/scope.yml:4: key `ceiling` is repeated (first at line 2)"
+           ]
+  end
+
+  @tag obligation: "covenant.contract.I11"
+  test "fields of the wrong type are errors, not crashes" do
+    text = """
+    - name: { bad: data }
+      ceiling: 1
+      counter: { kind: glob, pattern: "lib/**" }
+    - name: typed
+      ceiling: 1
+      why: [a]
+      record: { b: c }
+      counter: { kind: glob, pattern: "lib/**" }
+    - name: other
+      ceiling: 1
+      counter: { kind: module, module: [a], function: b }
+    """
+
+    assert messages(Scope.parse(text, @path)) == [
+             "system/scope.yml:1: ceiling #1 must have a `name`",
+             "system/scope.yml:4: ceiling #2 `typed` `why` must be text",
+             "system/scope.yml:9: ceiling #3 `other` needs a `counter` of kind `glob` (with `pattern`) or `module` (with `module` and `function`)"
+           ]
+  end
 end

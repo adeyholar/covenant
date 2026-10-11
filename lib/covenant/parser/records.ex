@@ -59,7 +59,7 @@ defmodule Covenant.Parser.Records do
   end
 
   defp read_yaml_document(text, file) do
-    case YamlElixir.read_from_string(text) do
+    case read_document(text, file) do
       {:ok, items} when is_list(items) ->
         {:ok, items}
 
@@ -69,6 +69,27 @@ defmodule Covenant.Parser.Records do
       {:ok, _other} ->
         {:error, [Error.new(file, 1, "decision records must be a YAML list of records")]}
 
+      {:error, errors} ->
+        {:error, errors}
+    end
+  end
+
+  @doc false
+  # Reads one YAML document, shared with `Covenant.Parser.Scope`. YamlElixir
+  # keeps only one of several documents, ignores `<<` merge keys and keeps one
+  # of two equal keys, so the parsed nodes are checked for all three first.
+  @spec read_document(String.t(), Path.t()) :: {:ok, term()} | {:error, [Error.t()]}
+  def read_document(text, file) do
+    with {:ok, [_ | _] = documents} <- YamlElixir.read_all_from_string(text),
+         [] <- node_problems(text) do
+      {:ok, List.last(documents)}
+    else
+      {:ok, []} ->
+        {:ok, nil}
+
+      [_ | _] = problems ->
+        {:error, Enum.map(problems, fn {line, message} -> Error.new(file, line, message) end)}
+
       {:error, %{line: line, message: message}} ->
         {:error, [Error.new(file, line, "invalid YAML: #{message}")]}
 
@@ -76,6 +97,55 @@ defmodule Covenant.Parser.Records do
         {:error, [Error.new(file, 1, "invalid YAML: #{Exception.message(error)}")]}
     end
   end
+
+  defp node_problems(text) do
+    docs =
+      :yamerl_constr.string(text,
+        detailed_constr: true,
+        str_node_as_binary: true,
+        keep_duplicate_keys: true
+      )
+
+    extra =
+      for {:yamerl_doc, root} <- Enum.drop(docs, 1),
+          do: {node_line(root), "more than one YAML document in the file"}
+
+    extra ++ Enum.flat_map(docs, fn {:yamerl_doc, root} -> map_problems(root) end)
+  end
+
+  defp map_problems({:yamerl_seq, _, _, _, items, _}), do: Enum.flat_map(items, &map_problems/1)
+
+  defp map_problems({:yamerl_map, _, _, _, pairs}) do
+    {problems, _seen} =
+      Enum.reduce(pairs, {[], %{}}, fn {key, value}, {problems, seen} ->
+        name = key_name(key)
+        line = node_line(key)
+
+        found =
+          cond do
+            name == "<<" ->
+              [{line, "merge keys (`<<`) are not supported"}]
+
+            is_map_key(seen, name) ->
+              [{line, "key `#{name}` is repeated (first at line #{seen[name]})"}]
+
+            true ->
+              []
+          end
+
+        {problems ++ found ++ map_problems(value), Map.put_new(seen, name, line)}
+      end)
+
+    problems
+  end
+
+  defp map_problems(_scalar), do: []
+
+  defp key_name({:yamerl_str, _, _, _, name}), do: name
+  defp key_name(node) when tuple_size(node) > 4, do: inspect(elem(node, 4))
+  defp key_name(_node), do: "~"
+
+  defp node_line(node), do: node |> elem(3) |> Keyword.get(:line, 1)
 
   defp item_lines(text) do
     text
@@ -100,6 +170,10 @@ defmodule Covenant.Parser.Records do
       required(item, "approved_by", label, file, line),
       id_shape(item, label, file, line),
       date_shape(item, label, file, line),
+      Enum.map(
+        ~w(decision driver approved_by evidence expires notes),
+        &text(item, &1, label, file, line)
+      ),
       enum(item, "kind", Record.kinds(), label, file, line),
       string_or_list(item, "invariant", label, file, line),
       string_or_list(item, "source", label, file, line),
@@ -213,6 +287,16 @@ defmodule Covenant.Parser.Records do
     end
   end
 
+  defp text(item, key, label, file, line) do
+    case Map.get(item, key) do
+      value when is_map(value) or is_list(value) ->
+        Error.new(file, line, "#{label} `#{key}` must be text")
+
+      _ ->
+        []
+    end
+  end
+
   defp optional_string(item, key, label, file, line) do
     case Map.get(item, key) do
       nil -> []
@@ -230,8 +314,15 @@ defmodule Covenant.Parser.Records do
         list
         |> Enum.with_index(1)
         |> Enum.flat_map(fn
-          {%{"option" => option}, _} when is_binary(option) -> []
-          {_, i} -> [Error.new(file, line, "#{label} alternative ##{i} must have an `option`")]
+          {%{"option" => option, "rejected" => rejected}, i}
+          when is_binary(option) and (is_map(rejected) or is_list(rejected)) ->
+            [Error.new(file, line, "#{label} alternative ##{i} `rejected` must be text")]
+
+          {%{"option" => option}, _} when is_binary(option) ->
+            []
+
+          {_, i} ->
+            [Error.new(file, line, "#{label} alternative ##{i} must have an `option`")]
         end)
 
       _ ->

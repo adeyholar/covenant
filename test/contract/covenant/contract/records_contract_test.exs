@@ -172,6 +172,58 @@ defmodule Covenant.Contract.RecordsContractTest do
     assert {:ok, []} = parse("")
   end
 
+  @tag obligation: "covenant.contract.I11"
+  test "a second YAML document is an error, not silently dropped" do
+    assert messages(parse(ContractBuilder.widget_records() <> "---\n[]\n")) == [
+             "demo/widget.decisions.yml:11: more than one YAML document in the file"
+           ]
+  end
+
+  @tag obligation: "covenant.contract.I11"
+  test "a merge key is an error, not silently ignored" do
+    text = ContractBuilder.widget_records() <> "  <<: { depends_on: [missing] }\n"
+
+    assert messages(parse(text)) == [
+             "demo/widget.decisions.yml:10: merge keys (`<<`) are not supported"
+           ]
+  end
+
+  @tag obligation: "covenant.contract.I11"
+  test "a repeated mapping key is an error, not silently resolved" do
+    text = ContractBuilder.widget_records() <> "  depends_on: []\n  depends_on: [missing]\n"
+
+    assert messages(parse(text)) == [
+             "demo/widget.decisions.yml:11: key `depends_on` is repeated (first at line 10)"
+           ]
+  end
+
+  @tag obligation: "covenant.contract.I11"
+  test "a mapping where text is expected is an error, not a crash" do
+    text =
+      String.replace(
+        ContractBuilder.widget_records(),
+        "decision: The size is stored.",
+        "decision: { bad: data }\n  notes: [a]\n  evidence: { x: 1 }"
+      )
+
+    assert messages(parse(text)) == [
+             "demo/widget.decisions.yml:1: record `keep-size` `decision` must be text",
+             "demo/widget.decisions.yml:1: record `keep-size` `evidence` must be text",
+             "demo/widget.decisions.yml:1: record `keep-size` `notes` must be text"
+           ]
+  end
+
+  @tag obligation: "covenant.contract.I11"
+  test "an alternative's rejected reason must be text" do
+    text =
+      ContractBuilder.widget_records() <>
+        "  alternatives:\n    - option: a\n      rejected: [x]\n"
+
+    assert messages(parse(text)) == [
+             "demo/widget.decisions.yml:1: record `keep-size` alternative #1 `rejected` must be text"
+           ]
+  end
+
   @tag obligation: "covenant.contract.I7"
   test "parse_file reports an unreadable file" do
     assert {:error, [%Error{line: nil, message: message}]} =

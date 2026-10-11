@@ -29,7 +29,7 @@ defmodule Covenant.Parser.Scope do
   end
 
   defp parse_document(text, file) do
-    case YamlElixir.read_from_string(text) do
+    case Covenant.Parser.Records.read_document(text, file) do
       {:ok, nil} ->
         {:ok, []}
 
@@ -44,11 +44,8 @@ defmodule Covenant.Parser.Scope do
       {:ok, _} ->
         {:error, [Error.new(file, 1, "scope.yml must be a YAML list of ceilings")]}
 
-      {:error, %{line: line, message: message}} ->
-        {:error, [Error.new(file, line, "invalid YAML: #{message}")]}
-
-      {:error, error} ->
-        {:error, [Error.new(file, 1, "invalid YAML: #{Exception.message(error)}")]}
+      {:error, errors} ->
+        {:error, errors}
     end
   end
 
@@ -68,11 +65,13 @@ defmodule Covenant.Parser.Scope do
   end
 
   defp ceiling(%{} = item, index, line, file) do
-    label = "ceiling ##{index + 1}#{if item["name"], do: " `#{item["name"]}`"}"
+    label = "ceiling ##{index + 1}#{if is_binary(item["name"]), do: " `#{item["name"]}`"}"
 
     with {:ok, name} <- fetch_string(item, "name", label, file, line),
          {:ok, limit} <- fetch_ceiling(item, label, file, line),
-         {:ok, counter} <- counter(item["counter"], label, file, line) do
+         {:ok, counter} <- counter(item["counter"], label, file, line),
+         :ok <- text(item, "why", label, file, line),
+         :ok <- text(item, "record", label, file, line) do
       {:ok,
        %Ceiling{
          name: name,
@@ -88,6 +87,16 @@ defmodule Covenant.Parser.Scope do
 
   defp ceiling(_item, index, line, file),
     do: {:error, [Error.new(file, line, "ceiling ##{index + 1} must be a mapping")]}
+
+  defp text(item, key, label, file, line) do
+    case Map.get(item, key) do
+      value when is_map(value) or is_list(value) ->
+        {:error, [Error.new(file, line, "#{label} `#{key}` must be text")]}
+
+      _ ->
+        :ok
+    end
+  end
 
   defp fetch_string(item, key, label, file, line) do
     case Map.get(item, key) do

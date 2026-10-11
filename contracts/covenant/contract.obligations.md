@@ -71,3 +71,9 @@ problem anchored to a file and line.
 - **must:** fail, at the offending line, an obligation-shaped heading (`<id>.I<n> — <title>`) at any level but `###`, an obligation heading indented by one to three spaces, a code fence never closed, a field line outside an obligation block, and a field repeated within one block; an obligation must not vanish or change because of how its neighbours are written
 - **kind:** functional
 - **status:** active
+
+### covenant.contract.I11 — A YAML Contract file is read whole or rejected
+- **scope:** `Covenant.Parser.Records`, `Covenant.Parser.Scope`
+- **must:** fail, at the offending line and without raising, a file holding more than one YAML document, a `<<` merge key, a mapping key repeated within one mapping, and a field whose value is a mapping or list where text is expected (`decision`, `driver`, `approved_by`, `evidence`, `expires`, `notes`, an alternative's `rejected`, a ceiling's `why` and `record`); a ceiling or record must not vanish or change because the YAML reader would drop, ignore or pick between values
+- **kind:** functional
+- **status:** active
