@@ -359,7 +359,7 @@ Every worker, `--jobs 1` included, runs the tests from a private copy of the pro
 - After each mutant the worker checks that the applications the baseline started are still running. If one is not, it restarts them and runs the unmutated suite once. At the end it runs the unmutated suite again. A broken VM ends the run with an error naming the mutant, instead of recording false kills.
 - A test's measured time includes its teardown (`on_exit`, supervised shutdown), and the unmutated re-runs use the baseline's timeout, not a mutant's. A red re-run is retried once. Before every run, the copy's `tmp/` is made writable again, so a test that leaves a read-only directory there doesn't break the next run.
 - A watchdog stops a mutant when no test finishes for ten times the baseline, plus five seconds, plus the per-test timeout. The mutant is a `timeout`, a survivor, unless a test had already failed against it, which makes it a kill with partial credit. The task starts a new worker for the rest.
-- A worker dies with its parent and removes its copy first.
+- A worker dies with its parent and removes its copy first. Whenever it removes a copy that the suite's processes may still be writing to, it steps out of the copy beforehand, so nothing they write by a relative path can keep it alive.
 - Concurrent runs of one component don't clobber each other.
 
 ## The sibling layout
@@ -549,6 +549,7 @@ mix covenant.check     # Covenant against its own Contract
 - A `value` check calls only zero-arity functions.
 - Mutation runs one component at a time. There is no mode that mutates only what a branch changed.
 - The private copy protects relative paths only. A mutant can still write through an absolute path or a link to `_build` or `deps`.
+- Run as root, a mutant that times out while several of its processes keep creating files can leave a small `covenant-parked-*` directory in the system temp directory. The worker reports it on standard error.
 - The modules that run the mutation worker can't be mutated by their own run.
 - Struct fields given by a module attribute (`defstruct @fields`, `defexception @fields`) are still mutated, and the mutants that result can't be killed. Sort them as `equivalent`.
 - In the sibling layout, a `covers` function must be public: the check finds it with `__info__/1`.

@@ -107,6 +107,77 @@ defmodule Covenant.MutateFix9ContractTest do
     end
   end
 
+  # The strays of a timed-out mutant: processes that put back, by a relative path, whatever
+  # is removed, and go on after an error. Started with the VM's working directory in the
+  # copy; the working directory goes back to where it was only once they are dead and
+  # the file server has answered every request they left behind.
+  defp strays_in(workdir) do
+    previous = File.cwd!()
+    File.mkdir_p!(Path.join(workdir, "tmp"))
+    File.write!(Path.join(workdir, "mix.exs"), "")
+    File.cd!(workdir)
+    strays = for n <- 1..8, do: spawn(fn -> put_back(n) end)
+
+    on_exit(fn ->
+      for stray <- strays do
+        ref = Process.monitor(stray)
+        Process.exit(stray, :kill)
+        assert_receive {:DOWN, ^ref, :process, ^stray, _}
+      end
+
+      File.cwd()
+      File.cd!(previous)
+    end)
+
+    written = fn -> length(File.ls!(Path.join(workdir, "tmp"))) == length(strays) end
+    assert wait_until(5_000, written), "the strays wrote nothing"
+  end
+
+  defp put_back(n) do
+    File.mkdir_p("tmp")
+    File.write(Path.join("tmp", "progress#{n}"), "x")
+    put_back(n)
+  end
+
+  defp wait_until(ms, fun) do
+    cond do
+      fun.() -> true
+      ms <= 0 -> false
+      true -> Process.sleep(10) && wait_until(ms - 10, fun)
+    end
+  end
+
+  @tag obligation: "covenant.mutate.I20"
+  test "leaving the copy first, its removal wins against processes that keep putting their files back",
+       %{scratch: scratch} do
+    workdir = Path.join(scratch, "covenant-mutate-1-busy")
+    strays_in(workdir)
+
+    assert Workdir.leave(workdir) == :ok
+    # the working directory no longer exists: a relative write has nowhere to land
+    assert File.cwd() == {:error, :enoent}
+    assert File.write(Path.join("tmp", "late"), "x") == {:error, :enoent}
+
+    assert Workdir.remove(workdir) == :ok
+    refute File.exists?(workdir)
+    # nothing is left next to it either
+    assert File.ls!(scratch) == []
+  end
+
+  @tag obligation: "covenant.mutate.I23"
+  test "an orphaned worker leaves its copy before removing it, whatever the suite still writes",
+       %{scratch: scratch} do
+    workdir = Path.join(scratch, "covenant-mutate-1-orphan")
+    strays_in(workdir)
+    Workdir.register(workdir)
+    on_exit(&Workdir.unregister/0)
+
+    assert Covenant.Mutate.Runner.remove_workdir() == :ok
+    assert File.cwd() == {:error, :enoent}
+    refute File.exists?(workdir)
+    assert File.ls!(scratch) == []
+  end
+
   @tag obligation: "covenant.mutate.I22"
   test "a survivors file the strict reader refuses (two documents, merge key, duplicate key) fails the task, naming file and line",
        %{scratch: scratch} do

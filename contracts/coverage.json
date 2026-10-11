@@ -735,7 +735,7 @@
         "covenant.mutate.I20": {
           "failing": 0,
           "kind": "functional",
-          "passing": 9,
+          "passing": 10,
           "status": "active",
           "testable": true,
           "tests": [
@@ -747,6 +747,7 @@
             "test a stopped worker leaves no directory behind: the copy is removed, and the halt follows",
             "test a timed-out mutant's stray processes never write into the project",
             "test an unmutated re-run that outruns its budget abandons the copy and halts with exit 3, naming the last mutant",
+            "test leaving the copy first, its removal wins against processes that keep putting their files back",
             "test many tests that each hit the per-test timeout finish, and are not a hang"
           ]
         },
@@ -780,12 +781,13 @@
         "covenant.mutate.I23": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 6,
           "status": "active",
           "testable": true,
           "tests": [
             "test a worker halts with status 1 when its standard input ends, and a port's program sees that end when the port closes",
             "test a worker whose parent dies removes its copy of the project",
+            "test an orphaned worker leaves its copy before removing it, whatever the suite still writes",
             "test jobs are capped at the number of mutants, and a count over the schedulers is warned about",
             "test the private copy is registered for the stdin watcher as soon as it exists, while it is copied",
             "test when one worker fails the others are stopped, not waited for"

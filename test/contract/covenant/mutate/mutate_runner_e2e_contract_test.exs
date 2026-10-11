@@ -108,7 +108,8 @@ defmodule Covenant.MutateRunnerE2EContractTest do
     assert [_, in_callback] = Regex.run(~r/CWD_IN_CALLBACK (\S+)/, output)
     assert Path.basename(in_callback) =~ ~r/^covenant-mutate-/
     # the copy is gone at the halt (not recreated empty), stray writers or not
-    refute File.exists?(in_callback)
+    refute File.exists?(in_callback), output
+    refute output =~ "could not remove"
     # the probe waits a second after the timeout before it halts: nothing appeared in the project
     refute File.exists?(Path.join(@project, "tmp"))
   end

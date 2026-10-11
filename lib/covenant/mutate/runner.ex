@@ -522,7 +522,9 @@ defmodule Covenant.Mutate.Runner do
     case outcome do
       {:returned, {:abandon, _, _} = abandon} ->
         # a mutant's processes may still run: the cwd never goes back to the project.
-        # The copy goes; a deleted cwd gives `:enoent` to a stray relative write
+        # It leaves the copy first, for a directory that is gone at once: a stray relative
+        # write gets `:enoent` and cannot put back what the removal takes away
+        Workdir.leave(workdir)
         Workdir.remove(workdir)
         Workdir.unregister()
         settle(plan, abandon, workdir)
@@ -542,11 +544,16 @@ defmodule Covenant.Mutate.Runner do
   end
 
   @doc """
-  Removes the private copy of the running worker, if there is one (it never raises).
-  The task's stdin watcher calls it before halting when the parent has died.
+  Removes the private copy of the running worker, if there is one (it never raises),
+  after taking the working directory out of it: the suite may be in the middle of a
+  run, and its processes must not put back what is being removed. The task's stdin
+  watcher calls it before halting when the parent has died.
   """
   @spec remove_workdir() :: :ok
-  def remove_workdir, do: Workdir.remove_registered()
+  def remove_workdir do
+    with dir when is_binary(dir) <- Workdir.registered(), do: Workdir.leave(dir)
+    Workdir.remove_registered()
+  end
 
   # With an `:on_timeout` the VM halts and the deleted directory is all that is left of
   # the copy. When nothing halts (no callback, or a `:halt` that returns) the VM goes on,

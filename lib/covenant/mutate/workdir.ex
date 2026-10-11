@@ -302,6 +302,31 @@ defmodule Covenant.Mutate.Workdir do
   end
 
   @doc """
+  Takes the working directory of the VM out of the copy `dir`, for a new, empty,
+  read-only directory next to it that is removed at once: the working directory
+  no longer exists. The runner calls it before `remove/1` whenever the processes
+  of a suite may still run. One that writes by a relative path gets `:enoent`
+  from then on, so it cannot put back what the removal takes away: a few
+  processes rewriting files under `tmp/` kept that directory, and so the whole
+  copy, from ever being removed. It never raises; when the directory cannot be
+  made, the working directory stays where it was.
+  """
+  @spec leave(Path.t()) :: :ok
+  def leave(dir) do
+    # not named like a copy: whoever looks for copies does not find it
+    parked = Path.join(Path.dirname(dir), "covenant-parked-#{System.pid()}-#{random_suffix()}")
+
+    with :ok <- File.mkdir(parked) do
+      File.chmod(parked, 0o500)
+      File.cd(parked)
+      # empty, unless the strays run as root (the mode does not stop them) and wrote first
+      with {:error, _} <- File.rmdir(parked), do: rm_rf(parked, 5)
+    end
+
+    :ok
+  end
+
+  @doc """
   Removes the directory like `remove/1`, then leaves the process's working
   directory in a new, empty directory at the same path: a stray process of a
   mutant that still writes by a relative path fails with `:enoent` instead of
