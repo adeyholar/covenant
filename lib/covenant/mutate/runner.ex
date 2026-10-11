@@ -19,6 +19,33 @@ defmodule Covenant.Mutate.Runner do
   and a failure that is only an `ExUnit.TimeoutError` never counts as a kill
   (record `timeouts-are-survivors`).
 
+  ## The watchdog
+
+  A suite run is bounded by a **progress** watchdog: `budget_ms/2` is the
+  longest it may go without finishing a test (the collector sends a heartbeat
+  at each finished test, and the timer starts over). A loop in `setup_all` and
+  a test tagged `timeout: :infinity` finish nothing and trip it; a mutant that
+  makes every one of many tests hit ExUnit's per-test timeout does not, since
+  each of those is a finished test (a failure by `:timeout`, which is not a
+  kill but is not a hang either). The allowed gap is the per-test timeout (the
+  longest a test legitimately takes to be declared finished), plus ten times
+  the baseline's whole duration (a `setup_all` or teardown that is slow in
+  the baseline is never slower than that by a factor of ten), plus five seconds.
+
+  When a mutant trips it, its processes are still running mutated code: killing
+  the task that called `ExUnit.run/1` does not stop the test and module
+  processes ExUnit spawned. So the working directory is **never** restored to
+  the project root. The plan's `:on_timeout` is called from inside the
+  isolated working directory (`cwd` is the workdir; give it an ABSOLUTE
+  path to write to); then the workdir is removed without raising, and the
+  process's cwd is left in a new, empty, read-only directory at the same
+  path, where a stray relative write fails with `:enoent`; the runner then
+  halts the VM with `timeout_exit/0` (plan key `:halt`, `System.halt/1` by
+  default). If it does not halt (a `:halt` that returns, or no `:on_timeout`),
+  the run returns an error with the cwd still in that empty directory, not
+  the project root: restoring it would let the stray processes write into the
+  project, and a leaked empty temp dir is a small price.
+
   With `fail_fast: true` a mutant's run stops at its first failing test
   (`max_failures: 1`): the verdict is the same, the credit is `:partial`. A
   timeout counts as a failure to ExUnit, so a run that stopped on nothing but a
@@ -31,8 +58,9 @@ defmodule Covenant.Mutate.Runner do
   # what the baseline runs under when the plan gives no timeout: ExUnit's own default
   @baseline_timeout 60_000
 
-  # a mutant's wall-clock budget: ExUnit's per-test timeout does not bound a
-  # `setup_all`, nor a test tagged `timeout: :infinity`
+  # a mutant's progress budget: the longest the suite may go without finishing a
+  # test. ExUnit's per-test timeout does not bound a `setup_all`, nor a test
+  # tagged `timeout: :infinity`
   @budget_factor 10
   @budget_extra_ms 5_000
   @timeout_exit 3
@@ -56,10 +84,13 @@ defmodule Covenant.Mutate.Runner do
     end
 
     @impl true
-    def handle_cast({:test_finished, %ExUnit.Test{} = test}, state),
-      do:
-        {:noreply,
-         %{state | finished: [Covenant.Mutate.Runner.entry(test, state.root) | state.finished]}}
+    def handle_cast({:test_finished, %ExUnit.Test{} = test}, state) do
+      # the heartbeat of the progress watchdog (`Covenant.Mutate.Runner.run_tests/3`)
+      send(state.sink, :covenant_heartbeat)
+
+      {:noreply,
+       %{state | finished: [Covenant.Mutate.Runner.entry(test, state.root) | state.finished]}}
+    end
 
     def handle_cast({:suite_finished, _}, state) do
       send(state.sink, {:covenant_mutate_run, Enum.reverse(state.finished)})
@@ -100,9 +131,12 @@ defmodule Covenant.Mutate.Runner do
     first failing test: exact verdict, `credit: :partial` on a kill;
   * `:on_timeout` — (optional) called with the results so far, the timed-out
     mutant included with the verdict `:timeout`, and that mutant when a
-    mutant's run outlasts its wall-clock budget (`budget_ms/2`); it is meant to
-    write the results to disk and `System.halt(timeout_exit())`. If it returns,
-    the run is an error;
+    mutant's run goes longer than `budget_ms/2` without finishing a test. It
+    runs with the working directory set to the worker's private copy, so it
+    must write the results to an ABSOLUTE path; it need not halt: when it
+    returns the runner removes the copy and halts with `timeout_exit/0`;
+  * `:halt` — (optional, default `&System.halt/1`) what the runner calls with
+    `timeout_exit/0` after `:on_timeout`; when it returns, the run is an error;
   * `:skip` — (optional) ids of mutants not to run (those a worker that was
     stopped had already judged);
   * `:isolate` — (optional, default `true`) run the tests from a private copy
@@ -123,6 +157,7 @@ defmodule Covenant.Mutate.Runner do
           optional(:fail_fast) => boolean(),
           optional(:keep) => (Mutant.t() -> boolean()),
           optional(:on_timeout) => (result(), Mutant.t() -> any()),
+          optional(:halt) => (pos_integer() -> any()),
           optional(:skip) => [String.t()],
           optional(:isolate) => boolean()
         }
@@ -141,10 +176,7 @@ defmodule Covenant.Mutate.Runner do
   def run(plan) do
     with {:ok, files} <- prepare_files(plan),
          {:ok, modules} <- boot_suite(plan) do
-      case isolated(plan, fn -> run_suite(plan, files, modules) end) do
-        {:timeout, result, mutant} -> expired(plan, result, mutant)
-        other -> other
-      end
+      isolated(plan, fn -> run_suite(plan, files, modules) end)
     end
   end
 
@@ -201,6 +233,7 @@ defmodule Covenant.Mutate.Runner do
         end
       end)
       |> finish(modules, env)
+      |> expire(plan)
     end
   end
 
@@ -258,25 +291,32 @@ defmodule Covenant.Mutate.Runner do
     timed_out = %{
       mutant
       | verdict: :timeout,
-        reason: "ran past its time budget of #{env.budget} ms (a watchdog stopped the worker)",
+        reason: "no test finished within #{env.budget} ms (a watchdog stopped the worker)",
         replacement: nil
     }
 
     {:timeout, env.result.(Enum.reverse([timed_out | verdicts])), timed_out}
   end
 
-  # The working directory is the project's again here. `:on_timeout` persists the
-  # results and halts the worker with `timeout_exit/0`; without one, or if it
-  # returns, the run is an error.
-  defp expired(plan, result, mutant) do
+  # Still inside the isolated directory, and the mutant's processes may still run:
+  # `:on_timeout` persists the results (to an absolute path), then `isolated/2`
+  # abandons the directory and `halt` stops the VM. Without a `:halt` that
+  # returns, no error comes back before that.
+  defp expire({:timeout, result, mutant}, plan) do
     with %{on_timeout: on_timeout} <- plan, do: on_timeout.(result, mutant)
 
-    {:error,
-     "#{describe(mutant)} ran past its time budget (#{mutant.reason}); a test loops outside " <>
-       "ExUnit's per-test timeout"}
+    {:abandon, plan,
+     {:error,
+      "#{describe(mutant)} ran past its time budget (#{mutant.reason}); a test loops outside " <>
+        "ExUnit's per-test timeout"}}
   end
 
-  @doc "The wall-clock budget of one mutant's run, in ms, given the baseline's duration and per-test timeout."
+  defp expire(other, _plan), do: other
+
+  @doc """
+  The progress budget of one mutant's run, in ms: the longest the suite may go
+  without finishing a test, given the baseline's duration and per-test timeout.
+  """
   @spec budget_ms(non_neg_integer(), pos_integer()) :: pos_integer()
   def budget_ms(baseline_ms, timeout_ms),
     do: @budget_factor * baseline_ms + @budget_extra_ms + timeout_ms
@@ -379,17 +419,44 @@ defmodule Covenant.Mutate.Runner do
   # working directory, so workers running side by side must not share it. The
   # suite is already compiled and loaded, so only what the tests do at run time
   # sees the private copy.
-  defp isolated(%{isolate: false}, fun), do: fun.()
+  defp isolated(%{isolate: false} = plan, fun), do: settle(plan, fun.())
 
-  defp isolated(%{root: root}, fun) do
+  defp isolated(%{root: root} = plan, fun) do
     workdir = Workdir.build(root)
+    previous = File.cwd!()
+    File.cd!(workdir)
 
-    try do
-      Workdir.within(workdir, fun)
-    after
-      Workdir.remove(workdir)
+    outcome =
+      try do
+        {:returned, fun.()}
+      catch
+        kind, reason -> {:raised, kind, reason, __STACKTRACE__}
+      end
+
+    case outcome do
+      {:returned, {:abandon, _, _} = abandon} ->
+        # a mutant's processes may still run: the cwd never goes back to the project
+        Workdir.abandon(workdir)
+        settle(plan, abandon)
+
+      {:returned, result} ->
+        File.cd!(previous)
+        Workdir.remove(workdir)
+        result
+
+      {:raised, kind, reason, stacktrace} ->
+        File.cd!(previous)
+        Workdir.remove(workdir)
+        :erlang.raise(kind, reason, stacktrace)
     end
   end
+
+  defp settle(plan, {:abandon, _, error}) do
+    if Map.has_key?(plan, :on_timeout), do: Map.get(plan, :halt, &System.halt/1).(@timeout_exit)
+    error
+  end
+
+  defp settle(_plan, result), do: result
 
   # -- files ------------------------------------------------------------------
 
@@ -565,19 +632,23 @@ defmodule Covenant.Mutate.Runner do
   end
 
   # The suite runs in a task, so a suite that never ends (a `setup_all` that loops) is
-  # `:budget`, not a hang; and a run that ends without the collector's report is an
-  # error, not a wait.
+  # `:budget`, not a hang; `budget` is the allowed gap between two finished tests (the
+  # collector's heartbeats start the timer over). A run that ends without the collector's
+  # report is an error, not a wait.
   @doc false
   @spec run_tests([module()], pos_integer() | :infinity, pos_integer() | :infinity) ::
           {:ok, [entry()]} | {:error, String.t()} | :budget
   def run_tests(modules, max_failures, budget) do
     ExUnit.configure(max_failures: max_failures)
+    flush_heartbeats()
     task = Task.async(fn -> ExUnit.run(modules) end)
 
-    case Task.yield(task, budget) || Task.shutdown(task, :brutal_kill) do
+    case await(task, budget) do
       {:ok, _} ->
         receive do
-          {:covenant_mutate_run, tests} -> {:ok, tests}
+          {:covenant_mutate_run, tests} ->
+            flush_heartbeats()
+            {:ok, tests}
         after
           5_000 -> {:error, "the mutant run finished but the collector reported nothing"}
         end
@@ -587,6 +658,30 @@ defmodule Covenant.Mutate.Runner do
 
       {:exit, reason} ->
         exit(reason)
+    end
+  end
+
+  defp await(%Task{ref: ref} = task, gap) do
+    receive do
+      {^ref, reply} ->
+        Process.demonitor(ref, [:flush])
+        {:ok, reply}
+
+      {:DOWN, ^ref, _, _, reason} ->
+        {:exit, reason}
+
+      :covenant_heartbeat ->
+        await(task, gap)
+    after
+      gap -> Task.shutdown(task, :brutal_kill) || nil
+    end
+  end
+
+  defp flush_heartbeats do
+    receive do
+      :covenant_heartbeat -> flush_heartbeats()
+    after
+      0 -> :ok
     end
   end
 
