@@ -17,12 +17,13 @@ defmodule Covenant do
     results_dir: "_build/covenant/results"  # where `Covenant.Formatter` writes its results
   ```
 
-  `contracts_dir` and `results_dir` are relative to the directory `mix` runs
-  in; `test_paths` are relative to `root/0`, so every task finds the same
+  `contracts_dir` is relative to `root/0` (or absolute) and only locates the Contract, never the
+  root; `results_dir` is relative to the directory `mix` runs in; `test_paths` are relative to `root/0`, so every task finds the same
   tests whichever directory it runs in (a `--test-path` typed on the command
   line is relative to the directory it was typed in). In an umbrella, point
   `contracts_dir` at an absolute path (`Path.expand("../contracts", __DIR__)`
-  from `config/config.exs`) so every app resolves the same directory, and set
+  from `config/config.exs`) so every app resolves the same directory (the root stays the
+  umbrella's), and set
   `test_paths` to `["apps/*/test/contract"]`.
 
   `sibling_dir` is relative to `root/0`. A project may use the `contracts/`
@@ -33,17 +34,29 @@ defmodule Covenant do
   ## The project root
 
   `root/0` is the directory of the Mix project (the umbrella root, for an app of an umbrella),
-  never one above it and never moved by `--contracts` or a nested `contracts_dir` such as
-  `docs/contracts`. Run `mix covenant.check` from an umbrella app and it runs `mix test` from
+  never one above it and never moved by `--contracts` or by `contracts_dir`, relative (`docs/contracts`,
+  `../contracts`) or absolute. Run `mix covenant.check` from an umbrella app and it runs `mix test` from
   the umbrella root, so each app's contract tests run in that app's own VM. Set `COVENANT_ROOT`
   or `config :covenant, root: ...` to say otherwise.
   """
 
   alias Covenant.Contract
 
-  @doc "The contracts directory (`:contracts_dir`, default `\"contracts\"`)."
+  @doc """
+  The contracts directory (`:contracts_dir`, default `"contracts"`): where the Contract is
+  found, never where the project root is. An absolute setting is used as it is; a relative one
+  is relative to `root/0` (shown relative to the working directory when it lies below it).
+  """
   @spec contracts_dir() :: Path.t()
   def contracts_dir do
+    setting = contracts_setting()
+
+    if Path.type(setting) == :absolute,
+      do: setting,
+      else: setting |> Path.expand(root()) |> Path.relative_to_cwd()
+  end
+
+  defp contracts_setting do
     case System.get_env("COVENANT_CONTRACTS_DIR") do
       dir when dir in [nil, ""] -> Application.get_env(:covenant, :contracts_dir, "contracts")
       dir -> dir
@@ -119,33 +132,41 @@ defmodule Covenant do
 
   1. the `COVENANT_ROOT` environment variable;
   2. `config :covenant, root: ...`;
-  3. the parent of `contracts_dir/0` when that is absolute;
-  4. the nearest of the current directory and its ancestors, up to the Mix project's directory
-     (the umbrella's, for an app) and never above it, that holds
-     `contracts_dir/0`, or the sibling layout's directory (`:sibling_dir`)
-     with a primitive (a subdirectory with a README.md) in it; a contracts directory
-     below it (`docs/contracts`) does not make `docs` the root;
-  5. the parent of `:sibling_dir` when that is absolute;
-  6. the Mix project's directory, else the current directory.
+  3. the nearest of the current directory and its ancestors, up to the Mix project's directory
+     (the umbrella's, for an app) and never above it, that holds a relative `contracts_dir/0`
+     (one that does not climb with `..`) or the sibling layout's directory (`:sibling_dir`) with
+     a primitive (a subdirectory with a README.md) in it, so a project nested in another finds
+     its own Contract;
+  4. the parent of an absolute `:sibling_dir`;
+  5. the Mix project's directory, else the current directory.
+
+  `contracts_dir/0` locates the Contract (relative to the root, or absolute) and never defines
+  the root: `contracts_dir: "/repo/docs/contracts"` or `"../contracts"` leaves the root at the
+  Mix project, so a `glob` ceiling still counts the project's files.
 
   The result is an absolute path.
   """
   @spec root() :: Path.t()
   def root do
     explicit = System.get_env("COVENANT_ROOT") || Application.get_env(:covenant, :root)
-    contracts = contracts_dir()
 
     cond do
-      explicit not in [nil, ""] ->
-        Path.expand(explicit)
-
-      Path.type(contracts) == :absolute ->
-        contracts |> Path.expand() |> Path.dirname()
-
-      true ->
-        bound = project_dir(cwd())
-        find_root(cwd(), contracts, sibling(), bound) || sibling_root() || bound || cwd()
+      explicit not in [nil, ""] -> Path.expand(explicit)
+      true -> root_from_layout()
     end
+  end
+
+  # The nearest directory at or below the Mix project that holds a layout, else the project itself.
+  # The configured `contracts_dir` is looked for only when it is relative and stays below its
+  # directory: an absolute or climbing (`..`) one says where the Contract is, never where the root is.
+  defp root_from_layout do
+    bound = project_dir(cwd())
+    setting = contracts_setting()
+
+    contracts =
+      if Path.type(setting) == :relative and ".." not in Path.split(setting), do: setting
+
+    find_root(cwd(), contracts, sibling(), bound) || sibling_root() || bound || cwd()
   end
 
   defp cwd, do: File.cwd!()
@@ -228,7 +249,7 @@ defmodule Covenant do
   defp find_root(dir, contracts, sibling, bound) do
     found =
       cond do
-        Path.type(contracts) != :absolute and File.dir?(Path.join(dir, contracts)) ->
+        contracts != nil and File.dir?(Path.join(dir, contracts)) ->
           contracts
 
         (sibling && Path.type(sibling) != :absolute) and primitives?(Path.join(dir, sibling)) ->
@@ -239,18 +260,10 @@ defmodule Covenant do
       end
 
     cond do
-      found -> root_of(dir, found)
+      found -> dir
       Path.dirname(dir) == dir or dir == bound -> nil
       true -> find_root(Path.dirname(dir), contracts, sibling, bound)
     end
-  end
-
-  # `dir` holds `found` (relative): the root, unless `found` climbs (`../../contracts`),
-  # where the root is the directory it names the child of.
-  defp root_of(dir, found) do
-    if ".." in Path.split(found),
-      do: dir |> Path.join(found) |> Path.expand() |> Path.dirname(),
-      else: dir
   end
 
   defp primitives?(dir),

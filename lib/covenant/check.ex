@@ -94,7 +94,7 @@ defmodule Covenant.Check do
         ceilings ++
         covers ++
         overlapping(contract) ++
-        outside(contract, results, File.cwd!(), opts[:sibling])
+        outside(contract, results, root, opts[:sibling])
 
     coverage =
       Coverage.compute(contract, results, covered: if(static?, do: :tagged, else: :passing))

@@ -350,19 +350,43 @@ defmodule Mix.Tasks.Covenant.Check do
         end
 
       results = read_results(run_dir)
-      publish_results(run_dir, results_dir)
+      published = publish_results(run_dir, results_dir)
       File.rm_rf!(run_dir)
+
+      status =
+        case published do
+          :ok -> status
+          {:error, message} -> if status == :ok, do: message, else: "#{status}; #{message}"
+        end
+
       {status, results}
     end
   end
 
+  # Never overwrites a file that is not a Covenant results document: the directory may be anyone's.
   defp publish_results(run_dir, results_dir) do
-    clear_results(results_dir)
+    files = Path.wildcard(Path.join(run_dir, "*.json"))
 
-    for file <- Path.wildcard(Path.join(run_dir, "*.json")) do
-      File.cp!(file, Path.join(results_dir, Path.basename(file)))
+    foreign =
+      for file <- files,
+          dest = Path.join(results_dir, Path.basename(file)),
+          File.exists?(dest) or match?({:ok, _}, File.lstat(dest)),
+          not regular_results?(dest),
+          do: dest
+
+    if foreign == [] do
+      clear_results(results_dir)
+      for file <- files, do: File.cp!(file, Path.join(results_dir, Path.basename(file)))
+      :ok
+    else
+      {:error,
+       "refusing to publish results: #{Enum.join(foreign, ", ")} exists and is not a Covenant " <>
+         "results document (it was left untouched; choose another --results-dir)"}
     end
   end
+
+  defp regular_results?(file),
+    do: match?({:ok, %File.Stat{type: :regular}}, File.lstat(file)) and covenant_results?(file)
 
   # Removes the files `Covenant.Formatter` wrote (`<app>.json` holding a Covenant results
   # document) and nothing else: the directory may be anyone's, and is never removed.
