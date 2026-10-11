@@ -25,7 +25,7 @@ modules: [Covenant.Results, Covenant.Formatter]
 
 ### covenant.results.I3 — Bad results are reported, never guessed
 - **scope:** `Covenant.Results.read_dir/1`, `Covenant.Results.read_file/1`
-- **must:** report an empty results directory with what to do, a corrupt or foreign file with its path, and decode an unknown state as `invalid`
+- **must:** report an empty results directory with what to do, a corrupt file with its path and a Covenant results file whose tests are malformed as `not a Covenant results file`, and decode a state that is not one a run writes (`passed`, `failed`, `skipped`, `excluded`, `invalid`; `tagged` is read only from source) as `invalid`; skip JSON files that are not Covenant results documents (no `covenant` key), as the directory may be anyone's
 - **kind:** functional
 - **status:** active
 

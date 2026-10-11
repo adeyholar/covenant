@@ -380,4 +380,46 @@ defmodule Covenant.CheckContractTest do
     assert Check.run(Contract.load!(dir), ResultsBuilder.results(@all), root: dir).warnings ==
              ["1 component(s) declare no modules: demo.gadget"]
   end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.check.I3"
+  test "every failed run of a parameterized test is reported, whichever result comes first",
+       %{contract: contract, dir: dir} do
+    %Results{tests: [passed]} = ResultsBuilder.results(["demo.widget.I1"])
+    %Results{tests: [gadget]} = ResultsBuilder.results(["demo.gadget.I1"])
+    # `parameterize:` gives one result per parameter, all with the same module and name
+    failed = %{passed | state: :failed, line: 99}
+    results = %Results{apps: ["demo"], tests: [passed, failed, gadget]}
+
+    report = Check.run(contract, results, root: dir)
+    refute Check.Report.ok?(report)
+    assert [problem] = short(report)
+    assert problem =~ "(obligation `demo.widget.I1`) failed"
+
+    invalid = %{passed | state: :invalid, line: 100}
+    report = Check.run(contract, %{results | tests: [passed, failed, invalid, gadget]}, root: dir)
+    assert length(report.problems) == 2
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.check.I5"
+  test "a glob counter that is absolute or climbs out of the root cannot be counted",
+       %{contract: contract, dir: dir} do
+    for pattern <- ["../../**", "/etc/*", "lib/../../*"] do
+      ceiling = %Covenant.Contract.Ceiling{
+        name: "out",
+        ceiling: 0,
+        counter: {:glob, pattern},
+        file: "system/scope.yml",
+        line: 1
+      }
+
+      report =
+        Check.run(%{contract | ceilings: [ceiling]}, ResultsBuilder.results(@all), root: dir)
+
+      assert [problem] = short(report)
+      assert problem =~ "scope ceiling `out` cannot be counted"
+      assert problem =~ pattern
+    end
+  end
 end

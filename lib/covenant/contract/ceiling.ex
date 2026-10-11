@@ -14,7 +14,8 @@ defmodule Covenant.Contract.Ceiling do
   ```
 
   A `glob` counter counts the files matching `pattern` (relative to the
-  project root); a `module` counter calls `module.function/0`, which must
+  project root; an absolute pattern, or one with a `..` segment, is an error: it would count files
+  outside the project); a `module` counter calls `module.function/0`, which must
   return a non-negative integer. `mix covenant.check` fails when a count
   exceeds its ceiling. A module counter that raises (a stub that is not
   implemented yet) leaves its ceiling unchecked, which is reported but never
@@ -48,7 +49,14 @@ defmodule Covenant.Contract.Ceiling do
           {:ok, non_neg_integer()} | {:unchecked, String.t()} | {:error, String.t()}
   def count(%__MODULE__{counter: {:glob, pattern}}, opts) do
     root = Keyword.get(opts, :root, File.cwd!())
-    {:ok, root |> Path.join(pattern) |> Path.wildcard(match_dot: false) |> length()}
+
+    if Path.type(pattern) == :absolute or Regex.match?(~r/(^|[\/{,])\.\.([\/},]|$)/, pattern) do
+      {:error,
+       "glob pattern `#{pattern}` is not under the project root " <>
+         "(a pattern must be relative and may not contain `..`)"}
+    else
+      {:ok, root |> Path.join(pattern) |> Path.wildcard(match_dot: false) |> length()}
+    end
   end
 
   def count(%__MODULE__{counter: {:module, module, function}}, _opts) do

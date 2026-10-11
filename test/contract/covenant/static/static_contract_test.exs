@@ -415,11 +415,12 @@ defmodule Covenant.StaticContractTest do
 
     @tag :tmp_dir
     @tag obligation: "covenant.static.I5"
-    test "falls back to the working directory when no contracts directory is found", %{
+    test "falls back to the Mix project directory when no contracts directory is found", %{
       tmp_dir: dir
     } do
       dir = Path.expand(dir)
       Application.put_env(:covenant, :contracts_dir, "no-such-contracts-dir-anywhere")
+      File.write!(Path.join(dir, "mix.exs"), "# a Mix project of its own")
       assert File.cd!(dir, fn -> Covenant.root() end) == dir
     end
   end

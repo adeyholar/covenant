@@ -33,7 +33,14 @@ defmodule Covenant.Results do
 
   defstruct apps: [], tests: []
 
-  @states ~w(passed failed skipped excluded invalid tagged)
+  # what a run writes; `:tagged` is only ever read from source (`Covenant.Static`), never from a file
+  @states %{
+    "passed" => :passed,
+    "failed" => :failed,
+    "skipped" => :skipped,
+    "excluded" => :excluded,
+    "invalid" => :invalid
+  }
 
   @doc "Converts a finished `ExUnit.Test` into a results entry, or `nil` when it carries no obligation tag."
   @spec from_ex_unit(ExUnit.Test.t()) :: Test.t() | nil
@@ -94,10 +101,18 @@ defmodule Covenant.Results do
     path
   end
 
-  @doc "Reads every `*.json` results file in `dir`."
+  @doc """
+  Reads every Covenant results file (`*.json` holding a document with `covenant`, `app` and `tests`)
+  in `dir`. Other JSON files are skipped: the directory may be anyone's.
+  """
   @spec read_dir(Path.t()) :: {:ok, t()} | {:error, String.t()}
   def read_dir(dir) do
-    files = dir |> Path.join("*.json") |> Path.wildcard() |> Enum.sort()
+    files =
+      dir
+      |> Path.join("*.json")
+      |> Path.wildcard()
+      |> Enum.sort()
+      |> Enum.filter(&covenant_file?/1)
 
     if files == [] do
       {:error,
@@ -112,6 +127,21 @@ defmodule Covenant.Results do
             {:halt, {:error, "#{file}: #{reason}"}}
         end
       end)
+    end
+  end
+
+  # Invalid JSON is not skipped: it may be a Covenant file cut short, and saying so is the safe error.
+  defp covenant_file?(file) do
+    case File.read(file) do
+      {:ok, text} ->
+        case JSON.decode(text) do
+          {:ok, %{} = doc} -> Map.has_key?(doc, "covenant")
+          {:ok, _} -> false
+          {:error, _} -> true
+        end
+
+      {:error, _} ->
+        true
     end
   end
 
@@ -138,7 +168,7 @@ defmodule Covenant.Results do
       line: map["line"],
       component: map["component"],
       obligations: List.wrap(map["obligations"]),
-      state: if(state in @states, do: String.to_existing_atom(state), else: :invalid)
+      state: Map.get(@states, state, :invalid)
     }
   end
 

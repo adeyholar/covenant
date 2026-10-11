@@ -175,7 +175,8 @@ defmodule Covenant.Check do
   defp failing(contract, by_obligation) do
     for {id, tests} <- Enum.sort(by_obligation),
         Contract.obligation(contract, id) != nil,
-        test <- Enum.uniq_by(tests, &{&1.module, &1.name}),
+        # a parameterized test is one result per parameter under one module and name: each failure counts
+        test <- Enum.uniq_by(tests, &{&1.module, &1.name, &1.state}),
         test.state in [:failed, :invalid] do
       Error.new(test.file, test.line, "#{test.name} (obligation `#{id}`) #{test.state}")
     end
@@ -301,7 +302,9 @@ defmodule Covenant.Check do
   directory): only the Contract tests beside a primitive's README may name
   one. Read from the source, so they are found whether or not the test runs.
   """
-  @spec strays([Path.t()], Path.t()) :: [Error.t()]
+  @spec strays([Path.t()], Path.t() | nil) :: [Error.t()]
+  def strays(_files, nil), do: []
+
   def strays(files, sibling) do
     for file <- Enum.sort(Enum.uniq(files)),
         Primitive.primitive_of(file, sibling) == nil,

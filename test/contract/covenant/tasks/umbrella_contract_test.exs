@@ -49,25 +49,28 @@ defmodule Covenant.TasksUmbrellaContractTest do
   end
 
   @tag obligation: "covenant.tasks.I9"
-  test "mix covenant.check --static run from an app reads the tests of every app" do
+  test "mix covenant.check --static run from an app reads the tests of every app (two of them)" do
     {output, status} = mix(["covenant.check", "--static"])
     assert status == 0, output
 
     assert output =~
-             "covenant.check --static: read 2 file(s), 2 contract test module(s), 2 tagged test(s) under apps/*/test/contract; no test was compiled or run"
+             "covenant.check --static: read 3 file(s), 3 contract test module(s), 3 tagged test(s) under apps/*/test/contract; no test was compiled or run"
 
     assert output =~ "covenant.check: the Contract holds statically"
     refute output =~ "declare no modules"
   end
 
   @tag obligation: "covenant.tasks.I9"
-  test "mix covenant.check run from an app runs the configured tests, handed to mix test relative to the app" do
+  test "mix covenant.check run from an app runs the configured tests, run from the umbrella root, handed to mix test relative to it" do
     {output, status} = mix(["covenant.check"])
     assert status == 0, output
 
-    assert output =~ "covenant.check: running mix test test/contract\n"
+    assert output =~
+             "covenant.check: running mix test apps/other/test/contract apps/shop/test/contract\n"
+
+    assert output =~ ~r/1 test, 0 failures/
     assert output =~ ~r/2 tests, 0 failures/
-    assert output =~ ~r/total\s+2\/2\s+100\.0%/
+    assert output =~ ~r/total\s+3\/3\s+100\.0%/
     assert output =~ "covenant.check: the Contract holds"
   end
 
@@ -86,20 +89,22 @@ defmodule Covenant.TasksUmbrellaContractTest do
 
     {output, status} = mix(["covenant.check"])
     assert status == 1, output
-    assert output =~ "scope ceiling `shop-lib` exceeded: 2 > 0"
+    assert output =~ "scope ceiling `shop-lib` exceeded: 3 > 0"
 
     {output, status} = mix(["covenant.check", "--static"])
     assert status == 1, output
-    assert output =~ "scope ceiling `shop-lib` exceeded: 2 > 0"
+    assert output =~ "scope ceiling `shop-lib` exceeded: 3 > 0"
   end
 
   @tag obligation: "covenant.tasks.I9"
   test "a --test-path typed on the command line is relative to the working directory" do
     # from apps/shop, `test/contract` is the app's own tests and `apps/*/test/contract` is nothing
     # (the configured path of the same spelling finds them: it is relative to the root)
+    # only shop's tests are read, so the other app's obligation has no test: exit 1
     {output, status} = mix(["covenant.check", "--static", "--test-path", "test/contract"])
-    assert status == 0, output
+    assert status == 1, output
     assert output =~ "read 2 file(s)"
+    assert output =~ "active obligation `other.thing.I1` has no tagged test"
 
     {output, _status} = mix(["covenant.check", "--static", "--test-path", "apps/*/test/contract"])
     assert output =~ "read 0 file(s)"
