@@ -92,10 +92,11 @@
         "covenant.check.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 1,
+          "passing": 2,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a static run resolves a sibling test's path against the root, not the working directory",
             "test an active obligation without a tagged test fails; retired and exception blocks need none"
           ]
         },
@@ -166,12 +167,13 @@
         "covenant.check.I5": {
           "failing": 0,
           "kind": "functional",
-          "passing": 7,
+          "passing": 8,
           "status": "active",
           "testable": true,
           "tests": [
             "test a glob counter that is absolute or climbs out of the root cannot be counted",
             "test a glob pattern that is absolute or contains .. is an error naming it",
+            "test a malformed glob pattern is a `cannot be counted` error naming it, never a crash",
             "test a module counter that raises leaves its ceiling unchecked, a warning and never a problem",
             "test a module counter that raises, throws or exits is unchecked, naming what happened",
             "test a scope ceiling exceeded fails, one at the limit passes, an uncountable one fails",
@@ -636,7 +638,7 @@
         "covenant.mutate.I15": {
           "failing": 0,
           "kind": "functional",
-          "passing": 12,
+          "passing": 14,
           "status": "active",
           "testable": true,
           "tests": [
@@ -646,6 +648,8 @@
             "test an unreadable entry is left out with a warning, and a failed build leaves no directory",
             "test build and dependency trees are links at any depth, a nested .git is left out, links are copied as links",
             "test building refuses a directory that already exists",
+            "test remove removes a workdir that a mutant left unreadable (mode 000)",
+            "test remove unlinks a workdir path that was replaced by a symlink and never touches its target",
             "test removing it deletes the links, never what they point at",
             "test removing it survives a read-only directory a test left behind",
             "test symlinks never lead a write into the project, and none dangles",
@@ -731,16 +735,18 @@
         "covenant.mutate.I20": {
           "failing": 0,
           "kind": "functional",
-          "passing": 7,
+          "passing": 9,
           "status": "active",
           "testable": true,
           "tests": [
             "test a failing :on_timeout callback does not let a stray mutant process write into the project",
             "test a mutant killed by an early test that a later one then hangs is a partial kill, not a timeout",
+            "test a mutant that hangs the compilation is a timeout, and the worker stops with exit 3",
             "test a mutant that loops outside ExUnit's timeouts is a timeout, and the worker stops with exit 3",
             "test a mutant's budget is ten baselines, five seconds and the per-test timeout, and a stopped worker exits 3",
             "test a stopped worker leaves no directory behind: the copy is removed, and the halt follows",
             "test a timed-out mutant's stray processes never write into the project",
+            "test an unmutated re-run that outruns its budget abandons the copy and halts with exit 3, naming the last mutant",
             "test many tests that each hit the per-test timeout finish, and are not a hang"
           ]
         },
@@ -758,25 +764,30 @@
         "covenant.mutate.I22": {
           "failing": 0,
           "kind": "functional",
-          "passing": 3,
+          "passing": 7,
           "status": "active",
           "testable": true,
           "tests": [
             "test --jobs 1 runs the mutants in a private copy: a mutant that writes by a relative path leaves the project untouched",
             "test a mutant that never ends is a timeout, the worker is respawned for the rest, and every mutant is reported",
+            "test a single-document survivors file, a missing one and a mutants.md pass the check",
+            "test a survivors file the strict reader refuses (two documents, merge key, duplicate key) fails the task, naming file and line",
+            "test the task carries on after a mutant that hangs the compilation",
+            "test the task reports a stopped sanity re-run as an error naming the mutant, and starts no new worker",
             "test two runs of one component at once do not clobber each other's raw results"
           ]
         },
         "covenant.mutate.I23": {
           "failing": 0,
           "kind": "functional",
-          "passing": 4,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
             "test a worker halts with status 1 when its standard input ends, and a port's program sees that end when the port closes",
             "test a worker whose parent dies removes its copy of the project",
             "test jobs are capped at the number of mutants, and a count over the schedulers is warned about",
+            "test the private copy is registered for the stdin watcher as soon as it exists, while it is copied",
             "test when one worker fails the others are stopped, not waited for"
           ]
         },
@@ -894,13 +905,15 @@
         "covenant.primitive.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 6,
+          "passing": 8,
           "status": "active",
           "testable": true,
           "tests": [
             "test a Contract loads from the sibling directory alone, the contracts directory alone, or both",
+            "test a `---` after an obligation list item is a thematic break, never a Setext heading",
             "test a fence that is never closed is an error in a README and in mutants.md",
             "test a line holding a bold id that isn't `- **A1** text` is an error, never skipped",
+            "test a plain paragraph above `---` is still a Setext heading",
             "test a primitive is a subdirectory with a README, and its obligations are its `- **A1**` lines",
             "test an obligation line inside a fence, a repeated id and a bad directory name are refused",
             "test bold words in prose are prose; only a list item opening with a bold id is a candidate"
@@ -932,29 +945,32 @@
         "covenant.primitive.I4": {
           "failing": 0,
           "kind": "functional",
-          "passing": 8,
+          "passing": 10,
           "status": "active",
           "testable": true,
           "tests": [
             "test Covenant.Case turns the comments into the test's obligation tag, merged with @tag",
             "test a Contract comment not directly above a test is a compile error at its line",
+            "test a `# Contract:` line inside a heredoc or a string is not a comment",
             "test a test that names nothing, an unknown id or another primitive's id is a compile error",
             "test ids on a Contract comment are split on commas only",
             "test outside the sibling layout a Contract comment, and a module testing a primitive, are compile errors",
             "test outside the sibling layout a prose `# Contract:` comment is only a comment",
             "test the ids come from the comment and attribute lines directly above a test",
+            "test the orphan comment check is scoped to its own module, and a second module's attached comments pass",
             "test trailing prose on a Contract comment is an unknown obligation, not bogus ids"
           ]
         },
         "covenant.primitive.I5": {
           "failing": 0,
           "kind": "functional",
-          "passing": 4,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
             "test a block without a heading, an equivalent wildcard, a bad line and a repeat are errors",
             "test a declared change may hold arrows of its own, and `#k` names one of several",
+            "test a mutation outside any function is declared against the bare module",
             "test a primitive's survivors file is the mutants.md beside its README",
             "test mutants.md declarations carry the heading and prose above them as their reason"
           ]
@@ -1009,10 +1025,11 @@
         "covenant.regen.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 4,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a custom sibling_dir's helper goes in the pack and the prompt",
             "test a primitive whose covered code is not loadable says its signatures are unavailable",
             "test a primitive's pack has its subdirectory tests, convention and helper, and no mutants.md",
             "test the prompt does not claim there are no signatures when they were all skipped",
@@ -1247,7 +1264,7 @@
           "status": "active",
           "testable": true,
           "tests": [
-            "test Covenant.root/0 and Covenant.test_paths an absolute contracts_dir, config :root and COVENANT_ROOT win in that order",
+            "test Covenant.root/0 and Covenant.test_paths an absolute contracts_dir never defines the root; config :root and COVENANT_ROOT win in that order",
             "test Covenant.root/0 and Covenant.test_paths falls back to the Mix project directory when no contracts directory is found",
             "test Covenant.root/0 and Covenant.test_paths is the parent of the contracts directory from any directory under it"
           ]
@@ -1286,7 +1303,7 @@
         "covenant.tasks.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 8,
+          "passing": 9,
           "status": "active",
           "testable": true,
           "tests": [
@@ -1297,6 +1314,7 @@
             "test mix covenant.check relays a suite that prints bytes that aren't UTF-8, and keeps UTF-8 intact",
             "test mix covenant.check runs the contract suite, prints coverage, writes coverage.json and exits 0",
             "test mix covenant.check warns about a ceiling whose counter raises, writes coverage.json and exits 0",
+            "test publishing results never overwrites a file that is not a Covenant results document",
             "test the relay holds back a character cut between chunks and replaces what isn't UTF-8"
           ]
         },
@@ -1380,7 +1398,7 @@
         "covenant.tasks.I9": {
           "failing": 0,
           "kind": "functional",
-          "passing": 18,
+          "passing": 23,
           "status": "active",
           "testable": true,
           "tests": [
@@ -1390,6 +1408,10 @@
             "test a commented-out apps_path declares nothing",
             "test a computed apps_path counts only for a directory named apps",
             "test a literal apps_path naming another directory is not this app's umbrella",
+            "test a poncho project whose ../contracts exists keeps its own directory as the root",
+            "test a relative --contracts typed in an app means the same Contract to the workers",
+            "test a relative contracts_dir that climbs with .. does not move the root above the project",
+            "test an absolute contracts_dir under docs/ does not move the root; a glob ceiling still counts",
             "test an umbrella app's root is the umbrella root, and a nested contracts_dir keeps the root",
             "test apps_path is read as a double-quoted, single-quoted or ~c string",
             "test mix covenant.check --contracts DIR keeps the root: a glob ceiling is counted from the project",
@@ -1401,7 +1423,8 @@
             "test mix covenant.mutate run from an app finds the app's contract tests and mutates its module",
             "test mix covenant.regen run from an app finds the app's contract tests and lays them out from the root",
             "test sibling_dir: false (or nil) turns the sibling layout off",
-            "test sibling_dir: false in a project's config: check, conditions and regen all run"
+            "test sibling_dir: false in a project's config: check, conditions and regen all run",
+            "test the explicit root still outranks the project directory"
           ]
         }
       }
