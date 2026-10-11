@@ -51,20 +51,24 @@ defmodule Mix.Tasks.Covenant.Mutate do
     not judged. A fail-fast matrix proves kills, not obligation credit: use it
     to sort survivors fast on a slow suite, and a full run to credit;
   * `--seed N` — ExUnit seed (default #{Covenant.Mutate.default_seed()}: definition order);
-  * `--jobs N` — worker processes (default 1; mutants are split round-robin).
-    With N > 1 each worker runs the tests from a private working directory
-    (symlinks to the project root, a `tmp/` of its own), so ExUnit's `:tmp_dir`
-    paths never collide and the kill credit is the same as with `--jobs 1`.
-    Whatever else the tests share between OS processes (a fixed path under the
-    system temp directory, a database, a port) is still shared: keep `--jobs 1`
-    for such a suite;
+  * `--jobs N` — worker processes (default 1; mutants are split round-robin;
+    never more than there are mutants, and a warning when N exceeds the schedulers
+    online). Every worker, one included, runs the tests from a private copy of the
+    project (`Covenant.Mutate.Workdir`), so a mutant's write or delete by a relative
+    path never touches your project, ExUnit's `:tmp_dir` paths never collide and the
+    kill credit is the same whatever N is. Whatever else the tests share between OS
+    processes (a fixed path under the system temp directory, a database, a port) is
+    still shared: keep `--jobs 1` for such a suite. A worker that a mutant makes
+    loop for ever is stopped by a watchdog and its mutant is a `timeout`; the task
+    starts a new worker for the mutants after it;
   * `--out PATH` — the kill matrix JSON (default `tmp/covenant/mutate/<component>/kill_matrix.json`);
   * `--contracts DIR` — the contracts directory;
   * `--test-path PATH` — a contract test path or glob, relative to the current
     directory or absolute (repeatable). Without it, the configured `test_paths`
     are searched, relative to `Covenant.root/0` whichever directory the task runs in.
 
-  `--raw PATH --slice I/N` are the worker's own flags; the task sets them.
+  `--raw PATH --slice I/N --skip m001,m002` are the worker's own flags; the task
+  sets them.
 
   ## The survivors file
 
@@ -117,9 +121,11 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
   alias Covenant.{Contract, Error}
   alias Covenant.Mutate
-  alias Covenant.Mutate.{Matrix, Modules, Mutant, Runner, Survivors}
+  alias Covenant.Mutate.{Matrix, Modules, Mutant, Mutator, Runner, Survivors}
 
   @requirements ["app.config"]
+
+  @timeout_status Runner.timeout_exit()
 
   @switches [
     module: :keep,
@@ -131,7 +137,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
     contracts: :string,
     test_path: :keep,
     raw: :string,
-    slice: :string
+    slice: :string,
+    skip: :string
   ]
 
   @impl true
@@ -168,7 +175,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     case opts[:raw] do
       nil -> parent(settings)
-      raw -> worker(settings, raw, opts[:slice] || "1/1")
+      raw -> worker(settings, raw, opts[:slice] || "1/1", skip_ids(opts[:skip]))
     end
   end
 
@@ -206,20 +213,26 @@ defmodule Mix.Tasks.Covenant.Mutate do
       )
     end
 
-    dir = Mutate.default_dir(settings.component)
-    File.mkdir_p!(dir)
-    dir |> Path.join("raw-*.json") |> Path.wildcard() |> Enum.each(&File.rm!/1)
+    settings = settings |> cap_jobs(plan, contract) |> Map.put(:run_id, run_id())
+
+    # a directory of this run's own, so that two runs of a component do not share raw files
+    run_dir =
+      Path.expand(Path.join(Mutate.default_dir(settings.component), "run-#{settings.run_id}"))
+
+    File.mkdir_p!(run_dir)
 
     raws =
-      1..settings.jobs
-      |> Enum.map(fn i ->
-        Task.async(fn -> run_worker(settings, plan, i, Path.join(dir, "raw-#{i}.json")) end)
-      end)
-      |> Task.await_many(:infinity)
-      |> Enum.map(fn
-        {:ok, raw} -> raw
-        {:error, reason} -> fail(reason)
-      end)
+      try do
+        1..settings.jobs
+        |> Enum.map(fn i -> Task.async(fn -> run_worker(settings, plan, i, run_dir) end) end)
+        |> await_workers()
+        |> case do
+          {:ok, raws} -> raws
+          {:error, reason} -> fail(reason)
+        end
+      after
+        File.rm_rf(run_dir)
+      end
 
     results =
       case Mutate.merge(raws) do
@@ -293,7 +306,131 @@ defmodule Mix.Tasks.Covenant.Mutate do
     end
   end
 
-  defp run_worker(settings, plan, i, raw_path) do
+  defp run_id, do: :crypto.strong_rand_bytes(6) |> Base.url_encode64(padding: false)
+
+  # No more workers than mutants (the rest would only boot and idle), and a word of
+  # warning when there are more than the VM has schedulers. The parent counts the
+  # mutants itself; when it cannot, the number asked for stands.
+  defp cap_jobs(%{jobs: 1} = settings, _plan, _contract), do: settings
+
+  defp cap_jobs(settings, plan, contract) do
+    {jobs, messages} =
+      jobs_for(settings.jobs, count_mutants(plan, contract), System.schedulers_online())
+
+    Enum.each(messages, &Mix.shell().info("covenant.mutate: warning: " <> &1))
+    %{settings | jobs: jobs}
+  end
+
+  @doc false
+  @spec jobs_for(pos_integer(), non_neg_integer() | nil, pos_integer()) ::
+          {pos_integer(), [String.t()]}
+  def jobs_for(requested, mutants, schedulers) do
+    capped = if is_integer(mutants) and mutants > 0, do: min(requested, mutants), else: requested
+
+    messages =
+      cond do
+        capped < requested ->
+          ["--jobs #{requested}: only #{mutants} mutant(s), running #{capped} worker(s)"]
+
+        capped > schedulers ->
+          ["--jobs #{capped} exceeds the #{schedulers} schedulers online"]
+
+        true ->
+          []
+      end
+
+    {capped, messages}
+  end
+
+  defp count_mutants(plan, contract) do
+    source = plan.source
+    root = File.cwd!()
+    keep = keep(contract, plan, source)
+
+    with {:ok, modules, _ignored} <- Modules.locate(plan.names, source, root) do
+      modules
+      |> Enum.group_by(fn {_, file} -> file end, fn {module, _} -> inspect(module) end)
+      |> Enum.reduce(0, fn {file, targets}, count ->
+        {:ok, ast} = Mutator.parse(File.read!(file), file)
+
+        sites =
+          ast
+          |> Mutator.sites(file: Path.relative_to(file, root), modules: targets)
+          |> Enum.filter(keep)
+
+        count + length(sites)
+      end)
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  # The workers' results, or the first failure: the other workers are stopped then
+  # (their ports close, which ends the workers' standard input and so the workers).
+  @doc false
+  def await_workers(tasks), do: await_workers(Map.new(tasks, &{&1.ref, &1}), [])
+
+  defp await_workers(pending, raws) when map_size(pending) == 0, do: {:ok, raws}
+
+  defp await_workers(pending, raws) do
+    receive do
+      {ref, result} when is_map_key(pending, ref) ->
+        Process.demonitor(ref, [:flush])
+
+        case result do
+          {:ok, more} ->
+            await_workers(Map.delete(pending, ref), more ++ raws)
+
+          {:error, reason} ->
+            pending
+            |> Map.delete(ref)
+            |> Map.values()
+            |> Enum.each(&Task.shutdown(&1, :brutal_kill))
+
+            {:error, reason}
+        end
+    end
+  end
+
+  # One worker; one that the watchdog stopped (exit status 3) is not a failure: what it
+  # judged is kept and a new worker runs the rest, until one finishes.
+  defp run_worker(settings, plan, i, run_dir),
+    do: run_worker(settings, plan, i, run_dir, 1, [], [])
+
+  defp run_worker(settings, plan, i, run_dir, attempt, skip, raws) do
+    raw_path = Path.join(run_dir, "raw-#{i}-#{attempt}.json")
+    worker = "worker #{i}/#{settings.jobs}"
+
+    case spawn_worker(settings, plan, i, raw_path, skip) do
+      0 ->
+        with {:ok, raw} <- Mutate.decode_raw(raw_path), do: {:ok, [raw | raws]}
+
+      status when status == @timeout_status ->
+        with {:ok, raw} <- Mutate.decode_raw(raw_path) do
+          judged = Enum.map(raw.mutants, & &1.id)
+
+          if judged == [] or Enum.all?(judged, &(&1 in skip)) do
+            {:error, "#{worker} was stopped by its watchdog without judging a mutant"}
+          else
+            for m <- raw.mutants, m.verdict == :timeout do
+              Mix.shell().info(
+                "covenant.mutate: #{worker}: #{m.id} #{Mutant.at(m)} was stopped by its watchdog (a timeout); " <>
+                  "starting a new worker for the rest"
+              )
+            end
+
+            run_worker(settings, plan, i, run_dir, attempt + 1, skip ++ judged, [raw | raws])
+          end
+        end
+
+      status ->
+        {:error, "#{worker} exited with status #{status}"}
+    end
+  end
+
+  defp spawn_worker(settings, plan, i, raw_path, skip) do
     mix = System.find_executable("mix") || Mix.raise("cannot find the `mix` executable on PATH")
 
     args =
@@ -308,25 +445,27 @@ defmodule Mix.Tasks.Covenant.Mutate do
         ["--seed", Integer.to_string(settings.seed)] ++
         if(settings.timeout, do: ["--timeout", Integer.to_string(settings.timeout)], else: []) ++
         if(settings.fail_fast, do: ["--fail-fast"], else: []) ++
+        if(skip != [], do: ["--skip", Enum.join(skip, ",")], else: []) ++
         ["--contracts", settings.contracts] ++
         Enum.flat_map(plan.names, &["--module", &1]) ++
         Enum.flat_map(settings.test_paths, &["--test-path", &1])
 
     env = [{"MIX_ENV", "test"}, {"COVENANT_MUTATE_SOURCE", Atom.to_string(plan.source)}]
 
-    case System.cmd(mix, args,
-           env: env,
-           into: Covenant.Relay.new(),
-           stderr_to_stdout: true
-         ) do
-      {_, 0} -> Mutate.decode_raw(raw_path)
-      {_, status} -> {:error, "worker #{i}/#{settings.jobs} exited with status #{status}"}
-    end
+    {_, status} =
+      System.cmd(mix, args, env: env, into: Covenant.Relay.new(), stderr_to_stdout: true)
+
+    status
   end
+
+  defp skip_ids(nil), do: []
+  defp skip_ids(text), do: text |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 
   # -- worker: boot the test env, run a slice, write raw results --------------
 
-  defp worker(settings, raw_path, slice) do
+  defp worker(settings, raw_path, slice, skip) do
+    stop_with_parent()
+    raw_path = Path.expand(raw_path)
     {i, n} = parse_slice(slice)
     prefix = if n > 1, do: "[#{i}/#{n}] ", else: ""
 
@@ -369,10 +508,14 @@ defmodule Mix.Tasks.Covenant.Mutate do
       timeout: settings.timeout,
       fail_fast: settings.fail_fast,
       slice: {i, n},
-      isolate: n > 1,
+      skip: skip,
       keep: keep(contract, plan, source),
       on_progress: &Mix.shell().info(prefix <> progress(&1)),
-      on_eta: &Mix.shell().info(prefix <> eta(&1))
+      on_eta: &Mix.shell().info(prefix <> eta(&1)),
+      # runs in the worker's private copy, so the path is absolute; the runner halts
+      on_timeout: fn result, _mutant ->
+        write_raw(raw_path, result, settings, slice, modules, ignored)
+      end
     }
 
     case Runner.run(runner_plan) do
@@ -382,22 +525,44 @@ defmodule Mix.Tasks.Covenant.Mutate do
             "#{length(result.mutants)} of #{result.all} mutant(s) run, per-test timeout #{result.timeout_ms} ms"
         )
 
-        File.mkdir_p!(Path.dirname(raw_path))
-
-        File.write!(raw_path, [
-          Mutate.encode_raw(result,
-            component: settings.component,
-            slice: slice,
-            modules: Enum.map(modules, fn {m, _} -> inspect(m) end),
-            ignored: ignored
-          ),
-          "\n"
-        ])
-
+        write_raw(raw_path, result, settings, slice, modules, ignored)
         :ok
 
       {:error, reason} ->
         fail(reason)
+    end
+  end
+
+  defp write_raw(raw_path, result, settings, slice, modules, ignored) do
+    File.mkdir_p!(Path.dirname(raw_path))
+
+    File.write!(
+      raw_path,
+      [
+        Mutate.encode_raw(result,
+          component: settings.component,
+          slice: slice,
+          modules: Enum.map(modules, fn {m, _} -> inspect(m) end),
+          ignored: ignored
+        ),
+        "\n"
+      ],
+      [:sync]
+    )
+  end
+
+  # The task that spawned this worker holds the other end of its standard input, and
+  # closes it when it dies: a worker stuck in a mutant must not outlive it.
+  defp stop_with_parent do
+    spawn(fn -> drain_stdin() end)
+    :ok
+  end
+
+  defp drain_stdin do
+    case IO.binread(:stdio, :eof) do
+      :eof -> System.halt(1)
+      {:error, _} -> System.halt(1)
+      _data -> drain_stdin()
     end
   end
 
