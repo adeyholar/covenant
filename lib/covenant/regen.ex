@@ -76,35 +76,72 @@ defmodule Covenant.Regen do
       %Component{} = component ->
         root = Path.expand(Keyword.get(opts, :root) || Path.dirname(contract.dir))
         out = Keyword.get(opts, :out, Path.join(["tmp", "covenant", "regen", component_id]))
-        test_paths = Keyword.get(opts, :test_paths, Covenant.test_paths())
-        tests = find_tests(component, test_paths, root)
 
-        stub_opts =
-          Keyword.take(opts, [:environment]) ++
-            [declared_elsewhere: Ownership.declared_elsewhere(contract, component)]
-
-        %{skipped: skipped, possibly_foreign: possibly_foreign} = surface(component, stub_opts)
-
-        File.rm_rf!(out)
-        File.mkdir_p!(out)
-
-        stub_opts = stub_opts ++ [root: root, contract: contract]
-
-        files =
-          contract_files(contract, component, out, root) ++
-            test_files(tests, root, out) ++
-            stub_files(component, out, stub_opts) ++
-            [brief_file(component, out), prompt_file(component, tests, out, stub_opts)]
-
-        {:ok,
-         %{
-           dir: out,
-           files: files |> Enum.reject(&is_nil/1) |> Enum.sort(),
-           skipped: skipped,
-           possibly_foreign: possibly_foreign
-         }}
+        if contains?(Path.expand(out), root) do
+          {:error,
+           "refusing to write the pack to #{out}: it would replace #{root}, which holds the project"}
+        else
+          pack(contract, component, root, out, opts)
+        end
     end
   end
+
+  defp contains?(dir, path), do: path == dir or String.starts_with?(path, dir <> "/")
+
+  # Everything that can fail is computed before the pack directory is replaced.
+  defp pack(contract, component, root, out, opts) do
+    test_paths = Keyword.get(opts, :test_paths, Covenant.test_paths())
+    layout = layout(component, root)
+
+    tests =
+      for test <- find_tests(component, test_paths, root) do
+        source = Path.expand(test, root)
+        {source, Path.relative_to(source, layout)}
+      end
+
+    stub_opts =
+      Keyword.take(opts, [:environment]) ++
+        [declared_elsewhere: Ownership.declared_elsewhere(contract, component)]
+
+    %{skipped: skipped, possibly_foreign: possibly_foreign} = surface(component, stub_opts)
+    stub_opts = stub_opts ++ [root: root, layout: layout, contract: contract]
+
+    writes =
+      Enum.map(contract_files(contract, component, layout) ++ tests, fn {source, target} ->
+        {:copy, source, target}
+      end) ++
+        Enum.map(stubs(component, stub_opts), fn {module, source} ->
+          {:write, Path.join(["stubs", "lib", Macro.underscore(module) <> ".ex"]), source}
+        end) ++
+        [
+          {:write, "REGENERATION_BRIEF.md", brief(component)},
+          {:write, "PROMPT.md", prompt(component, Enum.map(tests, &elem(&1, 1)), stub_opts)}
+        ]
+
+    File.rm_rf!(out)
+    File.mkdir_p!(out)
+
+    files =
+      Enum.map(writes, fn
+        {:copy, source, target} -> copy(source, Path.join(out, target))
+        {:write, target, text} -> write(Path.join(out, target), text)
+      end)
+
+    {:ok,
+     %{
+       dir: out,
+       files: Enum.sort(files),
+       skipped: skipped,
+       possibly_foreign: possibly_foreign
+     }}
+  end
+
+  # Where the pack lays files out from: the root, or for a primitive the directory that holds
+  # the sibling layout, so its files land at `contract/<primitive>/...` wherever the root is.
+  defp layout(%Component{form: :primitive, file: readme}, _root),
+    do: readme |> Path.expand() |> Path.dirname() |> Path.dirname() |> Path.dirname()
+
+  defp layout(_component, root), do: root
 
   @doc """
   Contract test files that declare `use Covenant.Case, component: "<id>"`, as paths relative to
@@ -146,35 +183,20 @@ defmodule Covenant.Regen do
 
   # -- contract files ---------------------------------------------------------
 
-  defp contract_files(contract, %Component{form: :primitive, file: readme}, out, root) do
+  # `{source, target}` pairs, the target relative to the pack.
+  defp contract_files(contract, %Component{form: :primitive, file: readme}, layout) do
     primitive =
       for source <- [readme, Path.join(Path.dirname(readme), "mutants.md")],
-          File.exists?(source) do
-        copy(source, Path.join(out, Path.relative_to(Path.expand(source), root)))
-      end
+          File.exists?(source),
+          do: {source, Path.relative_to(Path.expand(source), layout)}
 
-    system = Contract.component(contract, "system")
-
-    system_files =
-      for source <- [system && system.file, system && system.records_file],
-          source != nil,
-          File.exists?(source) do
-        copy(source, Path.join([out, "contracts", Path.relative_to(source, contract.dir)]))
-      end
-
-    primitive ++ system_files
+    primitive ++ system_files(contract)
   end
 
-  defp contract_files(contract, component, out, _root) do
-    system = Contract.component(contract, "system")
-
+  defp contract_files(contract, component, _layout) do
     sources =
-      [
-        component.file,
-        component.records_file,
-        system && system.file,
-        system && system.records_file
-      ] ++
+      [component.file, component.records_file] ++
+        Enum.map(system_files(contract), &elem(&1, 0)) ++
         [Path.join([contract.dir, "system", "decisions.yml"])]
 
     copies =
@@ -182,26 +204,33 @@ defmodule Covenant.Regen do
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
       |> Enum.filter(&File.exists?/1)
-      |> Enum.map(fn source ->
-        target = Path.join([out, "contracts", Path.relative_to(source, contract.dir)])
-        copy(source, target)
-      end)
+      |> Enum.map(&{&1, Path.join("contracts", Path.relative_to(&1, contract.dir))})
 
     convention = Path.join(contract.dir, "README.md")
 
-    convention_copy =
-      if File.exists?(convention), do: copy(convention, Path.join(out, "CONTRACT_CONVENTION.md"))
-
-    copies ++ List.wrap(convention_copy)
+    if File.exists?(convention),
+      do: copies ++ [{convention, "CONTRACT_CONVENTION.md"}],
+      else: copies
   end
 
-  defp test_files(tests, root, out) do
-    Enum.map(tests, fn relative -> copy(Path.expand(relative, root), Path.join(out, relative)) end)
+  defp system_files(contract) do
+    system = Contract.component(contract, "system")
+
+    for source <- [system && system.file, system && system.records_file],
+        source != nil,
+        File.exists?(source),
+        do: {source, Path.join("contracts", Path.relative_to(source, contract.dir))}
   end
 
   defp copy(source, target) do
     File.mkdir_p!(Path.dirname(target))
     File.cp!(source, target)
+    target
+  end
+
+  defp write(target, text) do
+    File.mkdir_p!(Path.dirname(target))
+    File.write!(target, text)
     target
   end
 
@@ -437,20 +466,9 @@ defmodule Covenant.Regen do
   defp stub_source(%Component{}),
     do: "Every function here is named in the intent's Public surface section;"
 
-  defp stub_files(component, out, opts) do
-    component
-    |> stubs(opts)
-    |> Enum.map(fn {module, source} ->
-      path = Path.join([out, "stubs", "lib", Macro.underscore(module) <> ".ex"])
-      File.mkdir_p!(Path.dirname(path))
-      File.write!(path, source)
-      path
-    end)
-  end
-
   # -- brief and prompt -------------------------------------------------------
 
-  defp brief_file(component, out) do
+  defp brief(component) do
     body =
       case Component.section(component, "Regeneration brief") do
         nil ->
@@ -460,15 +478,7 @@ defmodule Covenant.Regen do
           section.body <> "\n"
       end
 
-    path = Path.join(out, "REGENERATION_BRIEF.md")
-    File.write!(path, "# Regeneration brief — #{component.id}\n\n" <> body)
-    path
-  end
-
-  defp prompt_file(component, tests, out, opts) do
-    path = Path.join(out, "PROMPT.md")
-    File.write!(path, prompt(component, tests, opts))
-    path
+    "# Regeneration brief — #{component.id}\n\n" <> body
   end
 
   @doc "The brief handed to the regenerating agent."
@@ -476,7 +486,7 @@ defmodule Covenant.Regen do
   def prompt(%Component{} = component, tests, opts \\ []) do
     contract_file =
       if component.form == :primitive do
-        Path.relative_to(Path.expand(component.file), Path.expand(opts[:root] || File.cwd!()))
+        Path.relative_to(Path.expand(component.file), opts[:layout] || layout(component, nil))
       else
         Path.join(
           "contracts",

@@ -47,3 +47,6 @@ covenant-*.tar
 /test/fixtures/sibling_project/tmp/
 /test/fixtures/sibling_project/contract/coverage.json
 /test/fixtures/sibling_project/contract/coverage.static.json
+
+# Static coverage of Covenant's own Contract (mix covenant.check --static)
+/contracts/coverage.static.json

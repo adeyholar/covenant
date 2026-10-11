@@ -78,11 +78,10 @@ defmodule Mix.Tasks.Covenant.Mutate do
         sort: equivalent
         reason: The struct default for value is already 0.
 
-  `at` is `file:line:column`, `operator` the mutation operator and `reason`
-  free text that says why this survivor may live. `mutation` is optional:
-  without it the entry covers every mutant with that `at` and `operator`, so
-  give it when two mutants share both and need different judgments. `sort` is
-  one of:
+  `at` is `file:line:column`, `operator` the mutation operator, `mutation` the
+  change as the task prints it and `reason` free text that says why this
+  survivor may live. All of them are required: `at`, `operator` and `mutation`
+  together name one mutant. `sort` is one of:
 
   * `equivalent` — the mutant behaves exactly like the original;
   * `log-only` — it changes only a message or a log line nobody pins;
@@ -107,8 +106,11 @@ defmodule Mix.Tasks.Covenant.Mutate do
   `contract/<primitive>/mutants.md`, as flinch reads them: under a heading
   that gives the reason, an `equivalent` or `unpromised` block of
   `Module.function/arity: from -> to` lines, the mutation as this task prints
-  it (`unpromised` also takes `Module.function/arity: *`). A declaration that
-  a test kills, or that matches no mutant, fails the task.
+  it. Each line names exactly one mutant: when several of the unit's mutants
+  share the change, `#k` picks the k-th in source order (`Calc.f/1: 1 -> 2 #2`),
+  and a line without one is ambiguous. `unpromised` also takes
+  `Module.function/arity: *`, every survivor of the unit. A declaration that a
+  test kills, that matches no mutant or that is ambiguous fails the task.
   """
 
   use Mix.Task
@@ -229,6 +231,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
       Mix.shell().info("covenant.mutate: ignoring derived module #{name}: #{why}")
     end)
 
+    # Each mutants.md declaration names exactly one mutant of this run, or fails.
+    {annotations, unresolved} = Survivors.resolve(annotations, results.mutants)
+
     matrix =
       Matrix.build(results,
         component: plan.component,
@@ -239,6 +244,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
         jobs: settings.jobs,
         fail_fast: settings.fail_fast
       )
+
+    matrix = %{matrix | problems: Error.sort(unresolved ++ matrix.problems)}
 
     Mix.shell().info("")
     Mix.shell().info(Matrix.format(matrix))
@@ -260,7 +267,11 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
         Mix.shell().info(
           "```unpromised\n" <>
-            Enum.map_join(unsorted, "\n", &Survivors.template(&1, format: :md)) <> "\n```"
+            Enum.map_join(
+              unsorted,
+              "\n",
+              &Survivors.template(&1, format: :md, mutants: results.mutants)
+            ) <> "\n```"
         )
 
       true ->
@@ -303,7 +314,11 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     env = [{"MIX_ENV", "test"}, {"COVENANT_MUTATE_SOURCE", Atom.to_string(plan.source)}]
 
-    case System.cmd(mix, args, env: env, into: IO.stream(:stdio, :line), stderr_to_stdout: true) do
+    case System.cmd(mix, args,
+           env: env,
+           into: Covenant.Relay.new(),
+           stderr_to_stdout: true
+         ) do
       {_, 0} -> Mutate.decode_raw(raw_path)
       {_, status} -> {:error, "worker #{i}/#{settings.jobs} exited with status #{status}"}
     end

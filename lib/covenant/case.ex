@@ -50,8 +50,9 @@ defmodule Covenant.Case do
   (which works there too; both are merged). Several ids go on one line,
   separated by commas, or on several lines. A test with neither, an unknown
   id, and another primitive's id are compile errors. Outside the sibling
-  layout a `# Contract:` comment is a compile error: it would be silently
-  ignored.
+  layout a `# Contract:` comment naming a primitive's obligation (`calc/A1`)
+  is a compile error, since it would be silently ignored; any other
+  `# Contract:` comment there is ordinary prose.
 
   ## Options
 
@@ -141,6 +142,15 @@ defmodule Covenant.Case do
             known(Contract.component_ids(contract))
         )
 
+    if component.form == :primitive and Primitive.primitive_of(env.file, sibling) != component.id do
+      compile_error(
+        env.file,
+        env.line,
+        "#{inspect(env.module)} tests the primitive `#{component.id}`, whose Contract tests live " <>
+          "beside its README in #{Path.dirname(component.file)}"
+      )
+    end
+
     # The attribute accumulates newest first; tests are checked in definition order.
     {tests, _sources} =
       env.module
@@ -195,7 +205,14 @@ defmodule Covenant.Case do
   defp validate_test(%ExUnit.Test{name: name, tags: tags} = test, lines, component, contract) do
     file = tags[:file]
     line = tags[:line]
-    commented = if line, do: Primitive.comment_ids(lines, line), else: []
+    # Outside the sibling layout only a comment naming a primitive id is a claim;
+    # `# Contract: never negative` is prose.
+    commented =
+      cond do
+        line == nil -> []
+        component.form == :primitive -> Primitive.comment_ids(lines, line)
+        true -> Primitive.claimed_ids(lines, line)
+      end
 
     ids =
       case {component.form, commented, obligation_ids(tags[:obligation])} do

@@ -94,6 +94,51 @@ defmodule Covenant.TasksContractTest do
     assert output =~ ~r/total\s+7\/7\s+100\.0%/
   end
 
+  @tag obligation: "covenant.tasks.I1"
+  test "mix covenant.check relays a suite that prints bytes that aren't UTF-8, and keeps UTF-8 intact" do
+    noisy = Path.join(@project, "test/contract/example/noisy_contract_test.exs")
+
+    # A raw (latin1) device passes the bytes through unconverted, as a port or a
+    # binary dump would.
+    File.write!(noisy, """
+    defmodule Example.NoisyContractTest do
+      use Covenant.Case, component: "example.greeter"
+
+      @tag obligation: "example.greeter.I1"
+      test "prints invalid UTF-8 and an arrow" do
+        :ok = :io.setopts(:standard_io, encoding: :latin1)
+        IO.binwrite(<<"bytes:", 0xFF, 0xFE, "\\n">>)
+        :ok = :io.setopts(:standard_io, encoding: :unicode)
+        IO.puts("arrow: →")
+        assert Example.Greeter.greet("x") =~ "x"
+      end
+    end
+    """)
+
+    on_exit(fn -> File.rm(noisy) end)
+
+    {output, status} = mix(["covenant.check"])
+    assert status == 0, output
+    assert output =~ "bytes:��\n"
+    assert output =~ "arrow: →\n"
+    assert output =~ ~r/9 tests, 0 failures/
+    assert output =~ "the Contract holds"
+  end
+
+  @tag obligation: "covenant.tasks.I1"
+  test "the relay holds back a character cut between chunks and replaces what isn't UTF-8" do
+    arrow = "→"
+    <<a, b, c>> = arrow
+
+    assert Covenant.Relay.take("ok " <> <<a, b>>) == {"ok ", <<a, b>>}
+    assert Covenant.Relay.take(<<a, b, c>> <> "\n") == {"→\n", ""}
+    assert Covenant.Relay.take("é" |> binary_part(0, 1)) == {"", "é" |> binary_part(0, 1)}
+    assert Covenant.Relay.take(<<"x", 0xFF, 0xFE, "y">>) == {"x��y", ""}
+    assert Covenant.Relay.take(<<0xF0, 0x9F, 0x98>>) == {"", <<0xF0, 0x9F, 0x98>>}
+    assert Covenant.Relay.take("😀") == {"😀", ""}
+    assert Covenant.Relay.take("") == {"", ""}
+  end
+
   @tag obligation: "covenant.tasks.I3"
   test "mix covenant.check fails when a contract test fails" do
     broken = Path.join(@project, "test/contract/example/broken_contract_test.exs")

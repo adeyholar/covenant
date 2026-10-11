@@ -33,7 +33,7 @@ defmodule Covenant.Static do
   leave out `component:`, and each test's obligations are its `# Contract:`
   comments directly above it merged with its tag, as `Covenant.Case` reads
   them. A test there that names none is a problem, and so is a `# Contract:`
-  comment above a test anywhere else.
+  comment naming a primitive's obligation above a test anywhere else.
 
   `problems/2` adds the checks that need the Contract: an unknown
   component, a tag naming another component's obligation, and a tag naming
@@ -362,7 +362,10 @@ defmodule Covenant.Static do
       |> Enum.reject(&is_nil/1)
       |> Enum.join(" ")
 
-    commented = Primitive.comment_ids(acc.lines, line || 1)
+    commented =
+      if acc.primitive,
+        do: Primitive.comment_ids(acc.lines, line || 1),
+        else: Primitive.claimed_ids(acc.lines, line || 1)
 
     {test, problem} =
       case contract_ids(effective(tags), commented, acc.primitive) do

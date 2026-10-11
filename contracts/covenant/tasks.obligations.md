@@ -1,5 +1,5 @@
 ---
-modules: [Mix.Tasks.Covenant.Check, Mix.Tasks.Covenant.Conditions, Mix.Tasks.Covenant.Regen, Mix.Tasks.Covenant.Mutate]
+modules: [Mix.Tasks.Covenant.Check, Mix.Tasks.Covenant.Conditions, Mix.Tasks.Covenant.Regen, Mix.Tasks.Covenant.Mutate, Covenant.Relay]
 ---
 # covenant.tasks
 
@@ -12,8 +12,8 @@ step can rely on: what they print and their exit status.
 ## Obligations
 
 ### covenant.tasks.I1 — covenant.check runs the suite and reports
-- **scope:** `mix covenant.check`
-- **must:** run the configured contract test paths as a `mix test` subprocess with `Covenant.Formatter`, print the coverage table and a warning for the components that declare no modules (`covenant.check: warning: N component(s) declare no modules: ...`, covenant.check.I11), write `<contracts dir>/coverage.json`, and exit 0 when the Contract holds; a `module` ceiling whose counter raises is a `covenant.check: warning: scope ceiling ... unchecked` line, not a failure, and does not stop `coverage.json` being written
+- **scope:** `mix covenant.check`, `Covenant.Relay`
+- **must:** run the configured contract test paths as a `mix test` subprocess with `Covenant.Formatter`, relaying its output as text with valid UTF-8 unchanged and every invalid byte sequence as U+FFFD (a character cut between chunks held back until it is whole), so a test that prints binary data never stops the task (`Covenant.Relay`, which `mix covenant.mutate` uses for its workers too); print the coverage table and a warning for the components that declare no modules (`covenant.check: warning: N component(s) declare no modules: ...`, covenant.check.I11), write `<contracts dir>/coverage.json`, and exit 0 when the Contract holds; a `module` ceiling whose counter raises is a `covenant.check: warning: scope ceiling ... unchecked` line, not a failure, and does not stop `coverage.json` being written
 - **kind:** functional
 - **record:** suite-runs-as-subprocess
 - **status:** active

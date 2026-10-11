@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 77,
+      "active": 85,
       "coverage": 1.0,
-      "covered": 77
+      "covered": 85
     },
     "system": {
       "active": 0,
@@ -472,11 +472,12 @@
         "covenant.mutate.I10": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 6,
           "status": "active",
           "testable": true,
           "tests": [
             "test a module is located by its source file; derived ones that cannot be are skipped, explicit ones refused",
+            "test a primitive's modules are the ones its covers name, a tree expanded when located",
             "test located modules come back sorted by name, with every reason spelled out",
             "test module names are read from inline code spans, never from fenced blocks",
             "test the Public surface section alone names the modules to mutate",
@@ -486,12 +487,13 @@
         "covenant.mutate.I11": {
           "failing": 0,
           "kind": "functional",
-          "passing": 6,
+          "passing": 7,
           "status": "active",
           "testable": true,
           "tests": [
             "test a component that names no module cannot be planned",
             "test a mutant survives to_map and from_map, whatever its verdict",
+            "test a primitive's plan takes the tests beside its README, and covered_by? applies the most specific covers",
             "test a worker's results survive JSON and merging puts the mutants in id order",
             "test every outcome and the defaults of a worker's results survive JSON",
             "test from_map takes the index when it is given",
@@ -665,12 +667,14 @@
         "covenant.mutate.I8": {
           "failing": 0,
           "kind": "functional",
-          "passing": 6,
+          "passing": 8,
           "status": "active",
           "testable": true,
           "tests": [
             "test a YAML error is reported at its own line, a flow list gets line 1",
             "test a missing or empty file is no annotations; the file lives beside the component's contract",
+            "test a primitive's survivors file is the mutants.md beside its README, read as declarations",
+            "test a survivors-file entry without a mutation is an error naming the entry",
             "test a valid survivors file is a list of annotations with their line",
             "test every kind of bad entry is reported as file:line: message",
             "test find and matches? compare location, operator and mutation",
@@ -680,15 +684,133 @@
         "covenant.mutate.I9": {
           "failing": 0,
           "kind": "functional",
+          "passing": 14,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test #k counts every mutant of the unit sharing the change in source order, killed or not",
+            "test a change is matched as written, arrows of its own and all, and a wildcard is a declaration without one",
+            "test a declaration a test kills is contradicted, and one matching no survivor is unmatched",
+            "test a declaration matches the survivors of its unit by from and to, or all of them as a wildcard",
+            "test a declaration names exactly one mutant, and is ambiguous when several share its change",
+            "test a survivor inside the target of an active exception is a decision-hole without an entry",
+            "test a survivor's mutants.md line carries #k when other mutants of its unit share the change",
+            "test an ambiguity names the change as the line wrote it",
+            "test an annotation matching no mutant is moved, one matching only a killed mutant is stale",
+            "test an annotation sorts the survivor it names by location, operator and, when given, mutation",
+            "test an exception on a module or a file sorts the survivors inside it",
+            "test an unannotated survivor or timeout is a problem naming the mutant",
+            "test staleness is per line: each line needs its own survivor, a wildcard at least one",
+            "test wildcards and survivors-file entries pass through resolve unpinned"
+          ]
+        }
+      }
+    },
+    "covenant.primitive": {
+      "active": 8,
+      "app": "covenant",
+      "coverage": 1.0,
+      "covered": 8,
+      "form": "light",
+      "obligations": {
+        "covenant.primitive.I1": {
+          "failing": 0,
+          "kind": "functional",
           "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
-            "test a survivor inside the target of an active exception is a decision-hole without an entry",
-            "test an annotation matching no mutant is moved, one matching only a killed mutant is stale",
-            "test an annotation sorts the survivor it names by location, operator and, when given, mutation",
-            "test an exception on a module or a file sorts the survivors inside it",
-            "test an unannotated survivor or timeout is a problem naming the mutant"
+            "test a Contract loads from the sibling directory alone, the contracts directory alone, or both",
+            "test a fence that is never closed is an error in a README and in mutants.md",
+            "test a line holding a bold id that isn't `- **A1** text` is an error, never skipped",
+            "test a primitive is a subdirectory with a README, and its obligations are its `- **A1**` lines",
+            "test an obligation line inside a fence, a repeated id and a bad directory name are refused"
+          ]
+        },
+        "covenant.primitive.I2": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a covers line is a module, a tree or a function, and nothing else",
+            "test covers blocks count only in README.md, and declaration blocks only in mutants.md"
+          ]
+        },
+        "covenant.primitive.I3": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test the most specific reference owns the code"
+          ]
+        },
+        "covenant.primitive.I4": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test Covenant.Case turns the comments into the test's obligation tag, merged with @tag",
+            "test a test that names nothing, an unknown id or another primitive's id is a compile error",
+            "test outside the sibling layout a Contract comment, and a module testing a primitive, are compile errors",
+            "test outside the sibling layout a prose `# Contract:` comment is only a comment",
+            "test the ids come from the comment and attribute lines directly above a test"
+          ]
+        },
+        "covenant.primitive.I5": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a block without a heading, an equivalent wildcard, a bad line and a repeat are errors",
+            "test a declared change may hold arrows of its own, and `#k` names one of several",
+            "test a primitive's survivors file is the mutants.md beside its README",
+            "test mutants.md declarations carry the heading and prose above them as their reason"
+          ]
+        },
+        "covenant.primitive.I6": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 4,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test mix covenant.check --static reads the comments and skips the covers",
+            "test mix covenant.check fails on an unnamed obligation, a covers line naming no code, overlapping covers and a stray Contract comment",
+            "test mix covenant.check runs the Contract tests beside each README and reports the primitives",
+            "test with COVENANT_ROOT set, mix covenant.check still runs the sibling layout's tests"
+          ]
+        },
+        "covenant.primitive.I7": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 6,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test a contradicted or unmatched declaration fails the run, and an unsorted survivor is printed for mutants.md",
+            "test a declaration whose occurrence is past the last fails the run",
+            "test a pack lays a primitive out from the sibling layout's parent, and never replaces the project",
+            "test mix covenant.mutate mutates what a primitive covers and sorts its survivors from mutants.md",
+            "test mix covenant.regen packs a primitive with its README, mutants.md, tests and stubs from its covers",
+            "test the most specific covers reference decides which primitive a mutant belongs to"
+          ]
+        },
+        "covenant.primitive.I8": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 1,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test the root is the nearest directory holding either layout, and a sibling needs a primitive"
           ]
         }
       }
@@ -941,12 +1063,14 @@
         "covenant.tasks.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 2,
+          "passing": 4,
           "status": "active",
           "testable": true,
           "tests": [
+            "test mix covenant.check relays a suite that prints bytes that aren't UTF-8, and keeps UTF-8 intact",
             "test mix covenant.check runs the contract suite, prints coverage, writes coverage.json and exits 0",
-            "test mix covenant.check warns about a ceiling whose counter raises, writes coverage.json and exits 0"
+            "test mix covenant.check warns about a ceiling whose counter raises, writes coverage.json and exits 0",
+            "test the relay holds back a character cut between chunks and replaces what isn't UTF-8"
           ]
         },
         "covenant.tasks.I2": {
@@ -1052,8 +1176,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 77,
+    "active": 85,
     "coverage": 1.0,
-    "covered": 77
+    "covered": 85
   }
 }

@@ -732,6 +732,7 @@ defmodule Covenant.MutateContractTest do
     reason: The struct default for value is already 0.
   - at: lib/example/counter.ex:30:1
     operator: guard_removal
+    mutation: "`when x` → `(no guard)`"
     sort: decision-hole
     reason: undecided
   """
@@ -750,7 +751,7 @@ defmodule Covenant.MutateContractTest do
              line: 2
            } = first
 
-    assert second.mutation == nil
+    assert second.mutation == "`when x` → `(no guard)`"
     assert second.line == 7
     assert second.sort == "decision-hole"
 
@@ -767,7 +768,8 @@ defmodule Covenant.MutateContractTest do
       Enum.map(errors, &Error.format/1)
     end
 
-    base = "at: a.ex:1:1\n  operator: integer_shift\n  sort: equivalent\n  reason: r\n"
+    base =
+      "at: a.ex:1:1\n  operator: integer_shift\n  mutation: \"`1` → `2`\"\n  sort: equivalent\n  reason: r\n"
 
     assert errors.("- " <> String.replace(base, "  reason: r\n", "")) ==
              ["s.yml:1: annotation #1 is missing `reason`"]
@@ -798,9 +800,10 @@ defmodule Covenant.MutateContractTest do
     # the second entry is reported at its own line
     assert errors.("- " <> base <> "- sort: equivalent\n") ==
              [
-               "s.yml:5: annotation #2 is missing `at`",
-               "s.yml:5: annotation #2 is missing `operator`",
-               "s.yml:5: annotation #2 is missing `reason`"
+               "s.yml:6: annotation #2 is missing `at`",
+               "s.yml:6: annotation #2 is missing `operator`",
+               "s.yml:6: annotation #2 is missing `mutation`",
+               "s.yml:6: annotation #2 is missing `reason`"
              ]
 
     assert errors.("key: value\n") == [
@@ -1305,7 +1308,7 @@ defmodule Covenant.MutateContractTest do
 
     assert {:ok, [annotation]} =
              Survivors.parse(
-               "[{at: a.ex:1:1, operator: integer_shift, sort: equivalent, reason: r}]",
+               "[{at: a.ex:1:1, operator: integer_shift, mutation: m, sort: equivalent, reason: r}]",
                "f.yml"
              )
 
@@ -1682,11 +1685,11 @@ defmodule Covenant.MutateContractTest do
     counter: counter
   } do
     entry = fn n ->
-      "- at: a.ex:#{n}:1\r\n  operator: integer_shift\r\n  sort: equivalent\r\n  reason: r\r\n"
+      "- at: a.ex:#{n}:1\r\n  operator: integer_shift\r\n  mutation: m\r\n  sort: equivalent\r\n  reason: r\r\n"
     end
 
     assert {:ok, [first, second]} = Survivors.parse(entry.(1) <> entry.(2), "crlf.yml")
-    assert {first.line, second.line} == {1, 5}
+    assert {first.line, second.line} == {1, 6}
 
     assert {:error, [error]} = Survivors.parse("- a: [1\n", "bad.yml")
     assert error.file == "bad.yml"
@@ -1694,13 +1697,16 @@ defmodule Covenant.MutateContractTest do
     assert error.message =~ "invalid YAML: "
 
     assert {:error, errors} =
-             Survivors.parse("- at: a.ex:1:1\n  operator: integer_shift\n  reason: r\n", "s.yml")
+             Survivors.parse(
+               "- at: a.ex:1:1\n  operator: integer_shift\n  mutation: m\n  reason: r\n",
+               "s.yml"
+             )
 
     assert Enum.map(errors, & &1.message) == ["annotation #1 is missing `sort`"]
 
     assert {:error, errors} =
              Survivors.parse(
-               "- at: 5\n  operator: integer_shift\n  sort: equivalent\n  reason: r\n",
+               "- at: 5\n  operator: integer_shift\n  mutation: m\n  sort: equivalent\n  reason: r\n",
                "s.yml"
              )
 
@@ -1911,6 +1917,160 @@ defmodule Covenant.MutateContractTest do
   @tag obligation: "covenant.mutate.I18"
   test "mix help covenant.mutate says progress is reported every 25 mutants" do
     assert Mix.Task.moduledoc(Mix.Tasks.Covenant.Mutate) =~ "every 25 mutants"
+  end
+
+  # -- the sibling layout ---------------------------------------------------------
+
+  defp primitive!(dir, name, readme) do
+    path = Path.join([dir, "contract", name, "README.md"])
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, readme)
+  end
+
+  defp sibling_contract!(dir) do
+    {:ok, contract} =
+      Contract.load(Path.join(dir, "contracts"), sibling: Path.join(dir, "contract"))
+
+    contract
+  end
+
+  defp declaration(attrs) do
+    struct!(
+      Survivors.Annotation,
+      [
+        at: "X.f/0",
+        operator: "*",
+        sort: "unpromised",
+        reason: "open",
+        file: "mutants.md",
+        line: 3,
+        unit: "X.f/0",
+        from: "1",
+        to: "2"
+      ] ++ attrs
+    )
+  end
+
+  @tag obligation: "covenant.mutate.I8"
+  test "a primitive's survivors file is the mutants.md beside its README, read as declarations",
+       %{tmp_dir: dir} do
+    primitive!(dir, "calc", "# calc\n\n- **A1** Adds.\n\n```covers\nCalc\n```\n")
+    calc = dir |> sibling_contract!() |> Contract.component("calc")
+
+    path = Survivors.path("contracts", calc)
+    assert path == Path.join([dir, "contract", "calc", "mutants.md"])
+
+    File.write!(path, "## Kept\n\n```unpromised\nCalc.add/2: *\n```\n")
+
+    assert {:ok, [%{unit: "Calc.add/2", from: nil, sort: "unpromised", reason: "Kept"}]} =
+             Survivors.load(path)
+
+    yml = Path.join(dir, "x.survivors.yml")
+
+    File.write!(
+      yml,
+      "- at: lib/x.ex:1:1\n  operator: integer_shift\n  mutation: \"`1` → `2`\"\n  sort: equivalent\n  reason: r\n"
+    )
+
+    assert {:ok, [%{at: "lib/x.ex:1:1", unit: nil}]} = Survivors.load(yml)
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "a declaration matches the survivors of its unit by from and to, or all of them as a wildcard" do
+    m = mutant("m001", :survived)
+
+    assert Survivors.matches?(declaration([]), m)
+    refute Survivors.matches?(declaration(unit: "X.g/0"), m)
+    refute Survivors.matches?(declaration(from: "0"), m)
+    refute Survivors.matches?(declaration(to: "3"), m)
+    assert Survivors.matches?(declaration(from: nil, to: nil), m)
+    refute Survivors.matches?(declaration(from: nil, to: nil, unit: "X.g/0"), m)
+
+    assert Survivors.unit(m) == "X.f/0"
+    assert Survivors.unit(%{m | function: nil}) == "X"
+    assert Survivors.template(m, format: :md) == "X.f/0: 1 -> 2"
+    assert Survivors.template(m) =~ "- at: lib/x.ex:4:7\n"
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "a declaration a test kills is contradicted, and one matching no survivor is unmatched",
+       %{counter: counter} do
+    killed = mutant("m001", :killed, killed_by: ["M:a"])
+
+    assert [problem] = build(counter, [killed], [declaration([])]).problems
+    assert problem.file == "mutants.md" and problem.line == 3
+
+    assert problem.message ==
+             "declaration `X.f/0: 1 -> 2` (m001) is contradicted: a Contract test kills that mutant — delete it"
+
+    unmatched = build(counter, [killed], [declaration(unit: "X.g/0", from: nil, to: nil)])
+
+    assert [%{message: message}] = unmatched.problems
+
+    assert message ==
+             "declaration `X.g/0: *` matches no surviving mutant; the code moved, the mutation changed or nothing survives there — delete or update it"
+
+    sorted = build(counter, [mutant("m001", :survived)], [declaration(from: nil, to: nil)])
+    assert sorted.problems == []
+    assert [%{sort: "unpromised", reason: "open"}] = sorted.survivors
+  end
+
+  @tag obligation: "covenant.mutate.I10"
+  test "a primitive's modules are the ones its covers name, a tree expanded when located",
+       %{tmp_dir: dir} do
+    primitive!(dir, "mut", """
+    # mut
+
+    - **A1** Mutates.
+
+    ```covers
+    Covenant.Mutate.Matrix.build/2
+    Covenant.Mutate.*
+    Covenant.Static
+    ```
+    """)
+
+    mut = dir |> sibling_contract!() |> Contract.component("mut")
+
+    assert Modules.resolve(mut) ==
+             {:covers, ["Covenant.Mutate.*", "Covenant.Mutate.Matrix", "Covenant.Static"]}
+
+    assert Modules.resolve(mut, ["Covenant.Static"]) == {:flag, ["Covenant.Static"]}
+
+    assert {:ok, located, []} = Modules.locate(["Covenant.Mutate.*"], :covers, @root)
+    names = Enum.map(located, &inspect(elem(&1, 0)))
+    assert "Covenant.Mutate" in names and "Covenant.Mutate.Matrix" in names
+    refute "Covenant.Static" in names
+  end
+
+  @tag obligation: "covenant.mutate.I11"
+  test "a primitive's plan takes the tests beside its README, and covered_by? applies the most specific covers",
+       %{tmp_dir: dir} do
+    primitive!(dir, "calc", "# calc\n\n- **A1** Adds.\n\n```covers\nCalc\n```\n")
+    primitive!(dir, "sum", "# sum\n\n- **S1** Sums.\n\n```covers\nCalc.add/2\n```\n")
+    primitive!(dir, "empty", "# empty\n\n- **E1** Nothing.\n")
+    contract = sibling_contract!(dir)
+
+    assert {:error, "no Contract test (`*_test.exs`) beside " <> _} =
+             Mutate.plan(contract, "calc", root: dir)
+
+    assert {:error, "`empty` covers no code: add a ```covers block to " <> _} =
+             Mutate.plan(contract, "empty", root: dir)
+
+    File.write!(Path.join([dir, "contract", "calc", "calc_test.exs"]), "")
+    assert {:ok, plan} = Mutate.plan(contract, "calc", root: dir)
+    assert plan.source == :covers and plan.names == ["Calc"]
+    assert plan.test_files == ["contract/calc/calc_test.exs"]
+
+    add = mutant("m001", :survived, module: "Calc", function: "add/2")
+    clamp = mutant("m002", :survived, module: "Calc", function: "clamp/3")
+    top = mutant("m003", :survived, module: "Calc", function: nil)
+
+    refute Mutate.covered_by?(contract, "calc", add)
+    assert Mutate.covered_by?(contract, "sum", add)
+    assert Mutate.covered_by?(contract, "calc", clamp)
+    assert Mutate.covered_by?(contract, "calc", top)
+    refute Mutate.covered_by?(contract, "sum", clamp)
   end
 end
 

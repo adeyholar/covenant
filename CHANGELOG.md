@@ -27,8 +27,19 @@ The first release: the Contract layer for Impatient Programming in Elixir.
   with thirteen operators, runs its contract tests against each mutant and
   writes a kill matrix that credits every kill to the obligations whose tests
   caught it. Survivors are sorted in `<component>.survivors.yml`; an unsorted
-  survivor or a stale entry fails the run. `--fail-fast` trades exact credit
+  survivor or a stale entry fails the run. An entry's `at`, `operator` and
+  `mutation` are all required, so it names one mutant. `--fail-fast` trades exact credit
   for speed, `--jobs N` runs isolated workers, and the per-test timeout is
   measured from the baseline.
-- Covenant governs itself: 77 obligations across nine components, each proved
+- The sibling layout that flinch, qualm and exhale read: `contract/<primitive>/`
+  with `- **A1**` obligations and a `covers` block in its README, Contract tests
+  beside it that name their obligations in `# Contract: calc/A1` comments, and
+  an optional `mutants.md` of `equivalent` and `unpromised` declarations.
+  `Covenant.Case` reads the comments at compile time; `mix covenant.check`
+  applies the rules of `flinch contract`; `mix covenant.mutate` and
+  `mix covenant.regen` take a primitive by name. A project can use either
+  layout or both. The survivor sorts gain `unpromised`. Each `mutants.md`
+  line names exactly one mutant: `#k` picks one when several of a unit's
+  mutants share a change, and a line they share without it is ambiguous.
+- Covenant governs itself: 85 obligations across ten components, each proved
   by a `Covenant.Case` test.

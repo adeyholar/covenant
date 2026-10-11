@@ -1,0 +1,18 @@
+- id: survivor-keys-name-one-mutant
+  date: "2026-10-10"
+  decision: "A survivor's key names exactly one mutant. A survivors-file entry is keyed by `at`, `operator` and `mutation`, and `mutation` is required. A `mutants.md` declaration is keyed by `Unit: from -> to`, which survives edits to the file; when several of the unit's mutants share the change, `#k` picks the k-th in source order among all of them, killed or not, and a line without it is ambiguous. `Unit: *` is allowed only in an `unpromised` block, where the Contract promises nothing about the unit. Staleness is per line: a non-wildcard line must name one current survivor, a wildcard at least one. `equivalent` still sorts `equivalent` and `unpromised` sorts `unpromised`."
+  driver: "A review found one `equivalent` line `Lab.Retry.run/1: 1 -> 2` sorting two different mutants of a function (lines 10 and 40), a wildcard covering every future survivor of a unit, stale detection passing as long as any one mutant matched, and a survivors-file entry without `mutation` re-matching whatever mutant later landed on the same site and operator."
+  alternatives:
+    - option: Key declarations by file, line and column
+      rejected: "Every edit above a declared mutant would move it; the unit and the change survive edits, and `#k` counts all of the unit's mutants with that change, so it does not shift as tests change."
+    - option: Let a line sort every mutant that shares its change
+      rejected: "Equivalence is a claim about one mutant; a second mutant with the same text is a second claim nobody made."
+    - option: "Allow `Unit: *` in equivalent blocks"
+      rejected: "Equivalence is per mutant, and a wildcard would declare mutants that do not exist yet equivalent."
+  evidence: "The review's Lab.Retry reproduction; flinch's declare primitive (D1, D6: a wildcard is stale when its unit has no unheld mutants)."
+  invariant: covenant.mutate.I9
+  approved_by: "lead, 2026-10-10"
+  conditions:
+    - text: Every survivors file Covenant reads gives each entry a `mutation`
+  expires: When Covenant's mutants get stable ids of their own
+  source: ["lib/covenant/mutate/survivors.ex", "lib/covenant/parser/primitive.ex", "lib/mix/tasks/covenant.mutate.ex"]
