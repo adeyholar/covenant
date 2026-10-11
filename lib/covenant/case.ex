@@ -152,7 +152,7 @@ defmodule Covenant.Case do
     end
 
     # The attribute accumulates newest first; tests are checked in definition order.
-    {tests, _sources} =
+    {tests, sources} =
       env.module
       |> Module.get_attribute(:ex_unit_tests)
       |> Enum.reverse()
@@ -161,10 +161,39 @@ defmodule Covenant.Case do
         {validate_test(test, lines, component, contract), sources}
       end)
 
+    if component.form == :primitive, do: check_orphan_comments(tests, sources)
+
     if component.form == :primitive do
       Module.delete_attribute(env.module, :ex_unit_tests)
       Module.register_attribute(env.module, :ex_unit_tests, accumulate: true)
       Enum.each(tests, &Module.put_attribute(env.module, :ex_unit_tests, &1))
+    end
+
+    :ok
+  end
+
+  # A `# Contract:` comment that is not directly above a test (above a `setup`,
+  # a `defp`, a blank line) would be silently ignored, so it is an error.
+  defp check_orphan_comments(tests, sources) do
+    for {file, lines} <- sources do
+      attached =
+        for %{tags: %{file: ^file, line: line}} <- tests,
+            n <- Primitive.attached_comment_lines(lines, line),
+            into: MapSet.new(),
+            do: n
+
+      case Enum.find(Primitive.contract_comment_lines(lines), &(not MapSet.member?(attached, &1))) do
+        nil ->
+          :ok
+
+        n ->
+          compile_error(
+            file,
+            n,
+            "this `# Contract:` comment is not directly above a test, so it would be ignored; " <>
+              "put it on the lines above a `test`, or remove it"
+          )
+      end
     end
 
     :ok
