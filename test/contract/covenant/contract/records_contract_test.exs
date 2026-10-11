@@ -198,6 +198,17 @@ defmodule Covenant.Contract.RecordsContractTest do
   end
 
   @tag obligation: "covenant.contract.I11"
+  test "keys of different type are not repeats: 1 and \"1\", true and \"true\"" do
+    text = ContractBuilder.widget_records() <> "  1: a\n  \"1\": b\n  true: c\n  \"true\": d\n"
+
+    assert {:ok, _} = parse(text)
+
+    assert messages(parse(ContractBuilder.widget_records() <> "  1: a\n  1: b\n")) == [
+             "demo/widget.decisions.yml:11: key `1` is repeated (first at line 10)"
+           ]
+  end
+
+  @tag obligation: "covenant.contract.I11"
   test "a mapping where text is expected is an error, not a crash" do
     text =
       String.replace(
