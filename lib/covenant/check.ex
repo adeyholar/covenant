@@ -6,7 +6,8 @@ defmodule Covenant.Check do
   `run/3` fails (returns problems) on:
 
   * dangling `record`, `invariant`, `superseded_by` or `depends_on` references;
-  * an active obligation with no tagged test;
+  * an active obligation with no tagged test, or (in a run) no passing one: tagged tests that
+    were skipped or excluded are named in the problem;
   * a tag naming an obligation the Contract does not declare;
   * a tagged test that failed or could not run;
   * a `kind: exception` whose `target` no longer exists (stale exception);
@@ -67,7 +68,7 @@ defmodule Covenant.Check do
   Runs every check. Options:
 
   * `:root` — the project root that file targets and glob counters resolve
-    against (default: the current directory);
+    against (default: the current directory; `mix covenant.check` passes `Covenant.root/0`);
   * `:mode` — `:run` (default) or `:static`;
   * `:sibling` — the sibling layout's directory, outside which no test may
     name a primitive's obligation (default: none);
@@ -76,7 +77,7 @@ defmodule Covenant.Check do
   """
   @spec run(Contract.t(), Results.t(), keyword()) :: Report.t()
   def run(%Contract{} = contract, %Results{} = results, opts \\ []) do
-    root = Keyword.get(opts, :root, File.cwd!())
+    root = Keyword.get(opts, :root) || File.cwd!()
     static? = Keyword.get(opts, :mode, :run) == :static
     by_obligation = Results.by_obligation(results)
 
@@ -86,14 +87,14 @@ defmodule Covenant.Check do
 
     problems =
       Validate.dangling(contract) ++
-        untested(contract, by_obligation) ++
+        untested(contract, by_obligation, static?) ++
         unknown_tags(contract, by_obligation) ++
         failing(contract, by_obligation) ++
         exceptions ++
         ceilings ++
         covers ++
         overlapping(contract) ++
-        outside(contract, results, root, opts[:sibling])
+        outside(contract, results, File.cwd!(), opts[:sibling])
 
     coverage =
       Coverage.compute(contract, results, covered: if(static?, do: :tagged, else: :passing))
@@ -120,11 +121,36 @@ defmodule Covenant.Check do
     end
   end
 
-  defp untested(contract, by_obligation) do
+  # A run needs a passing test; a tagged test that was skipped or excluded proves nothing.
+  # Static mode ran nothing, so a tagged test is all it can ask for.
+  defp untested(contract, by_obligation, static?) do
     for %Obligation{} = obligation <- Contract.obligations(contract),
         Obligation.testable?(obligation),
-        Map.get(by_obligation, obligation.id, []) == [] do
-      Error.new(obligation.file, obligation.line, untested_message(obligation))
+        tests = Map.get(by_obligation, obligation.id, []),
+        problem = untested_problem(obligation, tests, static?) do
+      Error.new(obligation.file, obligation.line, problem)
+    end
+  end
+
+  defp untested_problem(obligation, [], _static?), do: untested_message(obligation)
+  defp untested_problem(_obligation, _tests, true), do: nil
+
+  defp untested_problem(%Obligation{id: id}, tests, false) do
+    if Enum.any?(tests, &(&1.state == :passed)) do
+      nil
+    else
+      idle =
+        tests
+        |> Enum.filter(&(&1.state in [:skipped, :excluded]))
+        |> Enum.uniq_by(&{&1.module, &1.name})
+
+      if idle == [] do
+        nil
+      else
+        "active obligation `#{id}` has no passing test: #{length(idle)} tagged test(s) were skipped or excluded: " <>
+          Enum.map_join(idle, ", ", & &1.name) <>
+          "; run them, or declare the obligation an exception if it is proven elsewhere"
+      end
     end
   end
 
