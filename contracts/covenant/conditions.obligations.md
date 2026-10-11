@@ -13,7 +13,7 @@ supports is relied on.
 
 ### covenant.conditions.I1 — The five check kinds evaluate against the context
 - **scope:** `Covenant.Conditions.evaluate/2`
-- **must:** evaluate `dep` (present in the lock, optionally matching a version requirement; a dep without a version cannot satisfy a requirement), `env` (variable set), `file` (path exists under the root), `otp` and `elixir` (running version matches the requirement); each outcome says what was found. A version is compared as three numbers: `28` and `28.5` are padded with zeros and a fourth number (`27.3.4.1`) is dropped. A requirement may leave out the minor or patch number after a comparison operator (`>= 28.0` is `>= 28.0.0`, `>= 28` too) but `~>` keeps the parts it was written with (`~> 28.0` means below 29)
+- **must:** evaluate `dep` (present in the lock, optionally matching a version requirement; a dep without a version cannot satisfy a requirement), `env` (variable set), `file` (path exists under the root), `otp` and `elixir` (running version matches the requirement); each outcome says what was found. A version is compared as three numbers: `28` and `28.5` are padded with zeros and a fourth number (`27.3.4.1`) is dropped. A requirement may leave out the minor or patch number after a comparison operator (`>= 28.0` is `>= 28.0.0`, `>= 28` too) but `~>` keeps the parts it was written with (`~> 28.0` means below 29); a `name`, `version` or `path` that is a map or a list (`version: {gte: ...}`) is suspect with a message saying it must be a single value, never a crash
 - **kind:** functional
 - **status:** active
 
@@ -56,7 +56,7 @@ supports is relied on.
 
 ### covenant.conditions.I8 — A file check stays under the project root
 - **scope:** `Covenant.Conditions.evaluate/2`
-- **must:** mark a `file` check suspect, saying the path is outside the project root, when the path expanded against the root (`..`, an absolute path and `~` included) is neither the root nor under it, whether or not the file exists there; a symlink inside the root that points outside it is not resolved and is followed
+- **must:** mark a `file` check suspect, saying the path is outside the project root, when the path expanded against the root (`..`, an absolute path and `~` included) is neither the root nor under it, whether or not the file exists there; a symlink inside the root that points outside it is not resolved and is followed; an absolute path inside the root is checked where it is, not under the root a second time
 - **kind:** functional
 - **status:** active
 

@@ -86,7 +86,23 @@ defmodule Covenant.Conditions do
   @spec evaluate(Condition.t(), Context.t()) :: outcome()
   def evaluate(%Condition{check: nil}, _ctx), do: :unchecked
 
-  def evaluate(%Condition{check: %{"kind" => "dep"} = check}, ctx) do
+  def evaluate(%Condition{check: %{"kind" => kind} = check} = condition, ctx)
+      when kind in ~w(dep env file otp elixir) do
+    case Enum.find(~w(name version path), &non_scalar?(Map.get(check, &1))) do
+      nil ->
+        do_evaluate(condition, ctx)
+
+      field ->
+        {:suspect,
+         "`#{field}` of a `#{kind}` check must be a single value, got #{inspect(check[field])}"}
+    end
+  end
+
+  def evaluate(condition, ctx), do: do_evaluate(condition, ctx)
+
+  defp non_scalar?(value), do: is_map(value) or is_list(value)
+
+  defp do_evaluate(%Condition{check: %{"kind" => "dep"} = check}, ctx) do
     name = check["name"]
 
     case Map.fetch(ctx.lock, to_string(name)) do
@@ -101,19 +117,19 @@ defmodule Covenant.Conditions do
     end
   end
 
-  def evaluate(%Condition{check: %{"kind" => "env", "name" => name}}, ctx) do
+  defp do_evaluate(%Condition{check: %{"kind" => "env", "name" => name}}, ctx) do
     if Map.has_key?(ctx.env, to_string(name)),
       do: {:ok, "env `#{name}` is set"},
       else: {:suspect, "env `#{name}` is not set"}
   end
 
-  def evaluate(%Condition{check: %{"kind" => "file", "path" => path}}, ctx)
-      when is_binary(path) do
+  defp do_evaluate(%Condition{check: %{"kind" => "file", "path" => path}}, ctx)
+       when is_binary(path) do
     cond do
       not Target.within?(path, ctx.root) ->
         {:suspect, "file `#{path}` is outside the project root"}
 
-      ctx.root |> Path.join(path) |> File.exists?() ->
+      path |> Path.expand(ctx.root) |> File.exists?() ->
         {:ok, "file `#{path}` exists"}
 
       true ->
@@ -121,22 +137,23 @@ defmodule Covenant.Conditions do
     end
   end
 
-  def evaluate(%Condition{check: %{"kind" => "otp", "version" => req}}, ctx),
+  defp do_evaluate(%Condition{check: %{"kind" => "otp", "version" => req}}, ctx),
     do: version_matches(ctx.otp_version, req, "OTP")
 
-  def evaluate(%Condition{check: %{"kind" => "elixir", "version" => req}}, ctx),
+  defp do_evaluate(%Condition{check: %{"kind" => "elixir", "version" => req}}, ctx),
     do: version_matches(ctx.elixir_version, req, "Elixir")
 
-  def evaluate(%Condition{check: %{"kind" => "value"} = check}, _ctx), do: evaluate_value(check)
+  defp do_evaluate(%Condition{check: %{"kind" => "value"} = check}, _ctx),
+    do: evaluate_value(check)
 
-  def evaluate(%Condition{check: %{"kind" => kind} = check}, _ctx)
-      when kind in ~w(env file otp elixir),
-      do: incomplete(kind, check)
+  defp do_evaluate(%Condition{check: %{"kind" => kind} = check}, _ctx)
+       when kind in ~w(env file otp elixir),
+       do: incomplete(kind, check)
 
-  def evaluate(%Condition{check: %{"kind" => kind}}, _ctx),
+  defp do_evaluate(%Condition{check: %{"kind" => kind}}, _ctx),
     do: {:suspect, "unknown check kind `#{kind}` (expected dep, env, file, otp, elixir or value)"}
 
-  def evaluate(%Condition{check: other}, _ctx),
+  defp do_evaluate(%Condition{check: other}, _ctx),
     do: {:suspect, "malformed check #{inspect(other)}"}
 
   defp incomplete(kind, check),
