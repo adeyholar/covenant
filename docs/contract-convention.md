@@ -134,6 +134,13 @@ A ceiling caps something countable, so the product stays small enough to
 regenerate. A `glob` counter counts files; a `module` counter calls a
 function of the project.
 
+`contracts/` executes project functions (a `module` counter here, a `value`
+check on a decision record) and is trusted input, like `mix.exs`. Covenant
+refuses to call a function of Elixir or OTP itself, so `System.halt/0` cannot
+end the gate with a success status, but that is a mitigation and not a
+sandbox: a project function can still do anything a test can. A `file`
+condition or exception target must stay under the project root.
+
 ```yaml
 - name: billing-modules
   ceiling: 40
