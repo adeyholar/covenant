@@ -7,13 +7,13 @@
       rejected: Every exception would get a vacuous test written to satisfy the tool, which the convention forbids ("a contract example is never deleted to satisfy a tool" cuts both ways).
     - option: Count exceptions in the denominator but never as covered
       rejected: Coverage could never reach 100% for a component with a declared exception, which hides real gaps.
-  evidence: contracts/README.md (machina-ex), "Light form" section.
+  evidence: docs/contract-convention.md, "Light form" section.
   invariant: covenant.check.I1
   approved_by: Covenant's author (initial build, 2026-10-09)
   conditions:
     - text: "The convention keeps `kind: exception` as a block kind rather than a separate section"
   expires: If exceptions move out of obligation blocks
-  source: ["contracts/README.md (machina-ex)"]
+  source: ["docs/contract-convention.md"]
 
 - id: untagged-test-is-compile-error
   date: "2026-10-09"
@@ -24,13 +24,13 @@
       rejected: Warnings scroll past; the test still runs and looks like a contract test to a reader.
     - option: Count untagged tests as coverage for nothing
       rejected: Same as warning, with a misleading results file.
-  evidence: contracts/README.md (machina-ex), "Contract tests" section.
+  evidence: docs/contract-convention.md, "Contract tests" section.
   invariant: covenant.case.I2
   approved_by: Covenant's author (initial build, 2026-10-09)
   conditions:
     - text: Contract tests live in their own directory, so implementation tests have somewhere else to go
   expires: Never
-  source: ["contracts/README.md (machina-ex)"]
+  source: ["docs/contract-convention.md"]
 
 - id: same-component-tags
   date: "2026-10-09"
@@ -50,7 +50,7 @@
 - id: results-per-app
   date: "2026-10-09"
   decision: Covenant.Formatter writes one results file per Mix app (`<results_dir>/<app>.json`) under a `_build/covenant/results` directory shared by every MIX_ENV; `mix covenant.check` merges them.
-  driver: Machina is an umbrella; one results file would be overwritten by each app's suite, and `_build/test` is not where the check task (running in dev) looks.
+  driver: In an umbrella each app runs its own suite; one results file would be overwritten by each app's suite, and `_build/test` is not where the check task (running in dev) looks.
   alternatives:
     - option: One results file, merged by module on write
       rejected: Entries for deleted modules linger forever.
@@ -77,7 +77,7 @@
   approved_by: Covenant's author (initial build, 2026-10-09)
   kind: known-gap
   conditions:
-    - text: No exception in Machina's contracts targets a private function yet
+    - text: No exception in a Contract Covenant checks targets a private function yet
   expires: When the first private-function exception is declared
   source: ["lib/covenant/target.ex"]
 
@@ -103,8 +103,8 @@
   driver: The convention fixes YAML for records; yaml_elixir wraps the mature Erlang yamerl parser and adds nothing else.
   alternatives:
     - option: Records as Elixir terms or JSON
-      rejected: The convention is YAML, shared with Agora's Ruby-era records.
-  evidence: contracts/README.md (machina-ex), "Decision records" section.
+      rejected: The convention is YAML, which keeps records readable by tools in other languages.
+  evidence: docs/contract-convention.md, "Decision records" section.
   approved_by: Covenant's author (initial build, 2026-10-09)
   conditions:
     - text: yaml_elixir 2.12 or compatible is locked
@@ -163,7 +163,7 @@
 - id: static-reads-literals
   date: "2026-10-10"
   decision: "`Covenant.Static` reads contract tests with `Code.string_to_quoted/2` and accepts only literal component names and literal obligation tags (a string or a list of strings); anything else is a problem at its line, never a guess and never an evaluation."
-  driver: The machina-ex Contract (35 test files, 1046 tests) is written before any implementation exists, so its tests cannot compile; the tag rules still have to hold. Evaluating module attributes or variables would mean running test code.
+  driver: The first large Contract Covenant checked (35 test files, 1046 tests) was written before any implementation existed, so its tests could not compile; the tag rules still have to hold. Evaluating module attributes or variables would mean running test code.
   alternatives:
     - option: Compile the test files against generated stubs
       rejected: Needs every module the tests name; the stubs would be a second, unreviewed implementation.
@@ -184,10 +184,10 @@
   driver: With no compiled code every module target looks stale and every module counter is uncountable; failing them would make the static check permanently red and train people to ignore it.
   alternatives:
     - option: Fail them as in a real run
-      rejected: Thirteen of fourteen machina-ex ceilings and five exceptions would fail before a line of implementation exists.
+      rejected: In that Contract, thirteen of fourteen ceilings and five exceptions would have failed before a line of implementation existed.
     - option: Drop them silently
       rejected: A reader would think they were checked.
-  evidence: "machina-ex contracts/system/scope.yml (13 module counters, 1 glob) and the five `kind: exception` blocks at the first static run."
+  evidence: "That Contract's system/scope.yml (13 module counters, 1 glob) and its five `kind: exception` blocks at the first static run."
   invariant: covenant.check.I10
   approved_by: contract integrator (workflow pass, 2026-10-10); pending lead review
   expires: When the code under test exists wherever the check runs
@@ -196,7 +196,7 @@
 - id: static-coverage-own-file
   date: "2026-10-10"
   decision: 'Static coverage is written to `<contracts dir>/coverage.static.json`, marked `"mode": "static"`; `coverage.json` stays the record of a real, passing run.'
-  driver: Coverage is defined as obligations with a passing test (IMP R29); a tagged-but-never-run test must not overwrite that number.
+  driver: Coverage is defined as obligations with a passing test (covenant.check.I7); a tagged-but-never-run test must not overwrite that number.
   alternatives:
     - option: Overwrite coverage.json
       rejected: A static 100% would read as a passing 100%.
@@ -209,11 +209,11 @@
 - id: root-is-contracts-parent
   date: "2026-10-10"
   decision: "`Covenant.root/0` is the directory that holds the contracts directory: `COVENANT_ROOT`, then `config :covenant, root:`, then the parent of `contracts_dir` (absolute, or found from the working directory upwards), then the working directory."
-  driver: machina-ex ruling R11 makes contract tests resolve paths from the repo root; in an umbrella `mix test` runs each app from `apps/<app>`, so the working directory is never the root.
+  driver: Contract tests resolve paths from the project root (docs/contract-convention.md, "Contract tests"); in an umbrella `mix test` runs each app from `apps/<app>`, so the working directory is never the root.
   alternatives:
     - option: Walk up to the nearest directory with a .git or mix.exs
-      rejected: Covenant itself lives in a sub-project with its own mix.exs and contracts/; the contracts directory is what the Contract means by root.
-  evidence: machina-ex docs/contract-reconciliation.md R11; contracts/system/intent.md (Test support, Umbrella).
+      rejected: A project can sit inside another repository, as Covenant itself began, with its own mix.exs and contracts/; the contracts directory is what the Contract means by root.
+  evidence: docs/contract-convention.md, "Contract tests"; the umbrella fixture under test/fixtures/umbrella_project.
   invariant: covenant.static.I5
   approved_by: contract integrator (workflow pass, 2026-10-10); pending lead review
   expires: Never
@@ -222,7 +222,7 @@
 - id: test-paths-resolve-against-root
   date: "2026-10-10"
   decision: "The configured `test_paths` resolve against `Covenant.root/0` in every task and in `Covenant.test_paths/0`; a `--test-path` typed on the command line resolves against the working directory. `--contracts` redirects the Contract, not the root the configured paths resolve against."
-  driver: "In the machina-ex umbrella `mix covenant.regen agora.wake_ingest` run from `apps/agora` and `mix covenant.mutate core.tenancy` run from `apps/machina_core` found no contract tests: `apps/*/test/contract` was expanded relative to the app directory."
+  driver: "In an umbrella, `mix covenant.regen billing.invoices` run from `apps/billing` and `mix covenant.mutate core.tenancy` run from `apps/core` found no contract tests: `apps/*/test/contract` was expanded relative to the app directory."
   alternatives:
     - option: Resolve against the working directory, as before
       rejected: "A configured path is the project's, not the user's; in an umbrella the working directory is never the root (record root-is-contracts-parent)."
@@ -230,7 +230,7 @@
       rejected: "A user types a path relative to where they are; every shell tool works that way."
     - option: Let `--contracts DIR` move the root to DIR's parent
       rejected: "`mix covenant.check --contracts tmp/copy` documents another Contract for the same tests in the working directory; moving the root would stop finding them."
-  evidence: machina-ex ruling R11; covenant.tasks.I9.
+  evidence: record root-is-contracts-parent; covenant.tasks.I9.
   invariant: covenant.static.I6
   approved_by: lead's Covenant fixes brief (2026-10-10); pending lead review
   expires: Never
@@ -239,15 +239,15 @@
 - id: declared-elsewhere-is-foreign
   date: "2026-10-10"
   decision: "A module another component lists (`#### Modules` paragraph or `modules:`) belongs to that component, ahead of every location rule, and a loadable module of the running project that no list claims is already implemented, not the component's to stub. A name that is neither loadable nor in a namespace the component uses is resolved as an alias of a known module or dropped."
-  driver: "A pack for `agora.wake_ingest` stubbed `Machina.Repo.Scoped`, `Machina.Tenancy`, `Machina.Clock` and `Machina.Test.*`: modules `core.tenancy` lists and the project already implements. Without a list every module of the running project counted as the component's."
+  driver: "A pack for `billing.invoices` stubbed `MyApp.Repo.Scoped`, `MyApp.Tenancy`, `MyApp.Clock` and `MyApp.Test.*`: modules `core.tenancy` lists and the project already implements. Without a list every module of the running project counted as the component's."
   alternatives:
     - option: Keep treating every loadable module of the project as owned
       rejected: "That is the bug: the pack shadows other components' implemented modules."
     - option: Derive the owner from the modules other components name in their obligation scopes
       rejected: "Scopes name collaborators as well as the component's own code, so the owner would be a guess; a list is a declaration."
     - option: Stub what cannot be placed and report it, for every unplaced name
-      rejected: "`Spend.Policy` (a fragment of `Machina.LLM.Spend.Policy`) and `Machina.Test.Log` were stubbed as if the component owned them. Only a loadable module whose beam lies nowhere known is still stubbed and reported."
-  evidence: machina-ex `contracts/core/tenancy.intent.md` (`#### Modules`); covenant.regen.I8, I9.
+      rejected: "`Spend.Policy` (a fragment of `MyApp.LLM.Spend.Policy`) and `MyApp.Test.Log` were stubbed as if the component owned them. Only a loadable module whose beam lies nowhere known is still stubbed and reported."
+  evidence: the `#### Modules` paragraph of that project's `core.tenancy` intent; covenant.regen.I8, I9.
   invariant: covenant.regen.I9
   approved_by: lead's Covenant fixes brief (2026-10-10); pending lead review
   conditions:

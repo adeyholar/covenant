@@ -125,7 +125,7 @@ defmodule Covenant.Contract do
 
   @doc """
   Derives a component id from a file path inside the contracts directory:
-  `agora/wake_ingest.intent.md` is `agora.wake_ingest`; anything under
+  `billing/invoices.intent.md` is `billing.invoices`; anything under
   `system/` is `system`.
   """
   @spec component_id(Path.t(), Path.t()) :: String.t()

@@ -13,4 +13,4 @@
     - text: The fixture keeps its own mix.lock
       check: { kind: file, path: mix.lock }
   expires: When Covenant's suite needs an umbrella fixture
-  source: ["tools/covenant/test/fixtures/example_project"]
+  source: ["test/fixtures/example_project"]

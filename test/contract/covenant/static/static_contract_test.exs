@@ -327,17 +327,17 @@ defmodule Covenant.StaticContractTest do
     test "is the parent of the contracts directory from any directory under it", %{tmp_dir: dir} do
       dir = Path.expand(dir)
       File.mkdir_p!(Path.join(dir, "contracts"))
-      deep = Path.join(dir, "apps/agora/test/contract")
+      deep = Path.join(dir, "apps/billing/test/contract")
       File.mkdir_p!(deep)
 
       roots =
-        for cwd <- [dir, Path.join(dir, "apps/agora"), deep],
+        for cwd <- [dir, Path.join(dir, "apps/billing"), deep],
             do: File.cd!(cwd, fn -> Covenant.root() end)
 
       assert roots == [dir, dir, dir]
 
       Application.put_env(:covenant, :contracts_dir, "../../contracts")
-      assert File.cd!(Path.join(dir, "apps/agora"), fn -> Covenant.root() end) == dir
+      assert File.cd!(Path.join(dir, "apps/billing"), fn -> Covenant.root() end) == dir
     end
 
     @tag :tmp_dir
@@ -363,7 +363,7 @@ defmodule Covenant.StaticContractTest do
     } do
       dir = Path.expand(dir)
       File.mkdir_p!(Path.join(dir, "contracts"))
-      app = Path.join(dir, "apps/agora")
+      app = Path.join(dir, "apps/billing")
       File.mkdir_p!(app)
 
       Application.put_env(:covenant, :contracts_dir, Path.join(dir, "contracts"))
@@ -409,7 +409,7 @@ defmodule Covenant.StaticContractTest do
          %{tmp_dir: dir} do
       dir = Path.expand(dir)
       File.mkdir_p!(Path.join(dir, "contracts"))
-      app = Path.join(dir, "apps/agora")
+      app = Path.join(dir, "apps/billing")
       File.mkdir_p!(app)
 
       Application.put_env(:covenant, :contracts_dir, Path.join(dir, "contracts"))

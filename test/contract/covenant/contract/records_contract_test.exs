@@ -46,7 +46,7 @@ defmodule Covenant.Contract.RecordsContractTest do
              %Condition{check: nil}
            ] = clamp.conditions
 
-    assert clamp.source == ["tools/covenant/test/fixtures/example_project"]
+    assert clamp.source == ["test/fixtures/example_project"]
     assert fixed.superseded_by == "configurable-max"
     assert fixed.kind == "fact"
     assert Record.superseded?(fixed)

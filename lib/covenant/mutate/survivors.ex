@@ -41,7 +41,7 @@ defmodule Covenant.Mutate.Survivors do
     defstruct [:at, :operator, :mutation, :sort, :reason, :file, :line]
   end
 
-  @doc "The sort names, in the order IMP lists them."
+  @doc "The sort names, in the order the survivors file documents them."
   @spec sorts() :: [String.t()]
   def sorts, do: @sorts
 

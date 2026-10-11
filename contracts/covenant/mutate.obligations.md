@@ -8,8 +8,8 @@ modules: [Covenant.Mutate, Covenant.Mutate.Matrix, Covenant.Mutate.Modules, Cove
 Mutation testing against the Contract: `mix covenant.mutate <component>`
 breaks the component's implementation one AST change at a time, runs its
 contract tests against each break and credits every kill to the obligations
-tagged on the tests that caught it, so a test that proves nothing is visible
-(IMP R26). The modules listed above are the ones that can be mutated in the
+tagged on the tests that caught it, so a test that proves nothing is
+visible. The modules listed above are the ones that can be mutated in the
 VM that runs the suite; `Covenant.Mutate.Runner`, `Covenant.Mutate.Workdir`
 and the Mix task run the worker itself and cannot be hot-swapped by their own
 mutants, so their obligations are proved by the tests but not self-mutated.

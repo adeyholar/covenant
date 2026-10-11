@@ -4,7 +4,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
   @moduledoc """
   Mutates a component's implementation at the AST level, runs its contract
   tests against every mutant and credits each kill to the obligations tagged
-  on the tests that caught it (IMP R26: every test proves it is worth keeping).
+  on the tests that caught it: every test has to prove it is worth keeping.
 
       mix covenant.mutate example.counter
       mix covenant.mutate example.counter --module Example.Counter --module Example.Counter.Log

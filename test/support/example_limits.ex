@@ -12,7 +12,7 @@ defmodule Covenant.ExampleLimits do
       backoff_s: [60, 300],
       mode: :fast,
       enabled: true,
-      name: "wake",
+      name: "invoices",
       nothing: nil,
       disabled: false,
       nested: %{"deep" => %{depth: 3}},

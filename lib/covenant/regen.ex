@@ -17,7 +17,7 @@ defmodule Covenant.Regen do
     stubs/lib/<module path>.ex        # public-surface stubs (heavy form)
   ```
 
-  The old implementation is deliberately excluded (IMP R17): if the rebuilt
+  The old implementation is deliberately excluded: if the rebuilt
   component diverges, the Contract was missing a sentence.
 
   ## Modules the component does not own
@@ -36,7 +36,7 @@ defmodule Covenant.Regen do
   carrying `owner: "<component id>"` when another component lists the module
   and `implemented: true` when the running project already has it. An alias
   (`Scope`, `Repo.Scoped`) is merged into the one known module whose name ends
-  in it (`Machina.Scope`) and dropped when none or several match.
+  in it (`MyApp.Scope`) and dropped when none or several match.
   """
 
   alias Covenant.Contract

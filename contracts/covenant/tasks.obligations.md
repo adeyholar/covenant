@@ -62,7 +62,7 @@ step can rely on: what they print and their exit status.
 ### covenant.tasks.I9 — The configured test paths resolve against the root, whichever directory a task runs in
 - **scope:** `mix covenant.check`, `mix covenant.check --static`, `mix covenant.regen`, `mix covenant.mutate`, `mix covenant.conditions`
 - **must:** resolve the `file` conditions and the `mix.lock` that `mix covenant.conditions` reads against `Covenant.root/0`, not the working directory; search the configured `test_paths` relative to `Covenant.root/0`, so a task run from an umbrella app (`apps/<app>`) finds the contract tests that one run from the root finds (`covenant.check` hands `mix test` those paths relative to the working directory); search a `--test-path` typed on the command line relative to the working directory; let `--contracts` redirect the Contract without moving the root
-- **why:** in the machina-ex umbrella `mix covenant.regen agora.wake_ingest` run from `apps/agora` and `mix covenant.mutate core.tenancy` run from `apps/machina_core` found no contract test, because `apps/*/test/contract` was expanded relative to the app directory
+- **why:** in an umbrella `mix covenant.regen billing.invoices` run from `apps/billing` and `mix covenant.mutate core.tenancy` run from `apps/core` found no contract test, because `apps/*/test/contract` was expanded relative to the app directory
 - **kind:** functional
 - **record:** test-paths-resolve-against-root
 - **status:** active

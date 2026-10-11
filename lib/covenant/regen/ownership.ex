@@ -3,7 +3,7 @@ defmodule Covenant.Regen.Ownership do
   Which modules a Public surface reference names does the component own?
 
   A stub for a module the component does not own (`System.halt(1)` in prose,
-  `Ecto.UUID.cast/1`, another component's `Machina.Repo.Scoped`) would shadow
+  `Ecto.UUID.cast/1`, another component's `MyApp.Repo.Scoped`) would shadow
   the real one. `partition/4` sorts the signatures of a Public surface into the
   ones to stub and the ones to skip:
 
@@ -11,7 +11,7 @@ defmodule Covenant.Regen.Ownership do
      `#### Modules` paragraph, or the front matter has `modules:`, exactly
      those modules are stubbed and every other reference is skipped. In the
      paragraph only the backticked names outside parentheses count
-     (`` `Machina.Cache` (behaviour, see `Machina.Registry`) `` lists one).
+     (`` `MyApp.Cache` (behaviour, see `MyApp.Registry`) `` lists one).
   2. **A module another component lists is foreign.** A module in the
      `#### Modules` paragraph or `modules:` of another component of the
      Contract belongs to that component: it is skipped and attributed to it
@@ -32,7 +32,7 @@ defmodule Covenant.Regen.Ownership do
      whose beam is anywhere else is stubbed and listed as `possibly_foreign`.
 
   An alias is resolved to the one module whose name ends in it: the bare
-  `Scope`, a dotted fragment such as `Repo.Scoped` for `Machina.Repo.Scoped`,
+  `Scope`, a dotted fragment such as `Repo.Scoped` for `MyApp.Repo.Scoped`,
   and an unplaced module name (`Spend.Policy`). The candidates are the listed
   modules, the modules other components list and the modules the surface
   itself stubs. It is dropped when none or several match; a bare name that is

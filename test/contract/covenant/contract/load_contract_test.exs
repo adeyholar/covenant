@@ -130,11 +130,11 @@ defmodule Covenant.Contract.LoadContractTest do
 
   @tag obligation: "covenant.contract.I1"
   test "derives component ids from paths" do
-    assert Contract.component_id("contracts", "contracts/agora/wake_ingest.intent.md") ==
-             "agora.wake_ingest"
+    assert Contract.component_id("contracts", "contracts/billing/invoices.intent.md") ==
+             "billing.invoices"
 
-    assert Contract.component_id("contracts", "contracts/agora/wake_ingest.decisions.yml") ==
-             "agora.wake_ingest"
+    assert Contract.component_id("contracts", "contracts/billing/invoices.decisions.yml") ==
+             "billing.invoices"
 
     assert Contract.component_id("contracts", "contracts/web/admin.obligations.md") == "web.admin"
     assert Contract.component_id("contracts", "contracts/system/intent.md") == "system"

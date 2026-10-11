@@ -14,8 +14,8 @@ defmodule Covenant.Contract.Component do
   belong to it.
 
   Component ids are `<app>.<component>` and are derived from the file path
-  inside the contracts directory: `agora/wake_ingest.intent.md` is
-  `agora.wake_ingest`. The whole-product `system/intent.md` is the component
+  inside the contracts directory: `billing/invoices.intent.md` is
+  `billing.invoices`. The whole-product `system/intent.md` is the component
   `system`, with form `:system`.
 
   A file may open with YAML front matter (`---` ... `---`); its keys land in

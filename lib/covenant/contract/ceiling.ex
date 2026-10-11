@@ -10,7 +10,7 @@ defmodule Covenant.Contract.Ceiling do
     record: six-tools          # optional decision record backing the ceiling
   - name: runtime-deps
     ceiling: 25
-    counter: { kind: module, module: Machina.Scope, function: runtime_deps }
+    counter: { kind: module, module: MyApp.Scope, function: runtime_deps }
   ```
 
   A `glob` counter counts the files matching `pattern` (relative to the

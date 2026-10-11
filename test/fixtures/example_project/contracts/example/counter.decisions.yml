@@ -15,7 +15,7 @@
       check: { kind: elixir, version: ">= 1.18.0" }
     - text: Callers treat the counter as a value, never as a process
   expires: When callers need signed counters
-  source: ["tools/covenant/test/fixtures/example_project"]
+  source: ["test/fixtures/example_project"]
 
 - id: positive-steps
   date: "2026-10-09"
@@ -31,7 +31,7 @@
     - text: The contract tooling depends on yaml_elixir
       check: { kind: dep, name: yaml_elixir, version: "~> 2.12" }
   expires: Never
-  source: ["tools/covenant/test/fixtures/example_project"]
+  source: ["test/fixtures/example_project"]
 
 - id: fixed-max-100
   date: "2026-10-09"
@@ -59,4 +59,4 @@
     - text: The counter implementation lives in lib/example/counter.ex
       check: { kind: file, path: lib/example/counter.ex }
   expires: When the cap moves to a persisted setting
-  source: ["tools/covenant/test/fixtures/example_project"]
+  source: ["test/fixtures/example_project"]

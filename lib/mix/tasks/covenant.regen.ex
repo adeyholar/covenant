@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Covenant.Regen do
 
   @moduledoc """
   Writes everything a fresh agent needs to rebuild a component from its
-  Contract, with the implementation excluded (IMP R17, the fire drill).
+  Contract, with the implementation excluded (the fire drill).
 
       mix covenant.regen example.counter
       mix covenant.regen example.counter --out tmp/regen/counter

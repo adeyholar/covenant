@@ -60,7 +60,7 @@ component from its Contract, with the implementation excluded.
 ### covenant.regen.I9 — A module another component lists is foreign
 - **scope:** `Covenant.Regen.Ownership.declared_elsewhere/2`, `Covenant.Regen.Ownership.partition/4`, `Covenant.Regen.surface/2`, `Covenant.Regen.write_pack/3`
 - **must:** ahead of every other ownership rule, skip a reference to a module that the `#### Modules` paragraph or the `modules:` front matter of another component of the Contract lists, unless this component lists it too, and attribute it to that component (the skipped signature carries `owner: "<component id>"`; a module two components list belongs to the first by component id), whether or not the module is loadable or implemented, with or without a list of its own; resolve aliases against those modules too; `mix covenant.regen` prints one `skipped (owned by <component id>): <modules>` line per owner
-- **why:** a pack for `agora.wake_ingest` stubbed the `core.tenancy` modules it only calls
+- **why:** a pack for `billing.invoices` stubbed the `core.tenancy` modules it only calls
 - **kind:** functional
 - **record:** declared-elsewhere-is-foreign
 - **status:** active

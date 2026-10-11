@@ -235,7 +235,7 @@ defmodule Covenant.ConditionsContractTest do
           {["nothing"], nil},
           {["ratio"], 0.5},
           {["claim_batch"], 20.0},
-          {["name"], "wake"}
+          {["name"], "invoices"}
         ] do
       assert {:ok, _} = Conditions.evaluate(value(@limits, equals, path), ctx),
              "path #{inspect(path)} equals #{inspect(equals)}"

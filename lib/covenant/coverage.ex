@@ -1,7 +1,7 @@
 defmodule Covenant.Coverage do
   @moduledoc """
   Contract coverage: the share of active obligations with at least one
-  passing tagged test, per component, per app and overall (IMP R29).
+  passing tagged test, per component, per app and overall.
 
   Retired obligations and `kind: exception` declarations are reported but
   excluded from the denominators.
