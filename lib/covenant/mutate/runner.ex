@@ -80,7 +80,6 @@ defmodule Covenant.Mutate.Runner do
   @budget_extra_ms 5_000
   @timeout_exit 3
   @sanity_pause_ms 200
-  @workdir_key {__MODULE__, :workdir}
 
   defmodule Collector do
     @moduledoc """
@@ -293,6 +292,7 @@ defmodule Covenant.Mutate.Runner do
 
   defp finish({:error, reason}, _modules, _env), do: {:error, reason}
   defp finish({:timeout, _, _} = timeout, _modules, _env), do: timeout
+  defp finish({:suspect, _} = suspect, _modules, _env), do: suspect
 
   defp finish([], _modules, env), do: {:ok, env.result.([])}
 
@@ -311,7 +311,7 @@ defmodule Covenant.Mutate.Runner do
         {:error, "after the last mutant, #{describe(last)}: #{reason}"}
 
       {:budget, _} ->
-        {:error,
+        {:suspect,
          "the unmutated suite did not finish within #{env.budget} ms after the last mutant, " <>
            "#{describe(last)}; this worker's results are unreliable"}
     end
@@ -351,6 +351,10 @@ defmodule Covenant.Mutate.Runner do
       "#{describe(mutant)} ran past its time budget (#{mutant.reason}); a test loops outside " <>
         "ExUnit's per-test timeout"}}
   end
+
+  # An unmutated re-run that outran its budget is no mutant's verdict, but its processes
+  # may still run just the same: the same abandon-and-halt, with no results to persist.
+  defp expire({:suspect, message}, plan), do: {:abandon, plan, {:error, message}}
 
   defp expire(other, _plan), do: other
 
@@ -432,7 +436,7 @@ defmodule Covenant.Mutate.Runner do
         {:error, "#{describe(mutant)} broke the VM: it stopped #{names}: #{reason}"}
 
       {:budget, _} ->
-        {:error,
+        {:suspect,
          "#{describe(mutant)} broke the VM: it stopped #{names}, and the unmutated suite " <>
            "did not finish within #{env.budget} ms after they restarted"}
 
@@ -503,11 +507,10 @@ defmodule Covenant.Mutate.Runner do
   defp isolated(%{isolate: false} = plan, fun), do: settle(plan, fun.())
 
   defp isolated(%{root: root} = plan, fun) do
-    workdir = Workdir.build(root)
+    # registered while it is built: the stdin watcher of the task finds it, should the parent die
+    workdir = Workdir.build(root, System.tmp_dir!(), Workdir.suffix(), true)
     previous = File.cwd!()
     File.cd!(workdir)
-    # where the stdin watcher of the task finds it, should the parent die
-    :persistent_term.put(@workdir_key, workdir)
 
     outcome =
       try do
@@ -521,19 +524,19 @@ defmodule Covenant.Mutate.Runner do
         # a mutant's processes may still run: the cwd never goes back to the project.
         # The copy goes; a deleted cwd gives `:enoent` to a stray relative write
         Workdir.remove(workdir)
-        :persistent_term.erase(@workdir_key)
+        Workdir.unregister()
         settle(plan, abandon, workdir)
 
       {:returned, result} ->
         File.cd!(previous)
         Workdir.remove(workdir)
-        :persistent_term.erase(@workdir_key)
+        Workdir.unregister()
         result
 
       {:raised, kind, reason, stacktrace} ->
         File.cd!(previous)
         Workdir.remove(workdir)
-        :persistent_term.erase(@workdir_key)
+        Workdir.unregister()
         :erlang.raise(kind, reason, stacktrace)
     end
   end
@@ -543,18 +546,17 @@ defmodule Covenant.Mutate.Runner do
   The task's stdin watcher calls it before halting when the parent has died.
   """
   @spec remove_workdir() :: :ok
-  def remove_workdir do
-    with dir when is_binary(dir) <- :persistent_term.get(@workdir_key, nil),
-         do: Workdir.remove(dir)
-
-    :ok
-  end
+  def remove_workdir, do: Workdir.remove_registered()
 
   # With an `:on_timeout` the VM halts and the deleted directory is all that is left of
   # the copy. When nothing halts (no callback, or a `:halt` that returns) the VM goes on,
   # so it gets a working directory again: a new, empty, read-only one at the same path.
-  defp settle(plan, {:abandon, _, error}, workdir) do
-    if Map.has_key?(plan, :on_timeout), do: Map.get(plan, :halt, &System.halt/1).(@timeout_exit)
+  defp settle(plan, {:abandon, _, {:error, message} = error}, workdir) do
+    if Map.has_key?(plan, :on_timeout) do
+      IO.puts(:stderr, "covenant.mutate: #{message}")
+      Map.get(plan, :halt, &System.halt/1).(@timeout_exit)
+    end
+
     if workdir, do: Workdir.abandon(workdir)
     error
   end
@@ -778,7 +780,7 @@ defmodule Covenant.Mutate.Runner do
   # A test that left a read-only directory in its `:tmp_dir` would make ExUnit's
   # `File.rm_rf!` of it fail in the next run of that test, in this VM
   defp unlock_tmp do
-    with dir when is_binary(dir) <- :persistent_term.get(@workdir_key, nil),
+    with dir when is_binary(dir) <- Workdir.registered(),
          do: Workdir.unlock(Path.join(dir, "tmp"))
   end
 
@@ -814,9 +816,10 @@ defmodule Covenant.Mutate.Runner do
     purge(file.originals)
 
     judged =
-      case Mutator.compile(Mutator.apply(file.ast, mutant), file.file) do
+      case compile(Mutator.apply(file.ast, mutant), file.file, budget) do
         {:error, reason} -> {:ok, %{mutant | verdict: :invalid, reason: reason}}
         {:ok, _} -> judge(mutant, modules, fail_fast, budget)
+        :budget -> {:budget, []}
       end
 
     case {judged, restore(file.originals)} do
@@ -824,6 +827,18 @@ defmodule Covenant.Mutate.Runner do
       {{:error, reason}, :ok} -> {:error, "#{describe(mutant)}: #{reason}"}
       {{:ok, result}, :ok} -> {:ok, %{result | replacement: nil}}
       {{:budget, entries}, :ok} -> {:budget, entries}
+    end
+  end
+
+  # Compiling runs the mutant's own macros and module bodies, so a mutant can hang here
+  # as well: the compile gets the same budget as a run of the suite.
+  defp compile(ast, file, budget) do
+    task = Task.async(fn -> Mutator.compile(ast, file) end)
+
+    case Task.yield(task, budget) || Task.shutdown(task, :brutal_kill) do
+      {:ok, compiled} -> compiled
+      {:exit, reason} -> exit(reason)
+      nil -> :budget
     end
   end
 

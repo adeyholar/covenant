@@ -195,6 +195,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     survivors_path = Survivors.path(settings.contracts, plan.component)
 
+    check_survivors_document(survivors_path)
+
     annotations =
       case Survivors.load(survivors_path) do
         {:ok, annotations} -> annotations
@@ -306,6 +308,21 @@ defmodule Mix.Tasks.Covenant.Mutate do
     end
   end
 
+  @doc false
+  # `Survivors` reads YAML with `YamlElixir.read_from_string/1`, which keeps one of
+  # several documents and one of two equal keys: a `.yml` survivors file goes through
+  # the strict reader first, and its errors (file:line) are the failure.
+  @spec check_survivors_document(Path.t()) :: :ok | no_return()
+  def check_survivors_document(path) do
+    with ".yml" <- Path.extname(path),
+         {:ok, text} <- File.read(path),
+         {:error, errors} <- Covenant.Parser.Records.read_document(text, path) do
+      fail_with(errors, "#{path} could not be parsed")
+    else
+      _ -> :ok
+    end
+  end
+
   defp run_id, do: :crypto.strong_rand_bytes(6) |> Base.url_encode64(padding: false)
 
   # No more workers than mutants (the rest would only boot and idle), and a word of
@@ -407,26 +424,41 @@ defmodule Mix.Tasks.Covenant.Mutate do
       0 ->
         with {:ok, raw} <- Mutate.decode_raw(raw_path), do: {:ok, [raw | raws]}
 
-      status when status == @timeout_status ->
-        with {:ok, raw} <- Mutate.decode_raw(raw_path) do
-          judged = Enum.map(raw.mutants, & &1.id)
-
-          if judged == [] or Enum.all?(judged, &(&1 in skip)) do
-            {:error, "#{worker} was stopped by its watchdog without judging a mutant"}
-          else
-            for m <- raw.mutants, m.verdict == :timeout do
-              Mix.shell().info(
-                "covenant.mutate: #{worker}: #{m.id} #{Mutant.at(m)} was stopped by its watchdog (a timeout); " <>
-                  "starting a new worker for the rest"
-              )
-            end
-
-            run_worker(settings, plan, i, run_dir, attempt + 1, skip ++ judged, [raw | raws])
-          end
+      @timeout_status ->
+        # no results file: it was stopped while no mutant was running (an unmutated
+        # re-run outran its budget). That is no mutant's verdict, and a new worker would
+        # meet the same state, so it is an error; the worker named the last mutant on its output
+        if File.exists?(raw_path) do
+          stopped(settings, plan, i, run_dir, {attempt, skip, raws}, raw_path)
+        else
+          {:error,
+           "#{worker} was stopped by its watchdog outside a mutant: the unmutated suite did " <>
+             "not finish after a mutant (see the output above for which); the results are unreliable"}
         end
 
       status ->
         {:error, "#{worker} exited with status #{status}"}
+    end
+  end
+
+  defp stopped(settings, plan, i, run_dir, {attempt, skip, raws}, raw_path) do
+    worker = "worker #{i}/#{settings.jobs}"
+
+    with {:ok, raw} <- Mutate.decode_raw(raw_path) do
+      judged = Enum.map(raw.mutants, & &1.id)
+
+      if judged == [] or Enum.all?(judged, &(&1 in skip)) do
+        {:error, "#{worker} was stopped by its watchdog without judging a mutant"}
+      else
+        for m <- raw.mutants, m.verdict == :timeout do
+          Mix.shell().info(
+            "covenant.mutate: #{worker}: #{m.id} #{Mutant.at(m)} was stopped by its watchdog (a timeout); " <>
+              "starting a new worker for the rest"
+          )
+        end
+
+        run_worker(settings, plan, i, run_dir, attempt + 1, skip ++ judged, [raw | raws])
+      end
     end
   end
 

@@ -550,6 +550,7 @@ mix covenant.check     # Covenant against its own Contract
 - Mutation runs one component at a time. There is no mode that mutates only what a branch changed.
 - The private copy protects relative paths only. A mutant can still write through an absolute path or a link to `_build` or `deps`.
 - The modules that run the mutation worker can't be mutated by their own run.
+- Struct fields given by a module attribute (`defstruct @fields`, `defexception @fields`) are still mutated, and the mutants that result can't be killed. Sort them as `equivalent`.
 - In the sibling layout, a `covers` function must be public: the check finds it with `__info__/1`.
 - A `mutants.md` declaration names Covenant's printed mutation, so declarations don't carry over between flinch and Covenant.
 

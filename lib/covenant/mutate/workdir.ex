@@ -65,13 +65,16 @@ defmodule Covenant.Mutate.Workdir do
   default) ends its name; a directory that already exists raises
   `File.Error` with reason `:eexist` and is never touched.
   """
-  @spec build(Path.t(), Path.t(), String.t()) :: Path.t()
-  def build(root, base \\ System.tmp_dir!(), suffix \\ random_suffix()) do
+  @spec build(Path.t(), Path.t(), String.t(), boolean()) :: Path.t()
+  def build(root, base \\ System.tmp_dir!(), suffix \\ random_suffix(), register? \\ false) do
     root = Path.expand(root)
     check_base!(Path.expand(base), root)
     dir = Path.join(base, "covenant-mutate-#{System.pid()}-#{suffix}")
 
     File.mkdir!(dir)
+    # with `register?` the stdin watcher of the task can find the directory, and
+    # remove it, even when the parent dies while the tree is still being copied
+    if register?, do: register(dir)
 
     try do
       File.chmod!(dir, 0o700)
@@ -87,8 +90,33 @@ defmodule Covenant.Mutate.Workdir do
     rescue
       error ->
         remove(dir)
+        if register?, do: unregister()
         reraise error, __STACKTRACE__
     end
+  end
+
+  @registry_key {__MODULE__, :registered}
+
+  @doc "Registers `dir` as the private copy of this VM's worker (`registered/0`)."
+  @spec register(Path.t()) :: :ok
+  def register(dir), do: :persistent_term.put(@registry_key, dir)
+
+  @doc "The directory registered by `register/1`, or `nil`."
+  @spec registered() :: Path.t() | nil
+  def registered, do: :persistent_term.get(@registry_key, nil)
+
+  @doc "Forgets the registered directory."
+  @spec unregister() :: :ok
+  def unregister do
+    :persistent_term.erase(@registry_key)
+    :ok
+  end
+
+  @doc "Removes the registered directory, if there is one (see `remove/1`); it never raises."
+  @spec remove_registered() :: :ok
+  def remove_registered do
+    with dir when is_binary(dir) <- registered(), do: remove(dir)
+    :ok
   end
 
   # Directories named like a build or dependency tree are linked; a symlink is copied
@@ -183,6 +211,10 @@ defmodule Covenant.Mutate.Workdir do
     end
   end
 
+  @doc false
+  @spec suffix() :: String.t()
+  def suffix, do: random_suffix()
+
   defp random_suffix,
     do: 6 |> :crypto.strong_rand_bytes() |> Base.encode32(case: :lower, padding: false)
 
@@ -195,14 +227,27 @@ defmodule Covenant.Mutate.Workdir do
   """
   @spec remove(Path.t()) :: :ok
   def remove(dir) do
-    with {:ok, entries} <- File.ls(dir) do
-      for entry <- entries,
-          path = Path.join(dir, entry),
-          match?({:ok, %File.Stat{type: :symlink}}, File.lstat(path)) do
-        File.rm(path)
-      end
+    case File.lstat(dir) do
+      {:ok, %File.Stat{type: :symlink}} ->
+        # the path was replaced by a link: the link goes, never what it points at
+        File.rm(dir)
 
-      rm_rf(dir, 5)
+      {:ok, %File.Stat{type: :directory, mode: mode}} ->
+        # an unreadable top directory (mode 000) could be neither listed nor removed
+        File.chmod(dir, Bitwise.bor(mode, 0o700))
+
+        with {:ok, entries} <- File.ls(dir) do
+          for entry <- entries,
+              path = Path.join(dir, entry),
+              match?({:ok, %File.Stat{type: :symlink}}, File.lstat(path)) do
+            File.rm(path)
+          end
+        end
+
+        rm_rf(dir, 5)
+
+      _ ->
+        :ok
     end
 
     :ok
