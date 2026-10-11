@@ -38,7 +38,8 @@ defmodule Covenant.TargetContractTest do
     end
 
     assert {:ok, {:file, "lib/../mix.exs"}} = Target.parse("lib/../mix.exs")
-    refute Target.exists?({:file, "../covenant"}, File.cwd!())
+    outside = "../" <> "covenant-outside-#{System.unique_integer([:positive])}"
+    refute Target.exists?({:file, outside}, File.cwd!())
     refute Target.exists?({:file, Path.expand("mix.exs")}, Path.join(File.cwd!(), "lib"))
   end
 
