@@ -15,8 +15,9 @@ defmodule Covenant.Static do
   overrides an earlier one, so `@tag :obligation` after a string tag leaves
   `true`, which is a problem). A tag is a literal string or a list of literal
   strings. A test inside `for`, `Enum.each`, `if`, `case` and the like can
-  define zero or many tests, so it is never credited: it is reported as
-  needing compiled code.
+  define zero or many tests, so it is never credited and is not an error: it
+  is returned in `generated` for the caller to report as needing compiled
+  code.
 
   `scan/1` returns one `Covenant.Results.Test` per test, with state
   `:tagged` (seen, not run), and the problems that `Covenant.Case` would
@@ -60,11 +61,15 @@ defmodule Covenant.Static do
           line: pos_integer() | nil
         }
 
+  @typedoc "A test a static reader cannot credit: `name` is `file:line: test <name>`."
+  @type generated :: %{file: String.t(), line: pos_integer() | nil, name: String.t()}
+
   @type scan :: %{
           files: [String.t()],
           modules: [module_entry()],
           tests: [Test.t()],
-          problems: [Error.t()]
+          problems: [Error.t()],
+          generated: [generated()]
         }
 
   @doc """
@@ -79,18 +84,20 @@ defmodule Covenant.Static do
     sibling = opts[:sibling]
     files = expand(paths)
 
-    Enum.reduce(files, %{files: [], modules: [], tests: [], problems: []}, fn file, acc ->
+    Enum.reduce(files, %{files: [], modules: [], tests: [], problems: [], generated: []}, fn file,
+                                                                                             acc ->
       shown = Path.relative_to(Path.expand(file), Path.expand(relative_to))
       primitive = sibling && Primitive.primitive_of(file, sibling)
 
-      %{modules: modules, tests: tests, problems: problems} =
+      %{modules: modules, tests: tests, problems: problems, generated: generated} =
         scan_source(File.read!(file), shown, primitive)
 
       %{
         files: acc.files ++ [shown],
         modules: acc.modules ++ modules,
         tests: acc.tests ++ tests,
-        problems: acc.problems ++ problems
+        problems: acc.problems ++ problems,
+        generated: acc.generated ++ generated
       }
     end)
   end
@@ -116,7 +123,8 @@ defmodule Covenant.Static do
   @spec scan_source(String.t(), String.t(), String.t() | nil) :: %{
           modules: [module_entry()],
           tests: [Test.t()],
-          problems: [Error.t()]
+          problems: [Error.t()],
+          generated: [generated()]
         }
   def scan_source(source, file, primitive \\ nil) do
     case Code.string_to_quoted(source, file: file, columns: false, emit_warnings: false) do
@@ -125,6 +133,7 @@ defmodule Covenant.Static do
           modules: [],
           tests: [],
           problems: [],
+          generated: [],
           seen: %{},
           lines: String.split(source, ["\r\n", "\n"]),
           primitive: primitive
@@ -135,7 +144,8 @@ defmodule Covenant.Static do
         %{
           modules: Enum.reverse(acc.modules),
           tests: Enum.reverse(acc.tests),
-          problems: Enum.reverse(acc.problems)
+          problems: Enum.reverse(acc.problems),
+          generated: Enum.reverse(acc.generated)
         }
 
       {:error, {meta, message, token}} ->
@@ -145,7 +155,8 @@ defmodule Covenant.Static do
         %{
           modules: [],
           tests: [],
-          problems: [Error.new(file, line, "cannot parse: #{message}#{token}")]
+          problems: [Error.new(file, line, "cannot parse: #{message}#{token}")],
+          generated: []
         }
     end
   end
@@ -358,26 +369,19 @@ defmodule Covenant.Static do
   end
 
   # A `test` under `for`, `Enum.each`, `if`, `case` and the like can be defined zero or many times
-  # (and a `@tag` before it reaches only the first), so static mode cannot credit it.
+  # (and a `@tag` before it reaches only the first), so static mode cannot credit it. It is not an
+  # error either: the scan lists it in `generated` for the task to report.
   defp walk_expr({form, _, _} = node, state, {tags, acc}) when form not in @opaque_forms do
     case nested_tests(node) do
       [] ->
         {tags, acc}
 
       found ->
-        where = construct(node)
+        generated =
+          for {kind, line, name} <- found,
+              do: %{file: state.file, line: line, name: "#{kind} #{name}"}
 
-        problems =
-          for {kind, line, name} <- found do
-            Error.new(
-              state.file,
-              line,
-              "#{kind} #{name} is defined inside `#{where}`, which can define zero or many tests; " <>
-                "static mode cannot credit it, so run `mix covenant.check` against compiled code"
-            )
-          end
-
-        {%{tags | tag: []}, %{acc | problems: Enum.reverse(problems) ++ acc.problems}}
+        {%{tags | tag: []}, %{acc | generated: Enum.reverse(generated) ++ acc.generated}}
     end
   end
 
@@ -398,11 +402,6 @@ defmodule Covenant.Static do
 
     Enum.reverse(found)
   end
-
-  defp construct({{:., _, [module, function]}, _, _}),
-    do: Macro.to_string(module) <> "." <> to_string(function)
-
-  defp construct({form, _, _}), do: to_string(form)
 
   defp has_body?(rest), do: Enum.any?(rest, &(is_list(&1) and Keyword.has_key?(&1, :do)))
 
