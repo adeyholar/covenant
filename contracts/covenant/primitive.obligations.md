@@ -58,7 +58,7 @@ check, coverage, regen and mutate treat both layouts alike.
 
 ### covenant.primitive.I8 — The root is the nearest directory that holds either layout
 - **scope:** `Covenant.root/0`, `Covenant.sibling_dir/0`
-- **must:** find the root as the nearest of the working directory and its ancestors that holds the contracts directory, or the sibling directory with a primitive in it, so a project with only the sibling layout has a root and a project nested in another finds its own; resolve `sibling_dir/0` against the root
+- **must:** take the root to be `COVENANT_ROOT`, else `config :covenant, root:`, else the Mix project's directory (the umbrella's, for an app); only outside any Mix project find it as the nearest of the working directory and its ancestors that holds the contracts directory, or the sibling directory with a primitive in it, so a project with only the sibling layout has a root and a project nested in another finds its own; `contracts_dir` (absolute, or relative with `..`) locates the Contract, relative to the root, and never defines the root; resolve `sibling_dir/0` against the root
 - **why:** a classic project's `test/contract` directory has no README.md in its subdirectories; without the primitive rule it passed for a sibling directory when a task ran from `test/`
 - **kind:** functional
 - **status:** active

@@ -323,18 +323,20 @@ defmodule Covenant.StaticContractTest do
 
       assert roots == [dir, dir, dir]
 
+      # a climbing contracts_dir locates the Contract; it never defines the root
       Application.put_env(:covenant, :contracts_dir, "../../contracts")
-      assert File.cd!(Path.join(dir, "apps/billing"), fn -> Covenant.root() end) == dir
+
+      assert File.cd!(Path.join(dir, "apps/billing"), fn -> Covenant.root() end) == File.cwd!()
     end
 
     @tag :tmp_dir
     @tag obligation: "covenant.static.I5"
-    test "an absolute contracts_dir, config :root and COVENANT_ROOT win in that order", %{
-      tmp_dir: dir
-    } do
+    test "an absolute contracts_dir never defines the root; config :root and COVENANT_ROOT win in that order",
+         %{tmp_dir: dir} do
       dir = Path.expand(dir)
+      project = File.cwd!()
       Application.put_env(:covenant, :contracts_dir, Path.join(dir, "repo/contracts"))
-      assert Covenant.root() == Path.join(dir, "repo")
+      assert Covenant.root() == project
 
       Application.put_env(:covenant, :root, Path.join(dir, "configured"))
       assert Covenant.root() == Path.join(dir, "configured")
@@ -353,7 +355,7 @@ defmodule Covenant.StaticContractTest do
       app = Path.join(dir, "apps/billing")
       File.mkdir_p!(app)
 
-      Application.put_env(:covenant, :contracts_dir, Path.join(dir, "contracts"))
+      Application.put_env(:covenant, :root, dir)
 
       Application.put_env(:covenant, :test_paths, [
         "apps/*/test/contract",
@@ -380,6 +382,7 @@ defmodule Covenant.StaticContractTest do
       assert File.cd!(app, fn -> Covenant.test_paths() end) == [Path.join(dir, "test/contract")]
 
       # a relative contracts_dir is found from the working directory upwards, as root/0 finds it
+      Application.delete_env(:covenant, :root)
       Application.put_env(:covenant, :contracts_dir, "contracts")
       assert File.cd!(app, fn -> Covenant.test_paths() end) == [Path.join(dir, "test/contract")]
 
@@ -399,7 +402,7 @@ defmodule Covenant.StaticContractTest do
       app = Path.join(dir, "apps/billing")
       File.mkdir_p!(app)
 
-      Application.put_env(:covenant, :contracts_dir, Path.join(dir, "contracts"))
+      Application.put_env(:covenant, :root, dir)
       Application.put_env(:covenant, :test_paths, ["apps/*/test/contract"])
 
       assert File.cd!(app, fn -> Covenant.test_paths(["test/contract", "../*/test", "/abs/x"]) end) ==
