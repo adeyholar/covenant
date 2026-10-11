@@ -37,6 +37,8 @@ The first release: the Contract layer for Impatient Programming in Elixir.
   `Covenant.Case` reads the comments at compile time; `mix covenant.check`
   applies the rules of `flinch contract`; `mix covenant.mutate` and
   `mix covenant.regen` take a primitive by name. A project can use either
-  layout or both. The survivor sorts gain `unpromised`.
+  layout or both. The survivor sorts gain `unpromised`. Each `mutants.md`
+  line names exactly one mutant: `#k` picks one when several of a unit's
+  mutants share a change, and a line they share without it is ambiguous.
 - Covenant governs itself: 85 obligations across ten components, each proved
   by a `Covenant.Case` test.
