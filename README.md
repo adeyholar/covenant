@@ -17,7 +17,7 @@ def deps do
 end
 ```
 
-Until 0.1 is on Hex, take it from GitHub:
+Or take it from GitHub:
 
 ```elixir
 {:covenant, github: "tools4imps/covenant", only: [:dev, :test], runtime: false}
@@ -67,9 +67,11 @@ wrote contracts/coverage.json
 covenant.check: the Contract holds
 ```
 
-`mix covenant.check` fails on a malformed obligation block, a dangling `record`, `invariant`, `superseded_by` or `depends_on` reference, an active obligation with no passing tagged test, a failing tagged test, an exception whose target no longer exists, and a scope ceiling exceeded. Coverage counts the active obligations that have at least one passing test; retired obligations and declared exceptions are reported but left out of the count. `contracts/coverage.json` is written without a timestamp, so it can be committed and diffed.
+`mix covenant.check` fails on a malformed obligation block, a dangling `record`, `invariant`, `superseded_by` or `depends_on` reference, an active obligation with no passing tagged test, a failing tagged test, an exception whose target no longer exists, and a scope ceiling exceeded. Coverage counts the active obligations that have at least one passing test; retired obligations and declared exceptions are reported but left out of the count. An obligation whose tagged tests were all skipped or excluded has no passing test: it fails, and the message names those tests. An obligation proven elsewhere takes a `kind: exception`. `contracts/coverage.json` is written without a timestamp, so it can be committed and diffed.
 
-`--static` compiles nothing and runs no test. It reads the contract test files as source and applies every check that needs no compiled code, for a Contract written ahead of its implementation. It writes `contracts/coverage.static.json` and never touches `coverage.json`:
+Each run writes its results to a private subdirectory of the results directory, so a `mix test` running in the background can't overwrite them mid-run. `--results-dir` (and the config key and `COVENANT_RESULTS_DIR`) only ever deletes Covenant's own result files. Paths resolve from the project root in every mode, so an umbrella app works.
+
+`--static` compiles nothing, loads no config and runs no test. It reads the contract test files as source and applies every check that needs no compiled code, for a Contract written ahead of its implementation: it works on a project whose `lib/` doesn't compile yet. A tagged test counts, skipped or not. A test inside `for`, `Enum.each`, `if`, `case`, `cond` or `unless` is not credited, since it may never be defined; those are listed as needing compiled code. It writes `contracts/coverage.static.json` and never touches `coverage.json`:
 
 ```text
 $ mix covenant.check --static
@@ -101,8 +103,8 @@ Every task exits 0 when the Contract holds and 1 when it doesn't. 1 also covers 
 | --- | --- |
 | `mix covenant.check` | any check above fails, or the contract suite fails |
 | `mix covenant.conditions` | any decision record is suspect |
-| `mix covenant.regen` | the component is unknown or the Contract doesn't parse |
-| `mix covenant.mutate` | the baseline is red, a survivor has no annotation, or an annotation matches no survivor |
+| `mix covenant.regen` | the component is unknown, the Contract doesn't parse, or `--out` is a non-empty directory that isn't a pack |
+| `mix covenant.mutate` | the baseline is red, there is nothing to mutate, a survivor has no annotation, an annotation matches no survivor, or a worker or the VM breaks |
 
 ## The Contract
 
@@ -135,7 +137,16 @@ Component ids are `<app>.<component>`, and obligation ids are `<component id>.I<
 - **status:** active
 ```
 
-`kind` is `functional`, `non-functional`, `persisted-format`, `ordering`, `security` or `exception`. A `kind: exception` block declares intentional duplication or a known gap, names the code with `target:` (`Module.function/arity`, `Module` or a file path), needs no test, and fails the check once its target is gone.
+`kind` is `functional`, `non-functional`, `persisted-format`, `ordering`, `security` or `exception`. A `kind: exception` block declares intentional duplication or a known gap, names the code with `target:` (`Module.function/arity`, `Module` or a file path relative to the project root), needs no test, and fails the check once its target is gone.
+
+Parsing is strict. A malformed obligation block is an error at its line, never skipped silently:
+
+- an obligation-shaped heading at the wrong level, or indented
+- an unclosed code fence
+- a known field outside a block, or misspelled (`**Record:**`, `**record**:`)
+- a repeated field
+
+A YAML contract file is rejected for multiple documents, `<<` merge keys, repeated keys and fields of the wrong type. A leading BOM is fine, and so are bold-label bullets in prose.
 
 ### Contract tests
 
@@ -193,7 +204,7 @@ The tags are checked when the module compiles. An untagged test, an unknown or r
 | `elixir` | `version` | the running Elixir matches |
 | `value` | `call`, `equals`, optional `path` | the function returns the value the record decided |
 
-A `value` check lets the record that decides a value verify it. `call` names a zero-arity function of your project, as `"Module.fun/0"`, and is called in the project's own VM after it compiles. `path` walks keys through maps, trying the atom form of each key before the string form. Atoms compare as strings, lists element by element, numbers by value. A different value is suspect (`Example.Scope.event_kinds/0 is 3, the record says 4`), and so is a missing key or a call that raises. A module that isn't compiled in the VM leaves the condition unchecked, which is counted and never a failure.
+`contracts/` is trusted input, like `mix.exs`: a `value` check and a `module` counter run your project's functions. Covenant refuses to call into Elixir or OTP itself, so `System.halt/0` can't end the gate with a success status, but this is not a sandbox. A `file` path must stay under the project root. A `value` check lets the record that decides a value verify it. `call` names a zero-arity function of your project, as `"Module.fun/0"`, and is called in the project's own VM after it compiles. `path` walks keys through maps, trying the atom form of each key before the string form. Atoms compare as strings, lists element by element, numbers by value. A different value is suspect (`Example.Scope.event_kinds/0 is 3, the record says 4`), and so is a missing key or a call that raises. A module that isn't compiled in the VM leaves the condition unchecked, which is counted and never a failure.
 
 ```text
 $ mix covenant.conditions --verbose
@@ -246,6 +257,8 @@ $ mix covenant.regen example.counter
 covenant.regen: wrote 9 file(s) to tmp/covenant/regen/example.counter
 ```
 
+`--out DIR` writes a `.covenant-pack` marker into every pack and only ever clears a directory that holds one. It refuses a non-empty directory without a marker and deletes nothing. Regen and mutate find the contract tests by reading `use Covenant.Case, component: ...` from the syntax tree, so the multi-line form `mix format` writes is found and a commented-out line isn't.
+
 A pack holds everything an agent needs to rebuild one component and nothing of the old implementation: the intent or obligations file, the records, the system intent, the component's contract tests, and one stub module per module of the intent's `## Public surface`. Hand it to a fresh agent, rebuild, and run the contract tests. Every difference is a sentence the Contract was missing.
 
 A Public surface mentions modules the component doesn't own, and a stub for one of those would shadow the real module. A `#### Modules` paragraph in the Public surface, or `modules:` in the file's front matter, says exactly what the component owns. Without one, Covenant decides from where each module lives and prints what it skipped; `mix covenant.check` warns about every component that declares no modules. The rules are in the docs for `Covenant.Regen.Ownership`.
@@ -259,13 +272,14 @@ covenant.mutate: tests: test/contract/example/counter_contract_test.exs
 covenant.mutate: Example.Counter (lib/example/counter.ex)
   m001 lib/example/counter.ex:11:16 integer_shift `100` → `101`  killed by 1 test(s)
   m002 lib/example/counter.ex:11:16 integer_shift `100` → `99`  killed by 2 test(s)
-  m003 lib/example/counter.ex:18:20 integer_shift `0` → `1`  SURVIVED
+  m003 lib/example/counter.ex:29:5 return_nil `%__MODULE__{value: 0, max: max, events: []}` → `nil`  killed by 7 test(s)
+  m005 lib/example/counter.ex:25:29 logical_swap `and` → `or`  SURVIVED
   ...
-covenant.mutate: baseline 7 test(s) green in 19 ms; 61 of 61 mutant(s) run, per-test timeout 1000 ms
+covenant.mutate: baseline 7 test(s) green in 82 ms; 59 of 59 mutant(s) run, per-test timeout 1000 ms
 
 Kill matrix — example.counter (Example.Counter)
-  61 mutants: 43 killed, 14 survived, 0 timed out, 4 invalid — score 75.4%
-  7 tests, baseline 19 ms, seed 0, timeout 1000 ms
+  59 mutants: 43 killed, 12 survived, 0 timed out, 4 invalid — score 78.2%
+  7 tests, baseline 82 ms, seed 0, timeout 1000 ms
 
   obligation          killed  unique
   example.counter.I1      26       1
@@ -275,10 +289,10 @@ Kill matrix — example.counter (Example.Counter)
   example.counter.I6      23       3
   example.counter.I7      15       1
 
-Survivors (14; 0 unsorted)
-  m003 lib/example/counter.ex:18:20 integer_shift `0` → `1`  equivalent — new/1 sets value explicitly; the defstruct default is never read.
-  m007 lib/example/counter.ex:25:29 logical_swap `and` → `or`  evaluation-gap — new/1 rejecting a non-integer max is not an obligation yet; add one before callers rely on it.
-  m019 lib/example/counter.ex:34:48 integer_shift `1` → `2`  decision-hole — The Contract lists increment/2 only; whether a default step exists is deliberately undecided.
+Survivors (12; 0 unsorted)
+  m005 lib/example/counter.ex:25:29 logical_swap `and` → `or`  evaluation-gap — new/1 rejecting a non-integer max is not an obligation yet; add one before callers rely on it.
+  m010 lib/example/counter.ex:26:28 string_empty `"max must be a positive integer, got: #{inspect(max)}"` → `""`  log-only — The ArgumentError message is prose for humans; the Contract pins the exception, not its text.
+  m017 lib/example/counter.ex:34:48 integer_shift `1` → `2`  decision-hole — The Contract lists increment/2 only; whether a default step exists is deliberately undecided.
   ...
 
 Mutation-blind tests (warn): no mutant only this test catches
@@ -290,7 +304,7 @@ wrote tmp/covenant/mutate/example.counter/kill_matrix.json
 covenant.mutate: every mutant is caught or sorted
 ```
 
-The modules to mutate come from `--module` flags, else the `modules:` front matter, else the Public surface and the obligations' `scope`. Each mutant is one AST change, compiled in memory: no file is written. The suite runs in one `MIX_ENV=test` worker that boots once and hot-swaps each mutant, and the unmutated baseline has to pass first. The set and order of mutants is a pure function of the source.
+The modules to mutate come from `--module` flags, else the `modules:` front matter, else the Public surface and the obligations' `scope`. Each mutant is one AST change, compiled in memory: no file is written. The suite runs in a `MIX_ENV=test` worker that boots once and hot-swaps each mutant, and the unmutated baseline has to pass first. The set and order of mutants is a pure function of the source.
 
 | Operator | Change |
 | --- | --- |
@@ -308,18 +322,18 @@ The modules to mutate come from `--module` flags, else the `modules:` front matt
 | `element_removal` | one element of a list or one pair of a map is dropped |
 | `ecto_where_removal` | a `\|> where(...)` stage or a `where:` key of `from` is dropped |
 
-Docs, specs, types, `defmacro`, `defguard`, `use`, `import`, `alias`, `require`, sigils and `quote` are never mutated.
+Docs, specs, types, `defmacro`, `defguard`, `defstruct` and `defexception` fields, `use`, `import`, `alias`, `require`, sigils and `quote` are never mutated. Struct literals in tests are expanded at compile time, so a mutant of a struct default could never be killed. A run that finds nothing to mutate is an error, and a module with no mutants is warned about.
 
 A mutant is killed when a test fails for any reason but a timeout, survives when every test passes, and is invalid when it doesn't compile; a mutant the tests only time out against is a survivor. A kill is credited to the obligations tagged on every test that failed. An obligation's unique kills are the mutants only its tests caught. A test with no unique kill is mutation-blind and is listed as a warning; `@tag mutation_blind: "reason"` keeps the reason beside the warning.
 
 There's no score threshold. The score is printed for information. Every survivor is either killed by a new test or sorted in `contracts/<app>/<component>.survivors.yml`, under a reason a reviewer can check. `at`, `operator` and `mutation` are all required, so an entry names one mutant:
 
 ```yaml
-- at: lib/example/counter.ex:18:20
-  operator: integer_shift
-  mutation: "`0` → `1`"
-  sort: equivalent
-  reason: new/1 sets value explicitly; the defstruct default is never read.
+- at: lib/example/counter.ex:69:60
+  operator: return_nil
+  mutation: "`:ok` → `nil`"
+  sort: dead-code
+  reason: check_step!/1's return value is never read; only its raise is observable.
 ```
 
 | Sort | The survivor is |
@@ -334,7 +348,17 @@ There's no score threshold. The score is printed for information. Every survivor
 
 A mutant inside the target of an active `kind: exception` obligation is sorted `decision-hole` without an entry. An entry that matches no survivor fails the run, so the file stays true.
 
-Without `--timeout`, each test's timeout is five times the slowest baseline test, and never under a second. `--fail-fast` stops each mutant's run at its first failing test: the verdicts are the same as a full run's, but the kill credit is partial, so use it to sort survivors on a slow suite and a full run to credit obligations. `--jobs N` splits the mutants over N worker processes, each running from its own directory so ExUnit's `:tmp_dir` isn't shared. A suite that shares anything else, such as a database or a fixed port, needs `--jobs 1`. `mix help covenant.mutate` has the rest.
+Without `--timeout`, each test's timeout is five times the slowest baseline test, and never under a second. `--fail-fast` stops each mutant's run at its first failing test: the verdicts are the same as a full run's, but the kill credit is partial, so use it to sort survivors on a slow suite and a full run to credit obligations. `mix help covenant.mutate` has the rest.
+
+### Workers and the project
+
+Every worker, `--jobs 1` included, runs the tests from a private copy of the project under the system temp directory. `_build` and `deps` beside a `mix.exs`, and `node_modules`, are linked rather than copied. `.git` is left out, so tests that shell out to git see no repository. A mutant's write or delete by a relative path lands in the copy. Absolute paths, paths through the `_build` and `deps` links, and paths derived from the project's location (`__DIR__`, `Application.app_dir/1`) are not protected. Mutate a project whose tests you would run anyway, from a clean working tree. A suite that shares anything else between OS processes, such as a database or a fixed port, needs `--jobs 1`.
+
+- `--jobs N` splits the mutants over N workers. It is capped at the number of mutants and warns above the schedulers online.
+- After each mutant the worker checks that the applications the baseline started are still running. If one is not, it restarts them and runs the unmutated suite once. At the end it runs the unmutated suite again. A broken VM ends the run with an error naming the mutant, instead of recording false kills.
+- A watchdog stops a mutant when no test finishes for ten times the baseline, plus five seconds, plus the per-test timeout. That mutant is a `timeout`, which is a survivor, and the task starts a new worker for the rest.
+- A worker dies with its parent.
+- Concurrent runs of one component don't clobber each other.
 
 ## The sibling layout
 
@@ -519,7 +543,7 @@ mix covenant.check     # Covenant against its own Contract
 - `--static` reads only literal component names and literal tags.
 - A `value` check calls only zero-arity functions.
 - Mutation runs one component at a time. There is no mode that mutates only what a branch changed.
-- `--jobs` isolates `tmp/` and nothing else.
+- The private copy protects relative paths only. A mutant can still write through an absolute path or a link to `_build` or `deps`.
 - The modules that run the mutation worker can't be mutated by their own run.
 - In the sibling layout, a `covers` function must be public: the check finds it with `__info__/1`.
 - A `mutants.md` declaration names Covenant's printed mutation, so declarations don't carry over between flinch and Covenant.
