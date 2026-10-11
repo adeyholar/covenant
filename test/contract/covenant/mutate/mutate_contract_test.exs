@@ -319,6 +319,42 @@ defmodule Covenant.MutateContractTest do
   end
 
   @tag obligation: "covenant.mutate.I2"
+  test "an absolute alias keeps its dots, a computed alias part is described, and code after a def has no function" do
+    source = """
+    defmodule Outer do
+      def f, do: 1
+      Module.put_attribute(__MODULE__, :after_def, 7 + 8)
+      defp g, do: 2
+      Module.put_attribute(__MODULE__, :after_defp, 5 + 6)
+
+      defmodule Elixir.Abs.Two do
+        def h, do: 3
+      end
+
+      defmodule unquote(m).Inner do
+        def k, do: 4
+      end
+    end
+    """
+
+    sites = parse!(source) |> Mutator.sites([])
+
+    assert sites |> Enum.map(& &1.module) |> Enum.uniq() ==
+             ["Outer", "Abs.Two", "Outer.unquote(m).Inner"]
+
+    after_defs =
+      for s <- sites,
+          s.module == "Outer",
+          s.operator == :arithmetic_swap,
+          do: {s.from, s.function}
+
+    assert after_defs == [{"+", nil}, {"+", nil}]
+
+    inside = for s <- sites, s.module == "Outer", s.from in ["1", "2"], do: s.function
+    assert inside |> Enum.uniq() |> Enum.sort() == ["f/0", "g/0"]
+  end
+
+  @tag obligation: "covenant.mutate.I2"
   test "ids run m001, m002, ... in walk order and widen past m999; the walk is deterministic" do
     body = "def a(x), do: x + 1\ndef b(x), do: [x, 2]"
     first = mutants(body)
@@ -1029,6 +1065,11 @@ defmodule Covenant.MutateContractTest do
     File.write!(path, "{")
     assert {:error, invalid} = Mutate.decode_raw(path)
     assert String.starts_with?(invalid, "#{path}: invalid JSON: ")
+
+    File.write!(path, ~s({"mutants": [{"id": "m001", "operator": "bogus"}], "tests": []}))
+
+    assert Mutate.decode_raw(path) ==
+             {:error, ~s(#{path}: mutant "m001": unknown operator "bogus")}
 
     one = %{raw | mutants: [mutant("m003", :killed), mutant("m001", :survived)], all: 4}
 
@@ -1992,6 +2033,114 @@ defmodule Covenant.MutateContractTest do
     assert Survivors.template(m) =~ "- at: lib/x.ex:4:7\n"
   end
 
+  defp pinned_ids(declarations, mutants) do
+    {kept, errors} = Survivors.resolve(declarations, mutants)
+    {Enum.map(kept, & &1.pinned), errors}
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "a declaration is pinned to the one mutant of its unit with that change" do
+    other = mutant("m3", :survived, line: 6, from: "9", to: "8")
+    elsewhere = mutant("m4", :survived, line: 1, function: "g/0")
+    mutants = [other, elsewhere]
+
+    # a change only one mutant of the unit has, by from and to or as written
+    assert {[%{pinned: "m3", from: "9", to: "8"}], []} =
+             Survivors.resolve([declaration(from: "9", to: "8")], mutants)
+
+    for change <- ["9 -> 8", "9 → 8", "`9` -> `8`", "`9` → `8`"] do
+      assert {[%{pinned: "m3", from: "9", to: "8"}], []} =
+               Survivors.resolve([declaration(from: nil, to: nil, change: change)], mutants)
+    end
+
+    assert {[%{pinned: :none}], []} =
+             Survivors.resolve([declaration(from: nil, to: nil, change: "9 -> 7")], mutants)
+
+    # the same change in another unit is not a candidate; one in this unit is
+    assert {["m4"], []} = pinned_ids([declaration(unit: "X.g/0", from: "1", to: "2")], mutants)
+    assert {[:none], []} = pinned_ids([declaration(from: "5", to: "6")], mutants)
+
+    # a wildcard and a survivors-file entry pass through untouched, in order
+    wildcard = declaration(from: nil, to: nil, line: 1)
+    plain = annotation(line: 2)
+    assert {[^wildcard, ^plain], []} = Survivors.resolve([wildcard, plain], mutants)
+
+    assert {[%{pinned: "m3"}, ^plain], []} =
+             Survivors.resolve([declaration(from: "9", to: "8"), plain], mutants)
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "a declaration that several mutants share needs its occurrence, counted in source order" do
+    second = mutant("m2", :survived, line: 5)
+    first = mutant("m1", :survived, line: 4)
+    other_file = mutant("m0", :survived, file: "lib/y.ex", line: 1)
+    mutants = [other_file, second, first]
+
+    assert {[], [error]} = Survivors.resolve([declaration(line: 7)], mutants)
+    assert error.file == "mutants.md" and error.line == 7
+
+    assert error.message ==
+             "ambiguous: 3 mutants in X.f/0 share 1 -> 2; add #1 to #3 to name one (in source order)"
+
+    assert {[], [%{message: "ambiguous: 3 mutants in X.f/0 share `1` → `2`; " <> _}]} =
+             Survivors.resolve([declaration(from: nil, to: nil, change: "`1` → `2`")], mutants)
+
+    # lib/x.ex sorts before lib/y.ex, a line before a later line
+    assert {["m1"], []} = pinned_ids([declaration(occurrence: 1)], mutants)
+    assert {["m2"], []} = pinned_ids([declaration(occurrence: 2)], mutants)
+    assert {["m0"], []} = pinned_ids([declaration(occurrence: 3)], mutants)
+
+    assert {[], [error]} = Survivors.resolve([declaration(occurrence: 4, line: 9)], mutants)
+    assert error.file == "mutants.md" and error.line == 9
+    assert error.message == "#4: only 3 mutant(s) in X.f/0 share 1 -> 2"
+
+    # the kept and the refused each keep their order
+    assert {[%{line: 1}, %{line: 3}], [%{line: 2}, %{line: 4}]} =
+             Survivors.resolve(
+               [
+                 declaration(occurrence: 1, line: 1),
+                 declaration(line: 2),
+                 declaration(occurrence: 2, line: 3),
+                 declaration(occurrence: 9, line: 4)
+               ],
+               mutants
+             )
+  end
+
+  @tag obligation: "covenant.mutate.I9"
+  test "a pinned declaration matches its one mutant, and an unmatched one matches none" do
+    one = mutant("m1", :survived)
+    two = mutant("m2", :survived)
+
+    assert Survivors.matches?(declaration(pinned: "m1"), one) == true
+    assert Survivors.matches?(declaration(pinned: "m1"), two) == false
+    assert Survivors.matches?(declaration(pinned: :none), one) == false
+
+    # a template names the occurrence only when the unit's mutants share the change
+    mutants = [one, two, mutant("m3", :survived, from: "3", to: "4")]
+    assert Survivors.template(one, format: :md, mutants: mutants) == "X.f/0: 1 -> 2 #1"
+    assert Survivors.template(two, format: :md, mutants: mutants) == "X.f/0: 1 -> 2 #2"
+
+    # sharing the from or the to alone is not sharing the change
+    lone = Enum.at(mutants, 2)
+
+    near = [
+      mutant("m6", :survived, from: "3", to: "9"),
+      mutant("m7", :survived, from: "7", to: "4")
+    ]
+
+    assert Survivors.template(lone, format: :md, mutants: mutants ++ near) == "X.f/0: 3 -> 4"
+
+    assert Survivors.template(one,
+             format: :md,
+             mutants: [one, mutant("m5", :survived, function: "g/0")]
+           ) ==
+             "X.f/0: 1 -> 2"
+
+    assert Survivors.template(mutant("m9", :survived), format: :md, mutants: [one, two]) ==
+             "X.f/0: 1 -> 2"
+  end
+
   @tag obligation: "covenant.mutate.I9"
   test "a declaration a test kills is contradicted, and one matching no survivor is unmatched",
        %{counter: counter} do
@@ -2002,6 +2151,13 @@ defmodule Covenant.MutateContractTest do
 
     assert problem.message ==
              "declaration `X.f/0: 1 -> 2` (m001) is contradicted: a Contract test kills that mutant — delete it"
+
+    invalid = mutant("m002", :invalid, line: 5)
+
+    assert [%{message: message}] = build(counter, [invalid], [declaration([])]).problems
+
+    assert message ==
+             "declaration `X.f/0: 1 -> 2` (m002) is contradicted: that mutant does not compile, so it cannot survive — delete it"
 
     unmatched = build(counter, [killed], [declaration(unit: "X.g/0", from: nil, to: nil)])
 

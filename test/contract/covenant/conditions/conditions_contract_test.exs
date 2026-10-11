@@ -208,6 +208,12 @@ defmodule Covenant.ConditionsContractTest do
 
   @limits "Covenant.ExampleLimits.limits/0"
 
+  defmodule AtomlessLimits do
+    @moduledoc false
+    # the key exists only as a string in this file; no atom of it is ever made
+    def limits, do: %{"never_made_an_atom_qzv" => 5}
+  end
+
   defp value(call, equals, path \\ nil) do
     check = %{"kind" => "value", "call" => call, "equals" => equals}
     premise(if path, do: Map.put(check, "path", path), else: check)
@@ -255,6 +261,20 @@ defmodule Covenant.ConditionsContractTest do
     # an empty path is no path
     assert {:ok, "Covenant.ExampleLimits.answer/0 is 42"} =
              Conditions.evaluate(value("Covenant.ExampleLimits.answer/0", 42, []), ctx)
+  end
+
+  @tag obligation: "covenant.conditions.I9"
+  test "value: a string key whose atom does not exist is still found", %{ctx: ctx} do
+    call = "Covenant.ConditionsContractTest.AtomlessLimits.limits/0"
+
+    assert {:ok, _} = Conditions.evaluate(value(call, 5, ["never_made_an_atom_qzv"]), ctx)
+    assert_raise ArgumentError, fn -> String.to_existing_atom("never_made_an_atom_qzv") end
+  end
+
+  @tag obligation: "covenant.conditions.I2"
+  test "a file check whose path is not a string is incomplete, not evaluated", %{ctx: ctx} do
+    assert {:suspect, "check `file` is incomplete: " <> _} =
+             Conditions.evaluate(premise(%{"kind" => "file", "path" => 123}), ctx)
   end
 
   @tag obligation: "covenant.conditions.I6"
