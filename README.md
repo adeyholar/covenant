@@ -141,12 +141,13 @@ Component ids are `<app>.<component>`, and obligation ids are `<component id>.I<
 
 Parsing is strict. A malformed obligation block is an error at its line, never skipped silently:
 
-- an obligation-shaped heading at the wrong level, or indented
+- an obligation-shaped heading at the wrong level, indented, or written `### <id>: title` instead of `### <id> — <title>`
 - an unclosed code fence
 - a known field outside a block, or misspelled (`**Record:**`, `**record**:`)
 - a repeated field
+- a Markdown or YAML file under `contracts/` that Covenant doesn't read, such as a misnamed `x.obligation.md` or one in a nested directory (`README.md` files, `coverage*.json` and `*.survivors.yml` are fine)
 
-A YAML contract file is rejected for multiple documents, `<<` merge keys, repeated keys and fields of the wrong type. A leading BOM is fine, and so are bold-label bullets in prose.
+`kind` and `status` take one value; nothing after them continues them. A YAML contract file, front matter included, is rejected for multiple documents, `<<` merge keys, repeated keys and fields of the wrong type. A leading BOM is fine, and so are bold-label bullets in prose.
 
 ### Contract tests
 
@@ -257,7 +258,7 @@ $ mix covenant.regen example.counter
 covenant.regen: wrote 9 file(s) to tmp/covenant/regen/example.counter
 ```
 
-`--out DIR` writes a `.covenant-pack` marker into every pack and only ever clears a directory that holds one. It refuses a non-empty directory without a marker and deletes nothing. Regen and mutate find the contract tests by reading `use Covenant.Case, component: ...` from the syntax tree, so the multi-line form `mix format` writes is found and a commented-out line isn't.
+`--out DIR` writes a `.covenant-pack` marker into every pack, listing the files Covenant wrote. A later run deletes only those files. It refuses a non-empty directory without a marker, and a pack that holds files Covenant didn't write (the rebuilding agent's `QUESTIONS.md`, say), and deletes nothing. Regen and mutate find the contract tests by reading `use Covenant.Case, component: ...` from the syntax tree, so the multi-line form `mix format` writes is found and a commented-out line isn't.
 
 A pack holds everything an agent needs to rebuild one component and nothing of the old implementation: the intent or obligations file, the records, the system intent, the component's contract tests, and one stub module per module of the intent's `## Public surface`. Hand it to a fresh agent, rebuild, and run the contract tests. Every difference is a sentence the Contract was missing.
 
@@ -352,12 +353,13 @@ Without `--timeout`, each test's timeout is five times the slowest baseline test
 
 ### Workers and the project
 
-Every worker, `--jobs 1` included, runs the tests from a private copy of the project under the system temp directory. `_build` and `deps` beside a `mix.exs`, and `node_modules`, are linked rather than copied. `.git` is left out, so tests that shell out to git see no repository. A mutant's write or delete by a relative path lands in the copy. Absolute paths, paths through the `_build` and `deps` links, and paths derived from the project's location (`__DIR__`, `Application.app_dir/1`) are not protected. Mutate a project whose tests you would run anyway, from a clean working tree. A suite that shares anything else between OS processes, such as a database or a fixed port, needs `--jobs 1`.
+Every worker, `--jobs 1` included, runs the tests from a private copy of the project under the system temp directory. `_build` and `deps` beside a `mix.exs`, and `node_modules`, are linked rather than copied. `cover`, `doc`, `.elixir_ls`, `.lexical`, `.expert`, `erl_crash.dump` and `priv/plts` are left out, and so is `.git`, so a test that shells out to git doesn't see the project's repository. A system temp directory inside the project (outside its `tmp/`) is refused. A mutant's write or delete by a relative path lands in the copy. Absolute paths, paths through the `_build` and `deps` links, and paths derived from the project's location (`__DIR__`, `Application.app_dir/1`) are not protected. Mutate a project whose tests you would run anyway, from a clean working tree. A suite that shares anything else between OS processes, such as a database or a fixed port, needs `--jobs 1`.
 
 - `--jobs N` splits the mutants over N workers. It is capped at the number of mutants and warns above the schedulers online.
 - After each mutant the worker checks that the applications the baseline started are still running. If one is not, it restarts them and runs the unmutated suite once. At the end it runs the unmutated suite again. A broken VM ends the run with an error naming the mutant, instead of recording false kills.
-- A watchdog stops a mutant when no test finishes for ten times the baseline, plus five seconds, plus the per-test timeout. That mutant is a `timeout`, which is a survivor, and the task starts a new worker for the rest.
-- A worker dies with its parent.
+- A test's measured time includes its teardown (`on_exit`, supervised shutdown), and the unmutated re-runs use the baseline's timeout, not a mutant's. A red re-run is retried once. Before every run, the copy's `tmp/` is made writable again, so a test that leaves a read-only directory there doesn't break the next run.
+- A watchdog stops a mutant when no test finishes for ten times the baseline, plus five seconds, plus the per-test timeout. The mutant is a `timeout`, a survivor, unless a test had already failed against it, which makes it a kill with partial credit. The task starts a new worker for the rest.
+- A worker dies with its parent and removes its copy first.
 - Concurrent runs of one component don't clobber each other.
 
 ## The sibling layout
@@ -410,7 +412,7 @@ defmodule Calc.ContractTest do
 end
 ```
 
-`Covenant.Case` takes the primitive from the file's directory and reads the comments when the module compiles, so `# Contract: calc/A1` counts exactly as `@tag obligation: "calc/A1"` does, and that works too. Several ids go on one line, separated by commas. A test that names nothing, an unknown id and another primitive's id are compile errors, and so is a `# Contract:` comment anywhere else.
+`Covenant.Case` takes the primitive from the file's directory and reads the comments when the module compiles, so `# Contract: calc/A1` counts exactly as `@tag obligation: "calc/A1"` does, and that works too. Several ids go on one line, separated by commas. A test that names nothing, an unknown id and another primitive's id are compile errors, and so is a `# Contract:` comment that doesn't sit directly above a test. Bold words in a primitive's README prose are prose; only a list item that opens with a bold id is an obligation.
 
 For `mix test` to run them, add the directory to the test paths and give it an empty `contract/test_helper.exs`; `test/test_helper.exs` still starts ExUnit. The default `test_pattern`, `*_test.exs`, already matches.
 
@@ -491,19 +493,22 @@ Calc.clamp/3: > -> >=
 
 A line is a unit and the mutation as the run prints it, `Module.function/arity: from -> to`, and it names exactly one mutant. When several of the unit's mutants share the change, `#k` picks the k-th in source order, killed ones included, so the number doesn't move as tests change: `Calc.clamp/3: < -> <= #2`. A line they share without `#k` is ambiguous and fails the run. An `equivalent` block claims no program can tell the mutant from the original; an `unpromised` block says the behaviour changes and the Contract leaves it open, and only there does `Module.function/arity: *` declare every survivor of the unit. A declaration that a test contradicts, or that names no surviving mutant, fails the run, line by line. An unsorted survivor is printed as a block ready to paste, with `#k` where it needs one.
 
-`mix covenant.regen calc` writes the README, `mutants.md`, the Contract tests and a stub of every public function the primitive covers.
+`mix covenant.regen calc` writes the README, the Contract tests (subdirectories included), `contract/test_helper.exs`, the convention and a stub of every public function the primitive covers. `mutants.md` stays out, since it describes the old implementation.
 
 ## Configuration
 
 ```elixir
 config :covenant,
   contracts_dir: "contracts",              # default
-  sibling_dir: "contract",                 # default; the sibling layout
+  sibling_dir: "contract",                 # default; the sibling layout; false turns it off
   test_paths: ["test/contract"],           # default; globs allowed
-  results_dir: "_build/covenant/results"   # default
+  results_dir: "_build/covenant/results",  # default
+  case_modules: []                         # your wrappers around Covenant.Case, for --static and regen
 ```
 
-Covenant resolves paths from the directory that holds `contracts/` (or, without one, `contract/`), never from the directory `mix` runs in. In an umbrella, set `contracts_dir: Path.expand("../contracts", __DIR__)` in `config/config.exs` and `test_paths: ["apps/*/test/contract"]`; each app's results are written separately and merged by `mix covenant.check`. [`test/fixtures/umbrella_project`](https://github.com/tools4imps/covenant/tree/main/test/fixtures/umbrella_project) runs the tasks from inside an app.
+Covenant resolves paths from the project root, never from the directory `mix` runs in. The root is the Mix project's directory, or the umbrella's for an app of one. It is never an ancestor of the project, and `--contracts docs/contracts` doesn't move it. In an umbrella, set `contracts_dir: Path.expand("../contracts", __DIR__)` in `config/config.exs` and `test_paths: ["apps/*/test/contract"]`. Run from inside an app, `mix covenant.check` runs the tests from the umbrella root, so each app's tests run in that app's own VM; each app's results are written separately and merged. [`test/fixtures/umbrella_project`](https://github.com/tools4imps/covenant/tree/main/test/fixtures/umbrella_project) runs the tasks from inside an app.
+
+`--static` and regen read `use Covenant.Case, component: "..."` literally. If your contract tests `use MyApp.ContractCase` instead, list it in `case_modules`; otherwise `--static` reports the module as one it can't read. Both follow the project's `test_pattern`.
 
 ## In CI
 
@@ -529,7 +534,7 @@ The test of a Contract is regeneration. If a component can be deleted and rebuil
 
 Covenant has its own Contract in [`contracts/`](https://github.com/tools4imps/covenant/tree/main/contracts): 96 obligations across ten light-form components, a system intent and the decision records behind its policies. Every test in `test/contract/` is a `Covenant.Case` test that names its obligations. CI runs the suite and `mix covenant.check` on every push, on Elixir 1.18 and 1.19.
 
-Two components are mutated with Covenant itself. `covenant.conditions` makes 231 mutants: 202 killed, 27 invalid, and 2 survivors. `covenant.mutate`, run against its own unit tests, makes 1541: 1325 killed, 150 invalid, 2 timeouts, and 64 survivors. Every survivor is sorted, with its reason, in `contracts/covenant/*.survivors.yml`.
+Two components are mutated with Covenant itself. `covenant.conditions` makes 242 mutants: 211 killed, 29 invalid, and 2 survivors. `covenant.mutate`, run against its own unit tests, makes 1541: 1325 killed, 150 invalid, 2 timeouts, and 64 survivors. Every survivor is sorted, with its reason, in `contracts/covenant/*.survivors.yml`.
 
 ```bash
 mix deps.get
@@ -540,7 +545,7 @@ mix covenant.check     # Covenant against its own Contract
 ## Known limits in 0.1
 
 - An exception's `target` can name a public function, a module or a file, not a private function.
-- `--static` reads only literal component names and literal tags.
+- `--static` reads only literal component names and literal tags, and doesn't credit tests generated in a loop or a conditional.
 - A `value` check calls only zero-arity functions.
 - Mutation runs one component at a time. There is no mode that mutates only what a branch changed.
 - The private copy protects relative paths only. A mutant can still write through an absolute path or a link to `_build` or `deps`.

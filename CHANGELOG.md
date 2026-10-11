@@ -59,9 +59,10 @@ The first release: the Contract layer for Impatient Programming in Elixir.
   layout or both. The survivor sorts gain `unpromised`. Each `mutants.md`
   line names exactly one mutant: `#k` picks one when several of a unit's
   mutants share a change, and a line they share without it is ambiguous.
-- Covenant governs itself: 85 obligations across ten components, each proved
+- Covenant governs itself: 96 obligations across ten components, each proved
   by a `Covenant.Case` test.
 - Hardened before release by adversarial review (Claude and GPT): false greens
-  from skipped tests and malformed Contracts, destructive `--out` and
-  `--results-dir`, mutants writing into the real project, and hangs and
-  orphaned workers.
+  from skipped tests, parameterized failures, malformed or unread Contract
+  files and a project root moved by `--contracts`; destructive `--out` and
+  `--results-dir`; mutants writing into the real project; and hangs, false
+  "unreliable" verdicts from slow teardowns, and orphaned workers.
