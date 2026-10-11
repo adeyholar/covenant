@@ -667,13 +667,14 @@
         "covenant.mutate.I8": {
           "failing": 0,
           "kind": "functional",
-          "passing": 7,
+          "passing": 8,
           "status": "active",
           "testable": true,
           "tests": [
             "test a YAML error is reported at its own line, a flow list gets line 1",
             "test a missing or empty file is no annotations; the file lives beside the component's contract",
             "test a primitive's survivors file is the mutants.md beside its README, read as declarations",
+            "test a survivors-file entry without a mutation is an error naming the entry",
             "test a valid survivors file is a list of annotations with their line",
             "test every kind of bad entry is reported as file:line: message",
             "test find and matches? compare location, operator and mutation",
@@ -1062,12 +1063,14 @@
         "covenant.tasks.I1": {
           "failing": 0,
           "kind": "functional",
-          "passing": 2,
+          "passing": 4,
           "status": "active",
           "testable": true,
           "tests": [
+            "test mix covenant.check relays a suite that prints bytes that aren't UTF-8, and keeps UTF-8 intact",
             "test mix covenant.check runs the contract suite, prints coverage, writes coverage.json and exits 0",
-            "test mix covenant.check warns about a ceiling whose counter raises, writes coverage.json and exits 0"
+            "test mix covenant.check warns about a ceiling whose counter raises, writes coverage.json and exits 0",
+            "test the relay holds back a character cut between chunks and replaces what isn't UTF-8"
           ]
         },
         "covenant.tasks.I2": {

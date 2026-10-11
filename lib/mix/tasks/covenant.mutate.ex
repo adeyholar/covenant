@@ -314,7 +314,11 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     env = [{"MIX_ENV", "test"}, {"COVENANT_MUTATE_SOURCE", Atom.to_string(plan.source)}]
 
-    case System.cmd(mix, args, env: env, into: IO.stream(:stdio, :line), stderr_to_stdout: true) do
+    case System.cmd(mix, args,
+           env: env,
+           into: Covenant.Relay.new(),
+           stderr_to_stdout: true
+         ) do
       {_, 0} -> Mutate.decode_raw(raw_path)
       {_, status} -> {:error, "worker #{i}/#{settings.jobs} exited with status #{status}"}
     end

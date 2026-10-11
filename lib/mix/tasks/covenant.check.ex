@@ -289,7 +289,7 @@ defmodule Mix.Tasks.Covenant.Check do
 
       case System.cmd(mix, ["test" | args],
              env: env,
-             into: IO.stream(:stdio, :line),
+             into: Covenant.Relay.new(),
              stderr_to_stdout: true
            ) do
         {_, 0} -> :ok
