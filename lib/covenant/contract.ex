@@ -38,6 +38,10 @@ defmodule Covenant.Contract do
 
   defstruct dir: nil, components: %{}, records: %{}, ceilings: []
 
+  @not_found "contracts directory not found; the project root is the Mix project, so a `contracts/` " <>
+               "above it needs `config :covenant, contracts_dir: \"../contracts\"`, or " <>
+               "`COVENANT_ROOT` / `config :covenant, root: ...` to move the root"
+
   @doc "Loads the Contract from `dir`; `sibling: dir` adds the sibling layout's primitives."
   @spec load(Path.t(), keyword()) :: {:ok, t()} | {:error, [Error.t()]}
   def load(dir, opts \\ []) do
@@ -47,7 +51,7 @@ defmodule Covenant.Contract do
     cond do
       File.dir?(dir) -> do_load(dir, if(sibling?, do: sibling))
       sibling? -> do_load(dir, sibling)
-      true -> {:error, [Error.new(dir, nil, "contracts directory not found")]}
+      true -> {:error, [Error.new(dir, nil, @not_found)]}
     end
   end
 
@@ -100,14 +104,17 @@ defmodule Covenant.Contract do
     end
   end
 
-  # Markdown and YAML files the loader never reads (a nested directory, a
-  # misnamed `x.obligation.md`) would take whole components with them.
+  # Files the loader never reads, but whose names say they are Contract files (a
+  # nested directory, a misnamed `x.obligation.md`), would take whole components
+  # with them. Any other file (notes, ADRs) is prose and left alone.
   defp unread(dir) do
     if File.dir?(dir) do
       read = MapSet.new(for({f, _} <- component_files(dir), do: f) ++ record_files(dir))
       scope = Path.join([dir, "system", "scope.yml"])
 
-      for file <- Path.wildcard(Path.join(dir, "**/*.{md,yml,yaml}")) |> Enum.sort(),
+      for file <- Path.wildcard(Path.join(dir, "**/*")) |> Enum.sort(),
+          File.regular?(file),
+          contract_name?(file),
           not MapSet.member?(read, file),
           file != scope,
           not known_file?(file) do
@@ -125,6 +132,13 @@ defmodule Covenant.Contract do
     else
       []
     end
+  end
+
+  @contract_words ~w(obligation intent decision survivor scope)
+
+  defp contract_name?(file) do
+    base = file |> Path.basename() |> String.downcase()
+    Enum.any?(@contract_words, &String.contains?(base, &1))
   end
 
   defp known_file?(file) do

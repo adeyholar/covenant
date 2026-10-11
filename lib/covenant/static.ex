@@ -134,17 +134,17 @@ defmodule Covenant.Static do
   end
 
   defp pattern_regex(pattern) do
-    body =
-      pattern
-      |> String.graphemes()
-      |> Enum.map_join(fn
-        "*" -> ".*"
-        "?" -> "."
-        char -> Regex.escape(char)
-      end)
-
-    Regex.compile!("^" <> body <> "$")
+    Regex.compile!("^" <> glob_body(String.graphemes(pattern), 0) <> "$")
   end
+
+  # `*`, `?` and `{a,b}` (alternatives, nestable); every other character is literal.
+  defp glob_body([], _depth), do: ""
+  defp glob_body(["*" | rest], depth), do: ".*" <> glob_body(rest, depth)
+  defp glob_body(["?" | rest], depth), do: "." <> glob_body(rest, depth)
+  defp glob_body(["{" | rest], depth), do: "(" <> glob_body(rest, depth + 1)
+  defp glob_body(["}" | rest], depth) when depth > 0, do: ")" <> glob_body(rest, depth - 1)
+  defp glob_body(["," | rest], depth) when depth > 0, do: "|" <> glob_body(rest, depth)
+  defp glob_body([char | rest], depth), do: Regex.escape(char) <> glob_body(rest, depth)
 
   @doc """
   Reads one file's source; `file` is the name used in results and problems, and `primitive` the

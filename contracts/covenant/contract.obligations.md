@@ -13,7 +13,7 @@ problem anchored to a file and line.
 
 ### covenant.contract.I1 — Files map to components by path
 - **scope:** `Covenant.Contract.load/1`, `Covenant.Contract.component_id/2`
-- **must:** read `<app>/<name>.intent.md` as the heavy-form component `<app>.<name>`, `<app>/<name>.obligations.md` as the light form, `system/intent.md` as the component `system`; attach `<app>/<name>.decisions.yml` to its component and keep records whose component has no file; expose obligations by id. A Markdown or YAML file under the contracts directory that the loader does not read (a nested `<app>/<sub>/x.obligations.md`, a misnamed `x.obligation.md`) is an error naming the file at line 1, never silently ignored; `README.md`, `coverage*.json`, `*.survivors.yml`, `system/scope.yml` and the files the loader reads are known
+- **must:** read `<app>/<name>.intent.md` as the heavy-form component `<app>.<name>`, `<app>/<name>.obligations.md` as the light form, `system/intent.md` as the component `system`; attach `<app>/<name>.decisions.yml` to its component and keep records whose component has no file; expose obligations by id. A file under the contracts directory that the loader does not read and whose basename looks like a Contract file (it contains `obligation`, `intent`, `decision`, `survivor` or `scope`, in any case and with any extension, `.markdown` included) is an error naming the file at line 1, never silently ignored: a nested `<app>/<sub>/x.obligations.md`, a misnamed `x.obligation.md`, an `x.obligations.markdown`; every other file (`NOTES.md`, `docs/overview.md`, an ADR) is prose and ignored; `README.md`, `*.survivors.yml`, `system/scope.yml` and the files the loader reads are known
 - **kind:** functional
 - **status:** active
 
@@ -55,7 +55,7 @@ problem anchored to a file and line.
 
 ### covenant.contract.I8 — An empty directory is a valid Contract; a missing one is not
 - **scope:** `Covenant.Contract.load/1`
-- **must:** return an empty Contract for a directory with no contract files, and an error naming the path for a directory that does not exist
+- **must:** return an empty Contract for a directory with no contract files, and an error naming the path for a directory that does not exist, with a hint for a `contracts/` that lives above the Mix project (`config :covenant, contracts_dir: "../contracts"`, `COVENANT_ROOT`, `config :covenant, root: ...`)
 - **kind:** functional
 - **status:** active
 

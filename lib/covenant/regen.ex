@@ -104,7 +104,7 @@ defmodule Covenant.Regen do
     tests =
       for test <- find_tests(component, test_paths, root) do
         source = Path.expand(test, root)
-        {source, Path.relative_to(source, layout)}
+        {source, in_pack(Path.relative_to(source, layout))}
       end
 
     stub_opts =
@@ -165,7 +165,7 @@ defmodule Covenant.Regen do
 
       {:ok, %File.Stat{type: :directory}} ->
         cond do
-          File.regular?(marker) ->
+          pack_marker?(marker) ->
             clear_pack(out, marker)
 
           File.ls!(out) == [] ->
@@ -184,6 +184,12 @@ defmodule Covenant.Regen do
       {:error, reason} ->
         {:error, "cannot write the pack to #{out}: #{:file.format_error(reason)}"}
     end
+  end
+
+  # A marker is a pack's when it names a component on its first line; an empty or blank one is not.
+  defp pack_marker?(marker) do
+    File.regular?(marker) and
+      match?([_ | _], marker |> File.read!() |> String.split("\n", trim: true))
   end
 
   defp clear_pack(out, marker) do
@@ -277,6 +283,9 @@ defmodule Covenant.Regen do
   end
 
   # -- contract files ---------------------------------------------------------
+
+  # A path outside the layout stays absolute; the pack holds and records it as `<path without the root slash>`.
+  defp in_pack(path), do: String.trim_leading(path, "/")
 
   # `{source, target}` pairs, the target relative to the pack.
   defp contract_files(contract, %Component{form: :primitive, file: readme}, layout) do

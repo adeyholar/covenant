@@ -110,7 +110,7 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I16 — The per-test timeout of a mutant run is measured from the baseline
 - **scope:** `Covenant.Mutate.default_timeout/1`, `mix covenant.mutate`
-- **must:** without `--timeout` give the mutants' tests a timeout of five times the slowest baseline test, in milliseconds, and never under 1000 (`default_timeout/1`; a baseline of no test measures 1000), each worker measuring its own baseline and the matrix recording the largest as `timeout_ms`, and run the baseline itself under the ExUnit default of 60 seconds; with `--timeout MS` give them exactly MS; leave a test that sets its own `@tag timeout:` with it
+- **must:** without `--timeout` give the mutants' tests a timeout of five times the slowest baseline test, in milliseconds, and never under 1000 (`default_timeout/1`; a baseline of no test measures 1000), each worker measuring its own baseline and the matrix recording the largest as `timeout_ms`, and run the baseline itself, and the sanity re-runs between mutants, under `--timeout` when given, else under the ExUnit timeout the project set (read from `ExUnit.configuration()` after its `test_helper.exs` has run, before the run sets its own), else the ExUnit default of 60 seconds; with `--timeout MS` give them exactly MS; leave a test that sets its own `@tag timeout:` with it
 - **why:** a flat ceiling holds every test a mutant that loops forever reaches for the whole ceiling, so a database-backed suite spent about a minute per mutant (half a day for a module of 700), and it is too short for a suite whose tests are slow
 - **kind:** functional
 - **status:** active

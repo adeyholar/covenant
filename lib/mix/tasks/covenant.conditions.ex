@@ -107,7 +107,7 @@ defmodule Mix.Tasks.Covenant.Conditions do
   end
 
   defp load_contract(dir) do
-    case Contract.load(dir, sibling: Path.relative_to_cwd(Covenant.sibling_dir())) do
+    case Contract.load(dir, sibling: sibling_relative()) do
       {:ok, contract} ->
         contract
 
@@ -116,5 +116,10 @@ defmodule Mix.Tasks.Covenant.Conditions do
         Mix.shell().error("covenant.conditions: the Contract in #{dir} could not be parsed")
         exit({:shutdown, 1})
     end
+  end
+
+  defp sibling_relative do
+    sibling = Covenant.sibling_dir()
+    sibling && Path.relative_to_cwd(sibling)
   end
 end

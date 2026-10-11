@@ -31,16 +31,33 @@ defmodule Covenant.Contract.UnreadFilesContractTest do
     ContractBuilder.write(dir, %{
       "demo/sub/other.obligations.md" => light(),
       "demo/widget.obligation.md" => "# nope\n",
-      "demo/notes.yml" => "a: 1\n"
+      "demo/sub/x.obligations.markdown" => light(),
+      "demo/Decisions-2024.txt" => "nope\n"
     })
 
     assert {:error, _} = result = Contract.load(dir)
 
     assert messages(result) |> Enum.map(&String.replace(&1, dir <> "/", "")) |> Enum.sort() == [
-             "demo/notes.yml:1: this file is not read: a component is `<app>/<name>.obligations.md` (or `.intent.md`) directly under the contracts directory's app folder, and records are `<app>/<name>.decisions.yml`; rename or move it",
+             "demo/Decisions-2024.txt:1: this file is not read: a component is `<app>/<name>.obligations.md` (or `.intent.md`) directly under the contracts directory's app folder, and records are `<app>/<name>.decisions.yml`; rename or move it",
              "demo/sub/other.obligations.md:1: this file is not read: a component is `<app>/<name>.obligations.md` (or `.intent.md`) directly under the contracts directory's app folder, and records are `<app>/<name>.decisions.yml`; rename or move it",
+             "demo/sub/x.obligations.markdown:1: this file is not read: a component is `<app>/<name>.obligations.md` (or `.intent.md`) directly under the contracts directory's app folder, and records are `<app>/<name>.decisions.yml`; rename or move it",
              "demo/widget.obligation.md:1: this file is not read: a component is `<app>/<name>.obligations.md` (or `.intent.md`) directly under the contracts directory's app folder, and records are `<app>/<name>.decisions.yml`; rename or move it"
            ]
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.contract.I1"
+  test "prose under the contracts directory (notes, ADRs, other YAML) is not an error",
+       %{tmp_dir: dir} do
+    ContractBuilder.write(dir, %{
+      "demo/gadget.obligations.md" => light(),
+      "NOTES.md" => "# Notes\n",
+      "docs/overview.md" => "# Overview\n",
+      "adr/0001-use-elixir.md" => "# ADR\n",
+      "demo/notes.yml" => "a: 1\n"
+    })
+
+    assert {:ok, _} = Contract.load(dir)
   end
 
   @tag obligation: "covenant.contract.I10"

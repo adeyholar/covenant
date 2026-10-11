@@ -509,7 +509,9 @@ defmodule Covenant.Parser.Primitive do
   The primitive a file belongs to: the first directory of its path inside
   `sibling_dir`, or `nil` when it lies outside (or directly in) that directory.
   """
-  @spec primitive_of(Path.t(), Path.t()) :: String.t() | nil
+  @spec primitive_of(Path.t(), Path.t() | nil) :: String.t() | nil
+  def primitive_of(_file, nil), do: nil
+
   def primitive_of(file, sibling_dir) do
     file = Path.expand(file)
     dir = Path.expand(sibling_dir)

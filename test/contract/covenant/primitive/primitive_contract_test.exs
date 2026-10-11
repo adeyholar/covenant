@@ -126,7 +126,7 @@ defmodule Covenant.PrimitiveContractTest do
     {:ok, classic} = Contract.load(contracts)
     assert Contract.component_ids(classic) == ["billing.invoices"]
 
-    assert {:error, [%{message: "contracts directory not found"}]} =
+    assert {:error, [%{message: "contracts directory not found" <> _}]} =
              Contract.load(Path.join(dir, "none"), sibling: Path.join(dir, "nothing"))
   end
 
