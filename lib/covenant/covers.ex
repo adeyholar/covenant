@@ -201,10 +201,10 @@ defmodule Covenant.Covers do
     end
   end
 
-  # No new atom: the module's atom if it already exists, else a string (never loaded).
+  # The module's existing atom, else an atom only when a beam of that name is on the code path
+  # (`Covenant.Regen.Ownership.module_atom/1`); otherwise the string, never loaded.
   defp to_module(name) do
-    String.to_existing_atom("Elixir." <> String.replace_prefix(name, "Elixir.", ""))
-  rescue
-    ArgumentError -> name
+    name = String.replace_prefix(name, "Elixir.", "")
+    Covenant.Regen.Ownership.module_atom(name) || name
   end
 end
