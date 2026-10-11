@@ -62,7 +62,7 @@ defmodule Mix.Tasks.Covenant.Regen do
     test_paths = Covenant.test_paths(Keyword.get_values(opts, :test_path))
 
     contract =
-      case Contract.load(contracts_dir) do
+      case Contract.load(contracts_dir, sibling: Path.relative_to_cwd(Covenant.sibling_dir())) do
         {:ok, contract} ->
           contract
 

@@ -16,8 +16,12 @@ defmodule Covenant.Mutate.Modules do
   # example.counter
   ```
 
-  Precedence: `--module` flags on the command line, then the front matter,
-  then the derived set. Derivation reads inline code spans only (fenced
+  A primitive of the sibling layout names its code in a `covers` block
+  (`Covenant.Covers`); a tree (`MyApp.Calc.*`) is expanded to the project's
+  modules under it when they are located.
+
+  Precedence: `--module` flags on the command line, then the front matter
+  (or a primitive's `covers`), then the derived set. Derivation reads inline code spans only (fenced
   blocks hold persisted-format examples, not module names). Derived modules
   must live under the project root (`String.t()` in a signature names a
   module too, and the standard library is not under test); explicitly named
@@ -25,13 +29,14 @@ defmodule Covenant.Mutate.Modules do
   """
 
   alias Covenant.Contract.{Component, Obligation}
+  alias Covenant.Covers
 
   @fence ~r/^[ \t]*(```|~~~).*?^[ \t]*\1[ \t]*$/ms
   @code_span ~r/`([^`\n]+)`/
   @module_ref ~r/(?<![A-Za-z0-9_:.])([A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*)(?![A-Za-z0-9_])/
 
   @typedoc "Where a module name came from."
-  @type source :: :flag | :front_matter | :derived
+  @type source :: :flag | :front_matter | :covers | :derived
 
   @doc """
   The implementation module names of `component`, as strings, with their source.
@@ -42,6 +47,9 @@ defmodule Covenant.Mutate.Modules do
     cond do
       flags != [] ->
         {:flag, flags |> Enum.map(&String.trim_leading(&1, "Elixir.")) |> uniq()}
+
+      component.form == :primitive ->
+        {:covers, Covers.module_names(component.covers)}
 
       Component.declared_modules(component) != [] ->
         {:front_matter, uniq(Component.declared_modules(component))}
@@ -94,6 +102,7 @@ defmodule Covenant.Mutate.Modules do
           {:ok, [{module(), Path.t()}], [{String.t(), String.t()}]} | {:error, String.t()}
   def locate(names, source, root) do
     root = Path.expand(root)
+    names = expand_trees(names)
 
     {located, ignored, errors} =
       Enum.reduce(names, {[], [], []}, fn name, {ok, ignored, errors} ->
@@ -128,6 +137,15 @@ defmodule Covenant.Mutate.Modules do
       true ->
         {:ok, located |> Enum.reverse() |> Enum.uniq() |> Enum.sort_by(&inspect(elem(&1, 0))),
          Enum.reverse(ignored)}
+    end
+  end
+
+  defp expand_trees(names) do
+    if Enum.any?(names, &String.ends_with?(&1, ".*")) do
+      modules = Covers.project_modules()
+      names |> Enum.flat_map(&Covers.expand(&1, modules)) |> Enum.uniq()
+    else
+      names
     end
   end
 

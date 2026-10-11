@@ -12,7 +12,14 @@ defmodule Covenant.Mutate.Survivors do
   ```
 
   `sort` is one of `equivalent`, `log-only`, `dead-code`, `timeout`,
-  `evaluation-gap` or `decision-hole`. A survivor without an annotation and an
+  `evaluation-gap`, `decision-hole` or `unpromised`.
+
+  A primitive of the sibling layout declares its survivors in
+  `contract/<primitive>/mutants.md` instead, as flinch does: `equivalent` and
+  `unpromised` blocks of `Module.function/arity: from -> to` lines under a
+  heading that gives the reason (`Covenant.Parser.Primitive.declarations/2`).
+  `equivalent` maps onto the `equivalent` sort and `unpromised` onto
+  `unpromised`. A survivor without an annotation and an
   annotation without a survivor both fail `mix covenant.mutate`, the way a
   stale `kind: exception` fails `mix covenant.check`: the counts only say
   where to look, the sort is where the judgment is.
@@ -20,12 +27,18 @@ defmodule Covenant.Mutate.Survivors do
 
   alias Covenant.Error
   alias Covenant.Mutate.Mutant
+  alias Covenant.Parser.Primitive
 
-  @sorts ~w(equivalent log-only dead-code timeout evaluation-gap decision-hole)
+  @sorts ~w(equivalent log-only dead-code timeout evaluation-gap decision-hole unpromised)
   @item_line ~r/^-[ \t]/
 
   defmodule Annotation do
-    @moduledoc "One annotated survivor."
+    @moduledoc """
+    One annotated survivor. An entry of a survivors file names a site (`at`,
+    `operator`, optional `mutation`); a declaration in a primitive's
+    `mutants.md` names a `unit` (`Module.function/arity`) and the mutation's
+    `from` and `to`, or neither for a wildcard over the unit.
+    """
 
     @type t :: %__MODULE__{
             at: String.t(),
@@ -34,31 +47,42 @@ defmodule Covenant.Mutate.Survivors do
             sort: String.t(),
             reason: String.t(),
             file: String.t(),
-            line: pos_integer()
+            line: pos_integer(),
+            unit: String.t() | nil,
+            from: String.t() | nil,
+            to: String.t() | nil
           }
 
     @enforce_keys [:at, :operator, :sort, :reason, :file, :line]
-    defstruct [:at, :operator, :mutation, :sort, :reason, :file, :line]
+    defstruct [:at, :operator, :mutation, :sort, :reason, :file, :line, :unit, :from, :to]
   end
 
   @doc "The sort names, in the order the survivors file documents them."
   @spec sorts() :: [String.t()]
   def sorts, do: @sorts
 
-  @doc "Where a component's annotations live: `<contracts dir>/<app>/<name>.survivors.yml`."
+  @doc """
+  Where a component's annotations live: `<contracts dir>/<app>/<name>.survivors.yml`,
+  or `mutants.md` beside a primitive's README.
+  """
   @spec path(Path.t(), Covenant.Contract.Component.t()) :: Path.t()
+  def path(_contracts_dir, %{form: :primitive, file: readme}),
+    do: Path.join(Path.dirname(readme), "mutants.md")
+
   def path(contracts_dir, %{form: :system}),
     do: Path.join([contracts_dir, "system", "survivors.yml"])
 
   def path(contracts_dir, component),
     do: Path.join([contracts_dir, component.app, "#{component.name}.survivors.yml"])
 
-  @doc "Reads the annotations file; a missing file is an empty list."
+  @doc "Reads the annotations file (a `mutants.md` by its extension); a missing file is an empty list."
   @spec load(Path.t()) :: {:ok, [Annotation.t()]} | {:error, [Error.t()]}
   def load(path) do
     case File.read(path) do
       {:ok, text} ->
-        parse(text, path)
+        if Path.extname(path) == ".md",
+          do: Primitive.declarations(text, path),
+          else: parse(text, path)
 
       {:error, :enoent} ->
         {:ok, []}
@@ -188,17 +212,39 @@ defmodule Covenant.Mutate.Survivors do
   @spec find([Annotation.t()], Mutant.t()) :: Annotation.t() | nil
   def find(annotations, %Mutant{} = mutant), do: Enum.find(annotations, &matches?(&1, mutant))
 
-  @doc "True when the annotation names the mutant's location, operator and (if given) mutation."
+  @doc """
+  True when the annotation names the mutant's location, operator and (if given)
+  mutation; a declaration, when it names the mutant's unit and (unless it is a
+  wildcard) its `from` and `to`.
+  """
   @spec matches?(Annotation.t(), Mutant.t()) :: boolean()
+  def matches?(%Annotation{unit: unit} = annotation, %Mutant{} = mutant) when unit != nil do
+    unit == unit(mutant) and
+      (annotation.from == nil or (annotation.from == mutant.from and annotation.to == mutant.to))
+  end
+
   def matches?(%Annotation{} = annotation, %Mutant{} = mutant) do
     annotation.at == Mutant.at(mutant) and
       annotation.operator == Atom.to_string(mutant.operator) and
       (annotation.mutation == nil or annotation.mutation == Mutant.mutation(mutant))
   end
 
-  @doc "A YAML entry for a survivor, ready to paste into the annotations file."
-  @spec template(Mutant.t()) :: String.t()
-  def template(%Mutant{} = mutant) do
+  @doc "The unit a mutant belongs to, `Module.function/arity`, or the module for code outside a function."
+  @spec unit(Mutant.t()) :: String.t()
+  def unit(%Mutant{module: module, function: nil}), do: module
+  def unit(%Mutant{module: module, function: function}), do: "#{module}.#{function}"
+
+  @doc """
+  An entry for a survivor, ready to paste: a YAML entry for a survivors file,
+  or (`format: :md`) a declaration line for a primitive's `mutants.md`.
+  """
+  @spec template(Mutant.t(), keyword()) :: String.t()
+  def template(mutant, opts \\ [])
+
+  def template(%Mutant{} = mutant, format: :md),
+    do: "#{unit(mutant)}: #{mutant.from} -> #{mutant.to}"
+
+  def template(%Mutant{} = mutant, _opts) do
     """
     - at: #{Mutant.at(mutant)}
       operator: #{mutant.operator}

@@ -102,11 +102,25 @@ defmodule Covenant.Contract.Obligation do
   def testable?(%__MODULE__{} = obligation),
     do: active?(obligation) and not exception?(obligation)
 
-  @doc "Validates the `<component id>.I<n>` id shape."
+  @doc """
+  Validates the id shape: `<component id>.I<n>`, or `<primitive>/<id>` in the
+  sibling layout (`calc/A1`).
+  """
   @spec valid_id?(String.t()) :: boolean()
-  def valid_id?(id), do: Regex.match?(~r/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.I[1-9][0-9]*$/, id)
+  def valid_id?(id),
+    do:
+      Regex.match?(~r/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*\.I[1-9][0-9]*$/, id) or
+        Regex.match?(~r/^[a-z][a-z0-9_]*\/[A-Z]+[0-9]+$/, id)
 
-  @doc "The component id an obligation id belongs to (`\"a.b.I3\"` -> `\"a.b\"`)."
+  @doc """
+  The component id an obligation id belongs to (`"a.b.I3"` -> `"a.b"`,
+  `"calc/A1"` -> `"calc"`).
+  """
   @spec component_of(String.t()) :: String.t()
-  def component_of(id), do: id |> String.split(".") |> Enum.drop(-1) |> Enum.join(".")
+  def component_of(id) do
+    case String.split(id, "/", parts: 2) do
+      [primitive, _] -> primitive
+      [_] -> id |> String.split(".") |> Enum.drop(-1) |> Enum.join(".")
+    end
+  end
 end

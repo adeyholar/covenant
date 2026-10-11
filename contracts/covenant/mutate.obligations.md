@@ -60,7 +60,7 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I8 — The survivors file is read strictly
 - **scope:** `Covenant.Mutate.Survivors.parse/2`, `Covenant.Mutate.Survivors.load/1`, `Covenant.Mutate.Survivors.path/2`
-- **must:** read a YAML list of mappings with `at` (`file:line:column`), `operator` (one of the thirteen), `sort` (`equivalent`, `log-only`, `dead-code`, `timeout`, `evaluation-gap` or `decision-hole`) and `reason`, and an optional `mutation`; report every bad entry as `file:line: message` (a missing or empty key, a key of the wrong type, an unknown operator or sort, a malformed `at`, an entry that is not a mapping, a document that is not a list, invalid YAML); read a missing or empty file as no annotations; keep the file at `<contracts>/<app>/<component>.survivors.yml` (`<contracts>/system/survivors.yml` for the system component)
+- **must:** read a YAML list of mappings with `at` (`file:line:column`), `operator` (one of the thirteen), `sort` (`equivalent`, `log-only`, `dead-code`, `timeout`, `evaluation-gap`, `decision-hole` or `unpromised`) and `reason`, and an optional `mutation`; report every bad entry as `file:line: message` (a missing or empty key, a key of the wrong type, an unknown operator or sort, a malformed `at`, an entry that is not a mapping, a document that is not a list, invalid YAML); read a missing or empty file as no annotations; keep the file at `<contracts>/<app>/<component>.survivors.yml` (`<contracts>/system/survivors.yml` for the system component)
 - **kind:** functional
 - **status:** active
 

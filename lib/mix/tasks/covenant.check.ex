@@ -21,8 +21,15 @@ defmodule Mix.Tasks.Covenant.Check do
   * a `kind: exception` whose target no longer exists;
   * a scope ceiling exceeded.
 
-  Prints contract coverage per component and per app, and writes
-  `<contracts dir>/coverage.json`. It also warns, without failing, about the
+  In the sibling layout (`contract/<primitive>/`, see `Covenant.Case`) it also
+  fails on a primitive's obligation that no Contract test names, a `covers`
+  line that names no code, two primitives covering the same code, and a
+  `# Contract:` comment or primitive obligation tag in a test outside the
+  sibling layout's directory. The sibling directory's tests run with the rest.
+
+  Prints contract coverage per component and per app (the primitives as the
+  app `contract`), and writes `<contracts dir>/coverage.json`
+  (`<sibling dir>/coverage.json` in a project with only the sibling layout). It also warns, without failing, about the
   components that declare no modules (no `#### Modules` paragraph in the Public
   surface and no `modules:` front matter): `covenant.check: warning: N
   component(s) declare no modules: ...`. `mix covenant.regen` and `mix
@@ -106,16 +113,18 @@ defmodule Mix.Tasks.Covenant.Check do
 
   defp check(contracts_dir, test_paths, results_dir, run?) do
     contract = load_contract(contracts_dir)
-    suite_status = if run?, do: run_suite(test_paths, results_dir), else: :ok
+    sibling = Covenant.sibling_dir()
+    suite_status = if run?, do: run_suite(test_paths ++ sibling_paths(), results_dir), else: :ok
     results = read_results(results_dir)
-    report = Check.run(contract, results)
+    report = Check.run(contract, results, sibling: sibling)
+    report = %{report | problems: Error.sort(report.problems ++ strays(test_paths, sibling))}
 
     Enum.each(report.problems, &Mix.shell().error(Error.format(&1)))
     Mix.shell().info("")
     Mix.shell().info(Coverage.format(report.coverage))
     warn(report)
 
-    coverage_path = Path.join(contracts_dir, "coverage.json")
+    coverage_path = coverage_path(contracts_dir, "coverage.json")
     File.write!(coverage_path, [Covenant.JSON.pretty(Coverage.to_map(report.coverage)), "\n"])
     Mix.shell().info("\nwrote #{coverage_path}")
 
@@ -134,12 +143,14 @@ defmodule Mix.Tasks.Covenant.Check do
 
   defp static(contracts_dir, test_paths, root) do
     contract = load_contract(contracts_dir)
-    scan = Static.scan(test_paths, relative_to: root)
+    sibling = Covenant.sibling_dir()
+    scan = Static.scan(test_paths ++ sibling_paths(), relative_to: root, sibling: sibling)
     results = %Results{apps: ["static"], tests: scan.tests}
-    report = Check.run(contract, results, mode: :static, root: root)
+    report = Check.run(contract, results, mode: :static, root: root, sibling: sibling)
 
     problems =
-      (scan.problems ++ Static.problems(contract, scan) ++ report.problems)
+      (scan.problems ++
+         Static.problems(contract, scan) ++ report.problems ++ strays(test_paths, sibling))
       |> Enum.map(fn %Error{file: file} = error ->
         if file, do: %{error | file: Path.relative_to(Path.expand(file), root)}, else: error
       end)
@@ -148,7 +159,7 @@ defmodule Mix.Tasks.Covenant.Check do
     Mix.shell().info(
       "covenant.check --static: read #{length(scan.files)} file(s), " <>
         "#{length(scan.modules)} contract test module(s), #{length(scan.tests)} tagged test(s) " <>
-        "under #{Enum.map_join(test_paths, ", ", &Path.relative_to(&1, root))}; no test was compiled or run"
+        "under #{Enum.map_join(test_paths ++ sibling_paths(), ", ", &Path.relative_to(&1, root))}; no test was compiled or run"
     )
 
     Enum.each(problems, &Mix.shell().error(Error.format(&1)))
@@ -156,18 +167,24 @@ defmodule Mix.Tasks.Covenant.Check do
     Mix.shell().info(Coverage.format(report.coverage))
 
     if report.skipped != [] do
-      {exceptions, ceilings} = Enum.split_with(report.skipped, &match?({:exception, _}, &1))
+      count = fn kind -> Enum.count(report.skipped, &match?({^kind, _}, &1)) end
+
+      covers =
+        case count.(:covers) do
+          0 -> ""
+          n -> ", the covers of #{n} primitive(s)"
+        end
 
       Mix.shell().info(
-        "\nskipped (need compiled code): #{length(exceptions)} exception target(s), " <>
-          "#{length(ceilings)} module ceiling(s): " <>
+        "\nskipped (need compiled code): #{count.(:exception)} exception target(s), " <>
+          "#{count.(:ceiling)} module ceiling(s)#{covers}: " <>
           Enum.map_join(report.skipped, ", ", fn {_, name} -> name end)
       )
     end
 
     warn(report)
 
-    coverage_path = Path.join(contracts_dir, "coverage.static.json")
+    coverage_path = coverage_path(contracts_dir, "coverage.static.json")
     File.write!(coverage_path, [Covenant.JSON.pretty(Coverage.to_map(report.coverage)), "\n"])
     Mix.shell().info("\nwrote #{coverage_path}")
 
@@ -179,6 +196,55 @@ defmodule Mix.Tasks.Covenant.Check do
     end
   end
 
+  # The sibling layout's directory, when it holds a primitive's tests.
+  defp sibling_paths do
+    sibling = Covenant.sibling_dir()
+    if Static.expand([sibling]) != [], do: [sibling], else: []
+  end
+
+  # Every test file `mix test` loads and every file of the configured contract test paths,
+  # outside the sibling layout's directory: none may name a primitive's obligation.
+  defp strays(test_paths, sibling) do
+    Check.strays(Static.expand(test_paths) ++ project_test_files(), sibling)
+  end
+
+  # The files `mix test` loads: under the project's test paths, kept by its
+  # `test_load_filters` and not dropped by its `test_ignore_filters` (Elixir 1.19).
+  defp project_test_files do
+    if Mix.Project.get() do
+      config = Mix.Project.config()
+      load = config[:test_load_filters] || [&String.ends_with?(&1, "_test.exs")]
+      ignore = config[:test_ignore_filters] || []
+
+      for path <- config[:test_paths] || ["test"],
+          file <- Path.wildcard(Path.join(path, "**/*.exs")),
+          filtered?(load, file),
+          not filtered?(ignore, file),
+          do: Path.expand(file)
+    else
+      []
+    end
+  end
+
+  defp filtered?(filters, file) do
+    Enum.any?(filters, fn
+      filter when is_function(filter, 1) -> filter.(file)
+      %Regex{} = regex -> Regex.match?(regex, file)
+      path when is_binary(path) -> path == file
+      _ -> false
+    end)
+  end
+
+  # Next to the Contract: the contracts directory, or the sibling layout's in a project without one.
+  defp coverage_path(contracts_dir, name) do
+    dir =
+      if File.dir?(contracts_dir) or not File.dir?(Covenant.sibling_dir()),
+        do: contracts_dir,
+        else: Covenant.sibling_dir()
+
+    dir |> Path.join(name) |> Path.relative_to_cwd()
+  end
+
   defp warn(%Check.Report{warnings: warnings}) do
     Enum.each(
       warnings,
@@ -187,7 +253,7 @@ defmodule Mix.Tasks.Covenant.Check do
   end
 
   defp load_contract(dir) do
-    case Contract.load(dir) do
+    case Contract.load(dir, sibling: Path.relative_to_cwd(Covenant.sibling_dir())) do
       {:ok, contract} ->
         contract
 

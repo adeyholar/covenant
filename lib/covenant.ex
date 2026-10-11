@@ -12,6 +12,7 @@ defmodule Covenant do
   ```elixir
   config :covenant,
     contracts_dir: "contracts",          # where the Contract lives
+    sibling_dir: "contract",             # the sibling layout: contract/<primitive>/README.md
     test_paths: ["test/contract"],       # contract test suites run by `mix covenant.check`
     results_dir: "_build/covenant/results"  # where `Covenant.Formatter` writes its results
   ```
@@ -23,6 +24,9 @@ defmodule Covenant do
   `contracts_dir` at an absolute path (`Path.expand("../contracts", __DIR__)`
   from `config/config.exs`) so every app resolves the same directory, and set
   `test_paths` to `["apps/*/test/contract"]`.
+
+  `sibling_dir` is relative to `root/0`. A project may use the `contracts/`
+  layout, the sibling layout, or both.
   """
 
   alias Covenant.Contract
@@ -30,6 +34,15 @@ defmodule Covenant do
   @doc "The contracts directory (`:contracts_dir`, default `\"contracts\"`)."
   @spec contracts_dir() :: Path.t()
   def contracts_dir, do: Application.get_env(:covenant, :contracts_dir, "contracts")
+
+  @doc """
+  The sibling layout's Contract directory (`:sibling_dir`, default `"contract"`),
+  as an absolute path resolved against `root/0`. Each primitive is a directory in
+  it with a README.md, and its Contract tests sit beside the README.
+  """
+  @spec sibling_dir() :: Path.t()
+  def sibling_dir,
+    do: Path.expand(Application.get_env(:covenant, :sibling_dir, "contract"), root())
 
   @doc """
   The contract test paths or globs (`:test_paths`, default `["test/contract"]`) as absolute
@@ -78,7 +91,8 @@ defmodule Covenant do
   end
 
   @doc """
-  The project root: the directory that holds the contracts directory.
+  The project root: the directory that holds the contracts directory (or,
+  in a project that has none, the sibling layout's directory).
 
   Contract tests resolve every path from here so they never depend on the
   directory `mix test` runs in (in an umbrella, `mix test` runs each app
@@ -87,9 +101,11 @@ defmodule Covenant do
   1. the `COVENANT_ROOT` environment variable;
   2. `config :covenant, root: ...`;
   3. the parent of `contracts_dir/0` when that is absolute;
-  4. the parent of `contracts_dir/0` resolved from the nearest of the
-     current directory and its ancestors where it is a directory;
-  5. the current directory.
+  4. the nearest of the current directory and its ancestors that holds
+     `contracts_dir/0`, or the sibling layout's directory (`:sibling_dir`)
+     with a primitive (a subdirectory with a README.md) in it;
+  5. the parent of `:sibling_dir` when that is absolute;
+  6. the current directory.
 
   The result is an absolute path.
   """
@@ -101,38 +117,58 @@ defmodule Covenant do
     cond do
       explicit not in [nil, ""] -> Path.expand(explicit)
       Path.type(contracts) == :absolute -> contracts |> Path.expand() |> Path.dirname()
-      true -> find_root(File.cwd!(), contracts) || File.cwd!()
+      true -> find_root(File.cwd!(), contracts, sibling()) || sibling_root() || File.cwd!()
     end
   end
 
-  defp find_root(dir, contracts) do
+  defp sibling, do: Application.get_env(:covenant, :sibling_dir, "contract")
+
+  defp sibling_root do
+    if Path.type(sibling()) == :absolute, do: sibling() |> Path.expand() |> Path.dirname()
+  end
+
+  # The nearest directory holding either layout wins, so a project nested in
+  # another (a fixture inside a repository) finds its own Contract. A sibling
+  # directory counts only when a primitive is in it, so the classic layout's
+  # `test/contract` never passes for one.
+  defp find_root(dir, contracts, sibling) do
+    found =
+      cond do
+        Path.type(contracts) != :absolute and File.dir?(Path.join(dir, contracts)) -> contracts
+        Path.type(sibling) != :absolute and primitives?(Path.join(dir, sibling)) -> sibling
+        true -> nil
+      end
+
     cond do
-      File.dir?(Path.join(dir, contracts)) ->
-        dir |> Path.join(contracts) |> Path.expand() |> Path.dirname()
+      found ->
+        dir |> Path.join(found) |> Path.expand() |> Path.dirname()
 
       Path.dirname(dir) == dir ->
         nil
 
       true ->
-        find_root(Path.dirname(dir), contracts)
+        find_root(Path.dirname(dir), contracts, sibling)
     end
   end
+
+  defp primitives?(dir),
+    do: dir |> Path.join("*/README.md") |> Path.wildcard() |> Enum.any?()
 
   @doc "Where `mix covenant.check` writes coverage (`<contracts_dir>/coverage.json`)."
   @spec coverage_path() :: Path.t()
   def coverage_path, do: Path.join(contracts_dir(), "coverage.json")
 
-  @doc "Loads the Contract from the configured directory."
+  @doc "Loads the Contract from the configured directories (`contracts_dir/0` and `sibling_dir/0`)."
   @spec load() :: {:ok, Contract.t()} | {:error, [Covenant.Error.t()]}
-  def load, do: Contract.load(contracts_dir())
+  def load, do: load(contracts_dir())
 
-  @doc "Loads the Contract from `dir`."
+  @doc "Loads the Contract from `dir`, with the sibling layout from `sibling_dir/0`."
   @spec load(Path.t()) :: {:ok, Contract.t()} | {:error, [Covenant.Error.t()]}
-  def load(dir), do: Contract.load(dir)
+  def load(dir), do: Contract.load(dir, sibling: sibling_dir())
 
-  @doc "Loads the Contract from the configured directory, raising on problems."
+  @doc "Loads the Contract from the configured directories, raising on problems."
   @spec load!() :: Contract.t()
-  def load!, do: Contract.load!(contracts_dir())
+  def load!, do: Contract.load!(contracts_dir(), sibling: sibling_dir())
 
   @doc "The Covenant version."
   @spec version() :: String.t()

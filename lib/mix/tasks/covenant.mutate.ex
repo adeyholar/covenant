@@ -90,10 +90,25 @@ defmodule Mix.Tasks.Covenant.Mutate do
   * `timeout` — the tests only timed out against it (a timeout is never a kill);
   * `evaluation-gap` — the behaviour matters but no test pins it yet;
   * `decision-hole` — the Contract leaves the behaviour deliberately undecided
-    (a mutant inside the target of an active exception is sorted so for you).
+    (a mutant inside the target of an active exception is sorted so for you);
+  * `unpromised` — the behaviour does change and the Contract leaves it open
+    (the sort of an `unpromised` declaration in the sibling layout).
 
   An entry matching no surviving mutant is stale and fails the task, like a
   stale `kind: exception` fails `mix covenant.check`.
+
+  ## The sibling layout
+
+  A primitive of the sibling layout (`mix covenant.mutate calc` for
+  `contract/calc/`) is mutated in the code its `covers` block names: a
+  module, a tree (`MyApp.Calc.*`) or a function, the most specific reference
+  winning when primitives overlap. Its Contract tests are the `*_test.exs`
+  files beside its README. Its survivors are declared in
+  `contract/<primitive>/mutants.md`, as flinch reads them: under a heading
+  that gives the reason, an `equivalent` or `unpromised` block of
+  `Module.function/arity: from -> to` lines, the mutation as this task prints
+  it (`unpromised` also takes `Module.function/arity: *`). A declaration that
+  a test kills, or that matches no mutant, fails the task.
   """
 
   use Mix.Task
@@ -234,9 +249,23 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     unsorted = for %{mutant: m, sort: nil} <- matrix.survivors, do: m
 
-    if unsorted != [] do
-      Mix.shell().info("\nTo annotate the unsorted survivors, add to #{survivors_path}:\n")
-      Enum.each(unsorted, &Mix.shell().info(Survivors.template(&1)))
+    cond do
+      unsorted == [] ->
+        :ok
+
+      plan.component.form == :primitive ->
+        Mix.shell().info(
+          "\nTo declare the unsorted survivors, add to #{survivors_path}, under a heading that gives the reason:\n"
+        )
+
+        Mix.shell().info(
+          "```unpromised\n" <>
+            Enum.map_join(unsorted, "\n", &Survivors.template(&1, format: :md)) <> "\n```"
+        )
+
+      true ->
+        Mix.shell().info("\nTo annotate the unsorted survivors, add to #{survivors_path}:\n")
+        Enum.each(unsorted, &Mix.shell().info(Survivors.template(&1)))
     end
 
     Mix.shell().info("")
@@ -326,6 +355,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
       fail_fast: settings.fail_fast,
       slice: {i, n},
       isolate: n > 1,
+      keep: keep(contract, plan, source),
       on_progress: &Mix.shell().info(prefix <> progress(&1)),
       on_eta: &Mix.shell().info(prefix <> eta(&1))
     }
@@ -355,6 +385,12 @@ defmodule Mix.Tasks.Covenant.Mutate do
         fail(reason)
     end
   end
+
+  # A primitive is mutated only in the code its covers own by the most specific reference.
+  defp keep(contract, %{component: %{form: :primitive, id: id}}, :covers),
+    do: &Mutate.covered_by?(contract, id, &1)
+
+  defp keep(_contract, _plan, _source), do: fn _ -> true end
 
   defp progress(%Mutant{} = m) do
     verdict =
@@ -388,6 +424,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
     case System.get_env("COVENANT_MUTATE_SOURCE") do
       "derived" -> :derived
       "front_matter" -> :front_matter
+      "covers" -> :covers
       "flag" -> :flag
       _ -> default
     end
@@ -396,7 +433,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
   # -- shared -----------------------------------------------------------------
 
   defp load_contract(dir) do
-    case Contract.load(dir) do
+    case Contract.load(dir, sibling: Path.relative_to_cwd(Covenant.sibling_dir())) do
       {:ok, contract} -> contract
       {:error, errors} -> fail_with(errors, "the Contract in #{dir} could not be parsed")
     end

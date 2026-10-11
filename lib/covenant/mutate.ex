@@ -43,6 +43,21 @@ defmodule Covenant.Mutate do
   def default_timeout(tests),
     do: Enum.max([@timeout_floor_ms | Enum.map(tests, &(@timeout_factor * &1.ms))])
 
+  @doc """
+  Whether a mutant belongs to the primitive `id`: the primitives' `covers`
+  references own the code at the mutant's module and function by the most
+  specific rule (`Covenant.Covers.owners/3`).
+  """
+  @spec covered_by?(Contract.t(), String.t(), Mutant.t()) :: boolean()
+  def covered_by?(%Contract{} = contract, id, %Mutant{module: module, function: function}) do
+    primitives =
+      for {pid, %Component{form: :primitive, covers: covers}} <- contract.components,
+          into: %{},
+          do: {pid, covers}
+
+    id in Covenant.Covers.owners(primitives, module, function)
+  end
+
   @doc "Whether a progress line is due after `done` of `total` mutants: every 25th, but not the last."
   @spec progress_due?(non_neg_integer(), non_neg_integer()) :: boolean()
   def progress_due?(done, total),
@@ -104,14 +119,21 @@ defmodule Covenant.Mutate do
         root = Keyword.get(opts, :root, File.cwd!())
         test_paths = Keyword.get(opts, :test_paths, Covenant.test_paths())
         {source, names} = Modules.resolve(component, Keyword.get(opts, :modules, []))
-        tests = Regen.find_tests(component_id, test_paths, root)
+        tests = Regen.find_tests(component, test_paths, root)
 
         cond do
+          names == [] and component.form == :primitive ->
+            {:error,
+             "`#{component_id}` covers no code: add a ```covers block to #{component.file} or pass --module"}
+
           names == [] ->
             {:error,
              "`#{component_id}` names no implementation module: its Public surface and obligation " <>
                "scopes contain no `Module.function` code span. Declare `modules:` in the front matter " <>
                "of #{component.file} or pass --module"}
+
+          tests == [] and component.form == :primitive ->
+            {:error, "no Contract test (`*_test.exs`) beside #{component.file}"}
 
           tests == [] ->
             {:error,

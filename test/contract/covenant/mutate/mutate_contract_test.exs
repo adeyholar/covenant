@@ -698,7 +698,7 @@ defmodule Covenant.MutateContractTest do
     assert second.sort == "decision-hole"
 
     assert Survivors.sorts() ==
-             ~w(equivalent log-only dead-code timeout evaluation-gap decision-hole)
+             ~w(equivalent log-only dead-code timeout evaluation-gap decision-hole unpromised)
 
     assert Mutant.operators() |> length() == 13
   end
@@ -730,7 +730,7 @@ defmodule Covenant.MutateContractTest do
 
     assert errors.("- " <> String.replace(base, "equivalent", "fine")) ==
              [
-               "s.yml:1: annotation #1 has unknown `sort` `fine` (expected one of: equivalent, log-only, dead-code, timeout, evaluation-gap, decision-hole)"
+               "s.yml:1: annotation #1 has unknown `sort` `fine` (expected one of: equivalent, log-only, dead-code, timeout, evaluation-gap, decision-hole, unpromised)"
              ]
 
     assert errors.("- " <> String.replace(base, "a.ex:1:1", "a.ex:1")) ==

@@ -40,3 +40,9 @@ covenant-*.tar
 
 # Editor tooling
 .elixir_ls/
+
+# Sibling-layout fixture build artefacts (test/fixtures/sibling_project)
+/test/fixtures/sibling_project/_build/
+/test/fixtures/sibling_project/tmp/
+/test/fixtures/sibling_project/contract/coverage.json
+/test/fixtures/sibling_project/contract/coverage.static.json

@@ -28,6 +28,13 @@ defmodule Covenant.Static do
   * a test name used twice in a module, or a literal name inside a `for`
     (ExUnit rejects the duplicate at compile time).
 
+  With `sibling: dir` (the sibling layout's directory), a file under
+  `dir/<primitive>/` belongs to that primitive: its `use Covenant.Case` may
+  leave out `component:`, and each test's obligations are its `# Contract:`
+  comments directly above it merged with its tag, as `Covenant.Case` reads
+  them. A test there that names none is a problem, and so is a `# Contract:`
+  comment above a test anywhere else.
+
   `problems/2` adds the checks that need the Contract: an unknown
   component, a tag naming another component's obligation, and a tag naming
   a retired obligation. A tag naming an obligation the Contract does not
@@ -37,6 +44,7 @@ defmodule Covenant.Static do
   alias Covenant.Contract
   alias Covenant.Contract.Obligation
   alias Covenant.Error
+  alias Covenant.Parser.Primitive
   alias Covenant.Results.Test
 
   @typedoc "A contract test module found in a file."
@@ -57,16 +65,21 @@ defmodule Covenant.Static do
   @doc """
   Expands `paths` (files, directories or globs) to `*_test.exs` files and
   reads each. `opts[:relative_to]` makes the reported file paths relative to
-  that directory (default: the current directory).
+  that directory (default: the current directory); `opts[:sibling]` is the
+  sibling layout's directory (default: none).
   """
   @spec scan([Path.t()], keyword()) :: scan()
   def scan(paths, opts \\ []) do
     relative_to = Keyword.get(opts, :relative_to, File.cwd!())
+    sibling = opts[:sibling]
     files = expand(paths)
 
     Enum.reduce(files, %{files: [], modules: [], tests: [], problems: []}, fn file, acc ->
       shown = Path.relative_to(Path.expand(file), Path.expand(relative_to))
-      %{modules: modules, tests: tests, problems: problems} = scan_source(File.read!(file), shown)
+      primitive = sibling && Primitive.primitive_of(file, sibling)
+
+      %{modules: modules, tests: tests, problems: problems} =
+        scan_source(File.read!(file), shown, primitive)
 
       %{
         files: acc.files ++ [shown],
@@ -91,16 +104,27 @@ defmodule Covenant.Static do
     |> Enum.sort()
   end
 
-  @doc "Reads one file's source; `file` is the name used in results and problems."
-  @spec scan_source(String.t(), String.t()) :: %{
+  @doc """
+  Reads one file's source; `file` is the name used in results and problems, and `primitive` the
+  sibling-layout primitive the file sits in (`nil` outside the sibling layout).
+  """
+  @spec scan_source(String.t(), String.t(), String.t() | nil) :: %{
           modules: [module_entry()],
           tests: [Test.t()],
           problems: [Error.t()]
         }
-  def scan_source(source, file) do
+  def scan_source(source, file, primitive \\ nil) do
     case Code.string_to_quoted(source, file: file, columns: false, emit_warnings: false) do
       {:ok, ast} ->
-        acc = %{modules: [], tests: [], problems: [], seen: %{}}
+        acc = %{
+          modules: [],
+          tests: [],
+          problems: [],
+          seen: %{},
+          lines: String.split(source, ["\r\n", "\n"]),
+          primitive: primitive
+        }
+
         acc = walk_top(ast, nil, file, acc)
 
         %{
@@ -128,7 +152,7 @@ defmodule Covenant.Static do
     exprs = block(body)
 
     acc =
-      case find_use(exprs) do
+      case find_use(exprs, acc.primitive) do
         nil ->
           acc
 
@@ -178,14 +202,22 @@ defmodule Covenant.Static do
   defp part(atom) when is_atom(atom), do: Atom.to_string(atom)
   defp part(other), do: Macro.to_string(other)
 
-  defp find_use(exprs) do
+  defp find_use(exprs, primitive) do
     Enum.find_value(exprs, fn
       {:use, _, [{:__aliases__, _, [:Covenant, :Case]} | rest]} ->
         opts = List.first(rest) || []
 
         case is_list(opts) && Keyword.keyword?(opts) && Keyword.fetch(opts, :component) do
-          {:ok, component} when is_binary(component) ->
+          :error when primitive != nil ->
+            {:ok, primitive}
+
+          {:ok, component} when is_binary(component) and primitive in [nil, component] ->
             {:ok, component}
+
+          {:ok, component} when is_binary(component) ->
+            {:error,
+             "use Covenant.Case names component #{inspect(component)}, but the file sits in the " <>
+               "sibling layout's `#{primitive}` primitive"}
 
           {:ok, other} ->
             {:error,
@@ -330,8 +362,13 @@ defmodule Covenant.Static do
       |> Enum.reject(&is_nil/1)
       |> Enum.join(" ")
 
+    commented = Primitive.comment_ids(acc.lines, line || 1)
+
     {test, problem} =
-      case effective(tags) do
+      case contract_ids(effective(tags), commented, acc.primitive) do
+        {:error, message} ->
+          {nil, Error.new(state.file, line, "#{full_name} #{message}")}
+
         :missing ->
           problem =
             Error.new(
@@ -387,6 +424,25 @@ defmodule Covenant.Static do
       do: %{acc | problems: [Error.new(state.file, line, problem) | acc.problems]},
       else: acc
   end
+
+  # The sibling layout: a primitive's test names its obligations in `# Contract:` comments, its
+  # tag, or both; anywhere else a `# Contract:` comment is a problem.
+  defp contract_ids(:missing, [], primitive) when primitive != nil,
+    do: {:error, "names no obligation; put `# Contract: #{primitive}/<id>` on the line above it"}
+
+  defp contract_ids(:missing, commented, primitive) when primitive != nil, do: commented
+  defp contract_ids(:unreadable, _commented, _primitive), do: :unreadable
+
+  defp contract_ids(ids, commented, primitive) when primitive != nil,
+    do: Enum.uniq(commented ++ ids)
+
+  defp contract_ids(_ids, [_ | _], nil),
+    do:
+      {:error,
+       "has a `# Contract:` comment, which only Contract tests in the sibling layout's " <>
+         "contract/<primitive>/ directories carry; tag it `@tag obligation: ...` instead"}
+
+  defp contract_ids(ids, [], nil), do: ids
 
   # ExUnit merges @moduletag, then @describetag, then @tag; within a level
   # the last value of a key wins.

@@ -16,7 +16,10 @@ defmodule Covenant.Contract.Component do
   Component ids are `<app>.<component>` and are derived from the file path
   inside the contracts directory: `billing/invoices.intent.md` is
   `billing.invoices`. The whole-product `system/intent.md` is the component
-  `system`, with form `:system`.
+  `system`, with form `:system`. A primitive of the sibling layout
+  (`contract/calc/README.md`, see `Covenant.Parser.Primitive`) is the component
+  `calc`, with form `:primitive`, app `"contract"` and the references of its
+  `covers` block in `covers`.
 
   A file may open with YAML front matter (`---` ... `---`); its keys land in
   `meta`. The convention uses `modules:` there to declare the implementation
@@ -26,7 +29,7 @@ defmodule Covenant.Contract.Component do
 
   alias Covenant.Contract.{Obligation, Record, Section}
 
-  @type form :: :heavy | :light | :system
+  @type form :: :heavy | :light | :system | :primitive
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -39,7 +42,8 @@ defmodule Covenant.Contract.Component do
           obligations: [Obligation.t()],
           records: [Record.t()],
           records_file: String.t() | nil,
-          meta: %{optional(String.t()) => term()}
+          meta: %{optional(String.t()) => term()},
+          covers: [Covenant.Covers.t()]
         }
 
   @enforce_keys [:id, :app, :name, :form, :file]
@@ -54,7 +58,8 @@ defmodule Covenant.Contract.Component do
     sections: [],
     obligations: [],
     records: [],
-    meta: %{}
+    meta: %{},
+    covers: []
   ]
 
   @doc "Finds a `##` section by exact title."

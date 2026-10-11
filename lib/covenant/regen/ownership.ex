@@ -62,8 +62,17 @@ defmodule Covenant.Regen.Ownership do
   @doc """
   The modules the intent lists as its own: the `#### Modules` paragraph of the
   Public surface and the front matter's `modules:`. Empty when it lists none.
+  For a primitive of the sibling layout, the modules its `covers` block names
+  (a tree by its root).
   """
   @spec listed(Component.t()) :: [String.t()]
+  def listed(%Component{form: :primitive, covers: covers}) do
+    covers
+    |> Covenant.Covers.module_names()
+    |> Enum.map(&String.trim_trailing(&1, ".*"))
+    |> Enum.uniq()
+  end
+
   def listed(%Component{} = component) do
     Enum.uniq(Component.declared_modules(component) ++ paragraph(component))
   end

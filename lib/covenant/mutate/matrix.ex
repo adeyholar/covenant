@@ -230,11 +230,25 @@ defmodule Covenant.Mutate.Matrix do
           &(&1.verdict in [:survived, :timeout] and Survivors.matches?(annotation, &1))
         ) do
       case Enum.find(mutants, &Survivors.matches?(annotation, &1)) do
+        nil when annotation.unit != nil ->
+          Error.new(
+            annotation.file,
+            annotation.line,
+            "declaration `#{declared(annotation)}` matches no surviving mutant; the code moved, the mutation changed or nothing survives there — delete or update it"
+          )
+
         nil ->
           Error.new(
             annotation.file,
             annotation.line,
             "annotation for #{annotation.at} #{annotation.operator} matches no mutant; the code moved or the mutation changed — delete or update it"
+          )
+
+        %Mutant{id: id} when annotation.unit != nil ->
+          Error.new(
+            annotation.file,
+            annotation.line,
+            "declaration `#{declared(annotation)}` (#{id}) is contradicted: a Contract test kills that mutant — delete it"
           )
 
         %Mutant{id: id} ->
@@ -246,6 +260,9 @@ defmodule Covenant.Mutate.Matrix do
       end
     end
   end
+
+  defp declared(%Annotation{unit: unit, from: nil}), do: "#{unit}: *"
+  defp declared(%Annotation{unit: unit, from: from, to: to}), do: "#{unit}: #{from} -> #{to}"
 
   defp summary(mutants, survivors) do
     count = fn verdict -> Enum.count(mutants, &(&1.verdict == verdict)) end

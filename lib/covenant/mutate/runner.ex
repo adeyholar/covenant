@@ -107,6 +107,7 @@ defmodule Covenant.Mutate.Runner do
           required(:on_progress) => (Mutant.t() -> any()),
           optional(:on_eta) => (map() -> any()),
           optional(:fail_fast) => boolean(),
+          optional(:keep) => (Mutant.t() -> boolean()),
           optional(:isolate) => boolean()
         }
 
@@ -133,7 +134,12 @@ defmodule Covenant.Mutate.Runner do
       timeout = plan.timeout || Mutate.default_timeout(tests)
       ExUnit.configure(timeout: timeout)
 
-      mutants = files |> Enum.flat_map(& &1.mutants) |> Mutator.numbered()
+      mutants =
+        files
+        |> Enum.flat_map(& &1.mutants)
+        |> Enum.filter(Map.get(plan, :keep, fn _ -> true end))
+        |> Mutator.numbered()
+
       {i, n} = plan.slice
 
       slice =

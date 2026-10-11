@@ -159,6 +159,7 @@
       check: { kind: file, path: lib/covenant.ex }
   expires: When the next subsystem lands in Covenant
   source: ["contracts/system/scope.yml"]
+  superseded_by: small-surface-after-sibling
 
 - id: static-reads-literals
   date: "2026-10-10"
@@ -267,3 +268,20 @@
   approved_by: "lead, 2026-10-10; lead's Covenant fixes brief (2026-10-10)"
   expires: When every component declares its modules
   source: ["lib/covenant/check.ex"]
+
+- id: small-surface-after-sibling
+  date: "2026-10-10"
+  decision: Covenant stays under 40 source files in lib/.
+  driver: "The `small-surface-after-mutate` ceiling expired when the sibling layout landed: reading `contract/<primitive>/` adds a parser (`Covenant.Parser.Primitive`) and the covers references (`Covenant.Covers`), 37 files in all."
+  alternatives:
+    - option: Keep 36 and fold the sibling reader into Covenant.Parser.Markdown
+      rejected: "The two layouts share no grammar: obligation blocks with fields against one-line `- **A1**` items, front matter against `covers` fences. One module would hold two parsers."
+    - option: No ceiling
+      rejected: The first scope budget Covenant checks should be its own.
+  evidence: "37 files under lib/ after the sibling layout (find lib -name '*.ex')."
+  approved_by: "lead, 2026-10-10"
+  conditions:
+    - text: The source lives under lib/
+      check: { kind: file, path: lib/covenant.ex }
+  expires: When the next subsystem lands in Covenant
+  source: ["contracts/system/scope.yml"]

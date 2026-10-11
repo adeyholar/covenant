@@ -41,6 +41,7 @@ defmodule Covenant.Regen do
 
   alias Covenant.Contract
   alias Covenant.Contract.Component
+  alias Covenant.Covers
   alias Covenant.Regen.Ownership
   alias Covenant.Static
 
@@ -76,7 +77,7 @@ defmodule Covenant.Regen do
         root = Path.expand(Keyword.get(opts, :root) || Path.dirname(contract.dir))
         out = Keyword.get(opts, :out, Path.join(["tmp", "covenant", "regen", component_id]))
         test_paths = Keyword.get(opts, :test_paths, Covenant.test_paths())
-        tests = find_tests(component_id, test_paths, root)
+        tests = find_tests(component, test_paths, root)
 
         stub_opts =
           Keyword.take(opts, [:environment]) ++
@@ -87,8 +88,10 @@ defmodule Covenant.Regen do
         File.rm_rf!(out)
         File.mkdir_p!(out)
 
+        stub_opts = stub_opts ++ [root: root, contract: contract]
+
         files =
-          contract_files(contract, component, out) ++
+          contract_files(contract, component, out, root) ++
             test_files(tests, root, out) ++
             stub_files(component, out, stub_opts) ++
             [brief_file(component, out), prompt_file(component, tests, out, stub_opts)]
@@ -106,9 +109,23 @@ defmodule Covenant.Regen do
   @doc """
   Contract test files that declare `use Covenant.Case, component: "<id>"`, as paths relative to
   `root`. `test_paths` entries (files, directories or globs, absolute or relative to `root`) are
-  expanded as `Covenant.Static.expand/1` does for `mix covenant.check --static`.
+  expanded as `Covenant.Static.expand/1` does for `mix covenant.check --static`. A primitive of
+  the sibling layout's tests are the `*_test.exs` files beside its README.
   """
-  @spec find_tests(String.t(), [Path.t()], Path.t()) :: [Path.t()]
+  @spec find_tests(String.t() | Component.t(), [Path.t()], Path.t()) :: [Path.t()]
+  def find_tests(%Component{form: :primitive, file: readme}, _test_paths, root) do
+    root = Path.expand(root)
+
+    readme
+    |> Path.dirname()
+    |> Path.join("*_test.exs")
+    |> Path.wildcard()
+    |> Enum.map(&Path.relative_to(Path.expand(&1), root))
+    |> Enum.sort()
+  end
+
+  def find_tests(%Component{id: id}, test_paths, root), do: find_tests(id, test_paths, root)
+
   def find_tests(component_id, test_paths, root) do
     pattern = ~r/use\s+Covenant\.Case\s*,[^\n]*component:\s*"#{Regex.escape(component_id)}"/
     root = Path.expand(root)
@@ -129,7 +146,26 @@ defmodule Covenant.Regen do
 
   # -- contract files ---------------------------------------------------------
 
-  defp contract_files(contract, component, out) do
+  defp contract_files(contract, %Component{form: :primitive, file: readme}, out, root) do
+    primitive =
+      for source <- [readme, Path.join(Path.dirname(readme), "mutants.md")],
+          File.exists?(source) do
+        copy(source, Path.join(out, Path.relative_to(Path.expand(source), root)))
+      end
+
+    system = Contract.component(contract, "system")
+
+    system_files =
+      for source <- [system && system.file, system && system.records_file],
+          source != nil,
+          File.exists?(source) do
+        copy(source, Path.join([out, "contracts", Path.relative_to(source, contract.dir)]))
+      end
+
+    primitive ++ system_files
+  end
+
+  defp contract_files(contract, component, out, _root) do
     system = Contract.component(contract, "system")
 
     sources =
@@ -187,8 +223,14 @@ defmodule Covenant.Regen do
           optional(:implemented) => true
         }
 
-  @doc "Reads `Module.function(args) :: type` and `Module.function/arity` signatures from the Public surface section."
+  @doc """
+  Reads `Module.function(args) :: type` and `Module.function/arity` signatures from the Public
+  surface section. A primitive of the sibling layout has none: its stubs come from its `covers`
+  block (`covered/2`).
+  """
   @spec signatures(Component.t()) :: [signature()]
+  def signatures(%Component{form: :primitive}), do: []
+
   def signatures(%Component{} = component) do
     case Component.section(component, "Public surface") do
       nil ->
@@ -273,7 +315,12 @@ defmodule Covenant.Regen do
           skipped: [signature()],
           possibly_foreign: [String.t()]
         }
-  def surface(%Component{} = component, opts \\ []) do
+  def surface(component, opts \\ [])
+
+  def surface(%Component{form: :primitive} = component, opts),
+    do: %{stub: covered(component, opts), skipped: [], possibly_foreign: []}
+
+  def surface(%Component{} = component, opts) do
     environment = Keyword.get_lazy(opts, :environment, &Ownership.environment/0)
     elsewhere = Keyword.get(opts, :declared_elsewhere, %{})
 
@@ -281,6 +328,65 @@ defmodule Covenant.Regen do
       parts = Ownership.partition(component, signatures(component), environment, elsewhere)
 
     %{parts | stub: Enum.uniq_by(stub, &{&1.module, &1.function, length(&1.args)})}
+  end
+
+  @doc """
+  The signatures a primitive's `covers` block names: each function it names, and the public
+  functions of each module it names (a tree's modules among the project's), as far as the running
+  VM can load them, minus the functions another primitive covers more specifically. Options:
+  `:contract` (the other primitives; default none), `:modules` (the project's modules a tree may
+  name; default `Covenant.Covers.project_modules/0`).
+  """
+  @spec covered(Component.t(), keyword()) :: [signature()]
+  def covered(%Component{form: :primitive, id: id, covers: covers}, opts \\ []) do
+    modules = Keyword.get_lazy(opts, :modules, &Covers.project_modules/0)
+
+    primitives =
+      case opts[:contract] do
+        %Contract{components: components} ->
+          for {pid, %Component{form: :primitive, covers: c}} <- components,
+              into: %{},
+              do: {pid, c}
+
+        nil ->
+          %{id => covers}
+      end
+
+    covers
+    |> Enum.flat_map(&functions(&1.ref, modules))
+    |> Enum.uniq()
+    |> Enum.filter(fn {module, function, arity} ->
+      id in Covers.owners(primitives, module, "#{function}/#{arity}")
+    end)
+    |> Enum.sort()
+    |> Enum.map(fn {module, function, arity} ->
+      %{
+        module: module,
+        function: function,
+        args: args("", Integer.to_string(arity)),
+        return: nil,
+        doc: ""
+      }
+    end)
+  end
+
+  defp functions({:function, module, function, arity}, _modules), do: [{module, function, arity}]
+  defp functions({:module, module}, _modules), do: exports(module)
+
+  defp functions({:tree, root}, modules),
+    do: Enum.flat_map(Covers.expand(root <> ".*", modules), &exports/1)
+
+  defp exports(module) do
+    mod = Module.concat([module])
+
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :__info__, 1) do
+      for {function, arity} <- mod.__info__(:functions),
+          name = Atom.to_string(function),
+          not String.starts_with?(name, "__"),
+          do: {module, name, arity}
+    else
+      []
+    end
   end
 
   @doc "Renders one stub module per public-surface module the component owns."
@@ -317,13 +423,19 @@ defmodule Covenant.Regen do
       Public surface of component `#{component.id}` (regeneration stub).
 
       Generated by `mix covenant.regen` from #{Path.basename(component.file)}.
-      Every function here is named in the intent's Public surface section;
+      #{stub_source(component)}
       replace the bodies until the contract tests pass.
       \"\"\"
 
     #{functions}end
     """
   end
+
+  defp stub_source(%Component{form: :primitive}),
+    do: "Every function here is code the README's covers block names;"
+
+  defp stub_source(%Component{}),
+    do: "Every function here is named in the intent's Public surface section;"
 
   defp stub_files(component, out, opts) do
     component
@@ -363,10 +475,14 @@ defmodule Covenant.Regen do
   @spec prompt(Component.t(), [Path.t()], keyword()) :: String.t()
   def prompt(%Component{} = component, tests, opts \\ []) do
     contract_file =
-      Path.join(
-        "contracts",
-        Path.relative_to(component.file, Path.dirname(Path.dirname(component.file)))
-      )
+      if component.form == :primitive do
+        Path.relative_to(Path.expand(component.file), Path.expand(opts[:root] || File.cwd!()))
+      else
+        Path.join(
+          "contracts",
+          Path.relative_to(component.file, Path.dirname(Path.dirname(component.file)))
+        )
+      end
 
     stubs = stubs(component, opts)
     obligations = Component.testable_obligations(component)
@@ -405,13 +521,10 @@ defmodule Covenant.Regen do
 
     ## What you have
 
-    - `#{contract_file}` — the component's #{form_name(component)}: purpose, scope,
-      environment facts, public surface, obligations, decisions, orderings and
-      known limits. Read it in full first.
+    - `#{contract_file}` — #{describe_file(component)} Read it in full first.
     #{if component.records_file, do: "- `contracts/#{Path.relative_to(component.records_file, Path.dirname(Path.dirname(component.records_file)))}` — its decision records: the reasons behind every value that looks arbitrary.\n", else: ""}- `contracts/system/` — the whole-product intent and records, when present.
     - `REGENERATION_BRIEF.md` — the questions previous regenerations asked, answered.
-    - `CONTRACT_CONVENTION.md` — how obligation blocks and records are written.
-    - Contract tests (they are the executable obligations; do not edit them):
+    #{convention_line(component, opts)}- Contract tests (they are the executable obligations; do not edit them):
     #{test_list}
     - Public-surface stubs to start from:
     #{stub_list}
@@ -440,7 +553,30 @@ defmodule Covenant.Regen do
     """
   end
 
+  defp describe_file(%Component{form: :primitive}),
+    do:
+      "the primitive's Contract README: its obligations, the code its covers block names and,\n  in `mutants.md` beside it when present, the survivors it declares."
+
+  defp describe_file(component),
+    do:
+      "the component's #{form_name(component)}: purpose, scope,\n  environment facts, public surface, obligations, decisions, orderings and\n  known limits."
+
+  # A sibling-layout project may have no contracts/README.md to copy.
+  defp convention_line(%Component{form: :primitive}, opts) do
+    case opts[:contract] do
+      %Contract{dir: dir} ->
+        if File.exists?(Path.join(dir, "README.md")), do: convention_line(nil, []), else: ""
+
+      _ ->
+        convention_line(nil, [])
+    end
+  end
+
+  defp convention_line(_component, _opts),
+    do: "- `CONTRACT_CONVENTION.md` — how obligation blocks and records are written.\n"
+
   defp form_name(%Component{form: :heavy}), do: "intent"
   defp form_name(%Component{form: :light}), do: "obligations file"
   defp form_name(%Component{form: :system}), do: "system intent"
+  defp form_name(%Component{form: :primitive}), do: "Contract README"
 end

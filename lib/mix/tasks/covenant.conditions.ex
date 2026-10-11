@@ -107,7 +107,7 @@ defmodule Mix.Tasks.Covenant.Conditions do
   end
 
   defp load_contract(dir) do
-    case Contract.load(dir) do
+    case Contract.load(dir, sibling: Path.relative_to_cwd(Covenant.sibling_dir())) do
       {:ok, contract} ->
         contract
 

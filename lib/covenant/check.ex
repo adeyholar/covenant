@@ -12,7 +12,7 @@ defmodule Covenant.Check do
   * a `kind: exception` whose `target` no longer exists (stale exception);
   * a scope ceiling whose count exceeds its limit.
 
-  Malformed blocks are reported earlier, by `Covenant.Contract.load/1`.
+  Malformed blocks are reported earlier, by `Covenant.Contract.load/2`.
 
   `Report.warnings` holds what is worth saying but never fails the check: the components that
   declare no modules (no `#### Modules` paragraph in the Public surface and no `modules:` front
@@ -22,28 +22,35 @@ defmodule Covenant.Check do
   With `mode: :static` (`mix covenant.check --static`, where the code under
   test is not compiled) the checks that need compiled code are skipped and
   listed in `Report.skipped` instead of failing: exception targets naming a
-  module or function, and `module` ceiling counters. File targets and `glob`
-  counters are still checked, and `failing/2` finds nothing because static
-  tests never ran.
+  module or function, `module` ceiling counters and the `covers` lines of
+  the sibling layout. File targets and `glob` counters are still checked,
+  and `failing/2` finds nothing because static tests never ran.
+
+  For the primitives of the sibling layout it also fails, as `flinch contract`
+  does, on a `covers` line that names no code, on two primitives that name the
+  same code, and on a test outside the sibling layout's directory that names
+  a primitive's obligation (`strays/2` finds the comments and tags in the
+  source).
   """
 
   alias Covenant.Contract
   alias Covenant.Contract.{Ceiling, Component, Obligation, Validate}
+  alias Covenant.Parser.Primitive
   alias Covenant.Regen.Ownership
-  alias Covenant.{Coverage, Error, Results, Target}
+  alias Covenant.{Coverage, Covers, Error, Results, Target}
 
   defmodule Report do
     @moduledoc """
     What a check produced: sorted problems, the coverage table, (static
     mode) the checks skipped for want of compiled code, as `{kind, name}`
-    with kind `:exception` or `:ceiling`, and the warnings, which never
+    with kind `:exception`, `:ceiling` or `:covers`, and the warnings, which never
     make `ok?/1` false.
     """
 
     @type t :: %__MODULE__{
             problems: [Covenant.Error.t()],
             coverage: Covenant.Coverage.t(),
-            skipped: [{:exception | :ceiling, String.t()}],
+            skipped: [{:exception | :ceiling | :covers, String.t()}],
             warnings: [String.t()]
           }
 
@@ -61,7 +68,11 @@ defmodule Covenant.Check do
 
   * `:root` — the project root that file targets and glob counters resolve
     against (default: the current directory);
-  * `:mode` — `:run` (default) or `:static`.
+  * `:mode` — `:run` (default) or `:static`;
+  * `:sibling` — the sibling layout's directory, outside which no test may
+    name a primitive's obligation (default: none);
+  * `:modules` — the project's modules a `covers` tree may name (default
+    `Covenant.Covers.project_modules/0`).
   """
   @spec run(Contract.t(), Results.t(), keyword()) :: Report.t()
   def run(%Contract{} = contract, %Results{} = results, opts \\ []) do
@@ -71,6 +82,7 @@ defmodule Covenant.Check do
 
     {exceptions, skipped_exceptions} = stale_exceptions(contract, root, static?)
     {ceilings, skipped_ceilings, unchecked_ceilings} = ceilings(contract, root, static?)
+    {covers, skipped_covers} = covers(contract, static?, opts)
 
     problems =
       Validate.dangling(contract) ++
@@ -78,7 +90,10 @@ defmodule Covenant.Check do
         unknown_tags(contract, by_obligation) ++
         failing(contract, by_obligation) ++
         exceptions ++
-        ceilings
+        ceilings ++
+        covers ++
+        overlapping(contract) ++
+        outside(contract, results, root, opts[:sibling])
 
     coverage =
       Coverage.compute(contract, results, covered: if(static?, do: :tagged, else: :passing))
@@ -86,7 +101,7 @@ defmodule Covenant.Check do
     %Report{
       problems: Error.sort(problems),
       coverage: coverage,
-      skipped: Enum.sort(skipped_exceptions ++ skipped_ceilings),
+      skipped: Enum.sort(skipped_exceptions ++ skipped_ceilings ++ skipped_covers),
       warnings: undeclared_modules(contract) ++ unchecked_ceilings
     }
   end
@@ -109,12 +124,17 @@ defmodule Covenant.Check do
     for %Obligation{} = obligation <- Contract.obligations(contract),
         Obligation.testable?(obligation),
         Map.get(by_obligation, obligation.id, []) == [] do
-      Error.new(
-        obligation.file,
-        obligation.line,
-        "active obligation `#{obligation.id}` has no tagged test; " <>
-          "add `@tag obligation: \"#{obligation.id}\"` to the contract test that proves it"
-      )
+      Error.new(obligation.file, obligation.line, untested_message(obligation))
+    end
+  end
+
+  defp untested_message(%Obligation{id: id} = obligation) do
+    if String.contains?(id, "/") do
+      "obligation `#{id}` is named by no Contract test; " <>
+        "put `# Contract: #{id}` above the test in #{Path.dirname(obligation.file)} that proves it"
+    else
+      "active obligation `#{id}` has no tagged test; " <>
+        "add `@tag obligation: \"#{id}\"` to the contract test that proves it"
     end
   end
 
@@ -171,6 +191,133 @@ defmodule Covenant.Check do
          Error.new(exception.file, exception.line, "exception `#{exception.id}`: #{reason}")}
     end
   end
+
+  # -- the sibling layout ------------------------------------------------------
+
+  defp primitives(contract) do
+    contract.components
+    |> Map.values()
+    |> Enum.filter(&(&1.form == :primitive))
+    |> Enum.sort_by(& &1.id)
+  end
+
+  defp covers(contract, static?, opts) do
+    primitives = primitives(contract)
+
+    if static? do
+      {[], for(%Component{id: id, covers: [_ | _]} <- primitives, do: {:covers, id})}
+    else
+      modules = Keyword.get_lazy(opts, :modules, &Covers.project_modules/0)
+
+      problems =
+        for %Component{} = primitive <- primitives,
+            %Covers{} = cover <- primitive.covers,
+            not Covers.exists?(cover.ref, modules) do
+          Error.new(
+            cover.file,
+            cover.line,
+            "covers `#{cover.text}` names no code in this project " <>
+              "(#{covers_hint(cover.ref)}); point it at the code `#{primitive.id}` covers or delete it"
+          )
+        end
+
+      {problems, []}
+    end
+  end
+
+  defp covers_hint({:function, _, _, _}), do: "no public function of that name and arity"
+  defp covers_hint({:tree, _}), do: "no module of that name or under it"
+  defp covers_hint({:module, _}), do: "no module of that name"
+
+  # Two primitives naming the same code leave the most-specific rule no winner.
+  defp overlapping(contract) do
+    contract
+    |> primitives()
+    |> Enum.flat_map(fn primitive -> Enum.map(primitive.covers, &{&1, primitive.id}) end)
+    |> Enum.group_by(fn {cover, _} -> cover.ref end)
+    |> Enum.flat_map(fn
+      {_, [_]} ->
+        []
+
+      {_, [{_, first} | rest]} ->
+        for {cover, id} <- rest do
+          Error.new(
+            cover.file,
+            cover.line,
+            "`#{id}` covers `#{cover.text}`, which `#{first}` covers too; one primitive owns a piece of code"
+          )
+        end
+    end)
+  end
+
+  # A test that ran outside the sibling layout's directory but names a primitive's obligation.
+  defp outside(_contract, _results, _root, nil), do: []
+
+  defp outside(contract, %Results{tests: tests}, root, sibling) do
+    for %Results.Test{file: file} = test <- tests,
+        file != nil,
+        Primitive.primitive_of(Path.expand(file, root), sibling) == nil,
+        id <- test.obligations,
+        match?(%Obligation{}, Contract.obligation(contract, id)),
+        String.contains?(id, "/") do
+      Error.new(file, test.line, stray_message(test.name, id))
+    end
+  end
+
+  defp stray_message(name, id),
+    do:
+      "#{name} names `#{id}` outside the sibling layout's directory; " <>
+        "a primitive's Contract tests live beside its README"
+
+  @doc """
+  The `# Contract:` comments and `obligation:` tags naming a primitive's
+  obligation (`calc/A1`) in `files` outside `sibling` (the sibling layout's
+  directory): only the Contract tests beside a primitive's README may name
+  one. Read from the source, so they are found whether or not the test runs.
+  """
+  @spec strays([Path.t()], Path.t()) :: [Error.t()]
+  def strays(files, sibling) do
+    for file <- Enum.sort(Enum.uniq(files)),
+        Primitive.primitive_of(file, sibling) == nil,
+        {:ok, text} <- [File.read(file)],
+        line <- stray_lines(text) do
+      Error.new(
+        file,
+        line,
+        "a Contract comment or tag naming a primitive's obligation outside the sibling layout's " <>
+          "directory; a primitive's Contract tests live beside its README"
+      )
+    end
+  end
+
+  # Real comments and real `@tag`/`@describetag`/`@moduletag obligation:` attributes
+  # only: the same text inside a string is not a claim.
+  defp stray_lines(text) do
+    case Code.string_to_quoted_with_comments(text, emit_warnings: false) do
+      {:ok, ast, comments} ->
+        commented =
+          for %{text: c, line: line} <- comments, Primitive.contract_comment?(c), do: line
+
+        {_, tagged} =
+          Macro.prewalk(ast, [], fn
+            {:@, meta, [{level, _, [value]}]} = node, acc
+            when level in [:tag, :describetag, :moduletag] and is_list(value) ->
+              ids = if Keyword.keyword?(value), do: List.wrap(value[:obligation]), else: []
+              {node, if(Enum.any?(ids, &primitive_id?/1), do: [meta[:line] | acc], else: acc)}
+
+            node, acc ->
+              {node, acc}
+          end)
+
+        Enum.sort(Enum.uniq(commented ++ tagged))
+
+      _ ->
+        []
+    end
+  end
+
+  defp primitive_id?(id),
+    do: is_binary(id) and Regex.match?(~r/^[a-z][a-z0-9_]*\/[A-Z]+[0-9]+$/, id)
 
   defp ceilings(contract, root, static?) do
     {skipped, counted} =

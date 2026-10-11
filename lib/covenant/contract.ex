@@ -13,7 +13,12 @@ defmodule Covenant.Contract do
     <app>/<name>.decisions.yml  # that component's records
   ```
 
-  `load/1` parses everything and either returns the Contract or every
+  With `sibling: dir`, the primitives of the sibling layout under `dir`
+  (`contract/<primitive>/README.md`, see `Covenant.Parser.Primitive`) join the
+  Contract as components of form `:primitive`; either directory may be
+  missing, but not both.
+
+  `load/2` parses everything and either returns the Contract or every
   problem found, each anchored to a file and line. Cross-reference checks
   (dangling `record`, `invariant`, `superseded_by`, ...) live in
   `Covenant.Contract.Validate` and run from `mix covenant.check`, so a
@@ -33,30 +38,33 @@ defmodule Covenant.Contract do
 
   defstruct dir: nil, components: %{}, records: %{}, ceilings: []
 
-  @doc "Loads the Contract from `dir`."
-  @spec load(Path.t()) :: {:ok, t()} | {:error, [Error.t()]}
-  def load(dir) do
-    if File.dir?(dir) do
-      do_load(dir)
-    else
-      {:error, [Error.new(dir, nil, "contracts directory not found")]}
+  @doc "Loads the Contract from `dir`; `sibling: dir` adds the sibling layout's primitives."
+  @spec load(Path.t(), keyword()) :: {:ok, t()} | {:error, [Error.t()]}
+  def load(dir, opts \\ []) do
+    sibling = opts[:sibling]
+    sibling? = sibling != nil and File.dir?(sibling)
+
+    cond do
+      File.dir?(dir) -> do_load(dir, if(sibling?, do: sibling))
+      sibling? -> do_load(dir, sibling)
+      true -> {:error, [Error.new(dir, nil, "contracts directory not found")]}
     end
   end
 
   @doc "Loads the Contract from `dir`, raising `Covenant.ContractError` on problems."
-  @spec load!(Path.t()) :: t()
-  def load!(dir) do
-    case load(dir) do
+  @spec load!(Path.t(), keyword()) :: t()
+  def load!(dir, opts \\ []) do
+    case load(dir, opts) do
       {:ok, contract} -> contract
       {:error, errors} -> raise Covenant.ContractError, errors: errors
     end
   end
 
-  defp do_load(dir) do
+  defp do_load(dir, sibling) do
     component_results =
       for {file, form} <- component_files(dir) do
         Parser.Markdown.parse_file(file, component_id(dir, file), form)
-      end
+      end ++ primitives(sibling)
 
     record_results =
       for file <- record_files(dir) do
@@ -66,7 +74,7 @@ defmodule Covenant.Contract do
     scope_path = Path.join([dir, "system", "scope.yml"])
 
     scope_result =
-      if File.exists?(scope_path), do: Parser.Scope.parse_file(scope_path), else: {:ok, []}
+      if File.regular?(scope_path), do: Parser.Scope.parse_file(scope_path), else: {:ok, []}
 
     errors =
       Enum.flat_map(component_results ++ record_results ++ [scope_result], fn
@@ -80,6 +88,15 @@ defmodule Covenant.Contract do
     case errors ++ duplicate_components(components) ++ duplicate_records(records) do
       [] -> {:ok, assemble(dir, components, record_results, elem(scope_result, 1))}
       errors -> {:error, errors}
+    end
+  end
+
+  defp primitives(nil), do: []
+
+  defp primitives(sibling) do
+    case Parser.Primitive.parse_dir(sibling) do
+      {:ok, components} -> Enum.map(components, &{:ok, &1})
+      error -> [error]
     end
   end
 
@@ -110,6 +127,10 @@ defmodule Covenant.Contract do
   # -- files ------------------------------------------------------------------
 
   defp component_files(dir) do
+    if File.dir?(dir), do: forms(dir), else: []
+  end
+
+  defp forms(dir) do
     heavy = dir |> Path.join("*/*.intent.md") |> Path.wildcard() |> Enum.map(&{&1, :heavy})
     light = dir |> Path.join("*/*.obligations.md") |> Path.wildcard() |> Enum.map(&{&1, :light})
     system = Path.join([dir, "system", "intent.md"])
@@ -118,6 +139,10 @@ defmodule Covenant.Contract do
   end
 
   defp record_files(dir) do
+    if File.dir?(dir), do: records_in(dir), else: []
+  end
+
+  defp records_in(dir) do
     system = Path.join([dir, "system", "decisions.yml"])
     system = if File.exists?(system), do: [system], else: []
     Enum.sort(Path.wildcard(Path.join(dir, "*/*.decisions.yml")) ++ system)
