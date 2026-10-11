@@ -130,6 +130,50 @@ defmodule Covenant.PrimitiveContractTest do
              Contract.load(Path.join(dir, "none"), sibling: Path.join(dir, "nothing"))
   end
 
+  @tag obligation: "covenant.primitive.I1"
+  test "a line holding a bold id that isn't `- **A1** text` is an error, never skipped" do
+    bad =
+      @calc <>
+        """
+
+        * **A3** a star bullet
+        -  **A4** two spaces
+        - **A5:** a colon inside
+        - **A6**: a colon after
+          - **A7** indented
+        1. **A8** numbered
+        - **a9** lowercase
+        - **A10**
+        """
+
+    {:error, errors} = Primitive.parse_readme(bad, "README.md", "calc")
+    assert Enum.map(errors, & &1.line) == Enum.to_list(14..21)
+
+    assert Enum.all?(
+             errors,
+             &(&1.message =~
+                 "looks like an obligation but is not one: write it as `- **A1** text`")
+           )
+
+    assert hd(errors).message =~ "`* **A3** a star bullet`"
+  end
+
+  @tag obligation: "covenant.primitive.I1"
+  test "a fence that is never closed is an error in a README and in mutants.md" do
+    unclosed = @calc <> "\n```covers\nCalc.add/2\n"
+
+    assert messages(Primitive.parse_readme(unclosed, "README.md", "calc")) == [
+             "README.md:14: the fence opened here with ``` is never closed"
+           ]
+
+    assert messages(
+             Primitive.declarations(
+               "## Kept\n\n~~~equivalent\nCalc.add/2: + -> -\n",
+               "mutants.md"
+             )
+           ) == ["mutants.md:3: the fence opened here with ~~~ is never closed"]
+  end
+
   # -- I2 -----------------------------------------------------------------------
 
   @tag obligation: "covenant.primitive.I2"
@@ -449,6 +493,52 @@ defmodule Covenant.PrimitiveContractTest do
              "Covenant.PrimitiveTest.Outside tests the primitive `calc`, whose Contract tests live beside its README"
   end
 
+  @tag :tmp_dir
+  @tag obligation: "covenant.primitive.I4"
+  test "outside the sibling layout a prose `# Contract:` comment is only a comment", %{
+    tmp_dir: dir
+  } do
+    sibling(dir, %{"calc" => @calc})
+
+    write!(Path.join(dir, "contracts/billing/invoices.obligations.md"), """
+    # billing.invoices
+
+    ## Purpose
+
+    Invoices.
+
+    ### billing.invoices.I1 — Totals add up
+    - **scope:** `Billing.total/1`
+    - **must:** sum the lines
+    - **kind:** functional
+    - **status:** active
+    """)
+
+    tests = """
+      # Contract: never negative
+      @tag obligation: "billing.invoices.I1"
+      test "prose", do: :ok
+    """
+
+    module =
+      compile_in(
+        dir,
+        "test/contract/billing/prose_contract_test.exs",
+        [name: Covenant.PrimitiveTest.Prose, tests: tests],
+        ", component: \"billing.invoices\""
+      )
+
+    assert [%{tags: %{obligation: "billing.invoices.I1"}}] = module.__ex_unit__().tests
+
+    file = Path.join(dir, "test/contract/billing/prose_contract_test.exs")
+    scan = Covenant.Static.scan([file], sibling: Path.join(dir, "contract"))
+    assert scan.problems == []
+    assert Covenant.Check.strays([file], Path.join(dir, "contract")) == []
+
+    claimed = write!(Path.join(dir, "test/claim_test.exs"), "# Contract: calc/A1\n")
+    assert [%{line: 1}] = Covenant.Check.strays([claimed], Path.join(dir, "contract"))
+  end
+
   # -- I5 -----------------------------------------------------------------------
 
   defp mutant(attrs) do
@@ -558,6 +648,69 @@ defmodule Covenant.PrimitiveContractTest do
 
     write!(path, "## Kept\n\n```equivalent\nCalc.add/2: + -> -\n```\n")
     assert {:ok, [%{unit: "Calc.add/2", sort: "equivalent"}]} = Survivors.load(path)
+  end
+
+  @tag obligation: "covenant.primitive.I5"
+  test "a declared change may hold arrows of its own, and `#k` names one of several" do
+    text = """
+    ## Kept
+
+    ```unpromised
+    Calc.map/2: f -> fn x -> x end
+    Calc.add/2: `+` → `-` #2
+    ```
+    """
+
+    {:ok, [fun, nth]} = Primitive.declarations(text, "mutants.md")
+
+    assert %{unit: "Calc.map/2", change: "f -> fn x -> x end", occurrence: nil} = fun
+    assert Primitive.change?(fun.change, "f", "fn x -> x end")
+
+    assert Survivors.matches?(
+             fun,
+             mutant(module: "Calc", function: "map/2", from: "f", to: "fn x -> x end")
+           )
+
+    refute Survivors.matches?(fun, mutant(module: "Calc", function: "map/2", from: "f", to: "g"))
+
+    assert %{change: "`+` → `-`", occurrence: 2, from: "+", to: "-"} = nth
+    assert Primitive.change?(nth.change, "+", "-")
+
+    assert messages(
+             Primitive.declarations("## K\n\n```unpromised\nCalc.add/2: + #1\n```\n", "m.md")
+           ) ==
+             ["m.md:4: `Calc.add/2: + #1` is not `Unit: from -> to`"]
+  end
+
+  # -- I7 -----------------------------------------------------------------------
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.primitive.I7"
+  test "a pack lays a primitive out from the sibling layout's parent, and never replaces the project",
+       %{tmp_dir: dir} do
+    root = sibling(dir, %{"calc" => @calc})
+    write!(Path.join([root, "calc", "calc_test.exs"]), "# the calc Contract tests\n")
+    {:ok, contract} = Contract.load(Path.join(dir, "contracts"), sibling: root)
+
+    elsewhere = Path.join(dir, "elsewhere")
+    pack = Path.join(dir, "pack")
+
+    {:ok, %{files: files}} =
+      Covenant.Regen.write_pack(contract, "calc",
+        out: pack,
+        root: elsewhere,
+        test_paths: []
+      )
+
+    relative = Enum.map(files, &Path.relative_to(&1, pack))
+    assert "contract/calc/README.md" in relative
+    assert "contract/calc/calc_test.exs" in relative
+    assert File.read!(Path.join(pack, "PROMPT.md")) =~ "`contract/calc/README.md`"
+
+    assert {:error, "refusing to write the pack to " <> _} =
+             Covenant.Regen.write_pack(contract, "calc", out: dir, root: dir, test_paths: [])
+
+    assert File.exists?(Path.join([root, "calc", "README.md"]))
   end
 
   # -- I8 -----------------------------------------------------------------------

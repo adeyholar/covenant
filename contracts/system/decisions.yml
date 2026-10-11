@@ -335,3 +335,4 @@
   approved_by: "lead, 2026-10-10"
   expires: When Covenant's mutants get ids of their own
   source: ["lib/covenant/parser/primitive.ex", "lib/covenant/mutate/survivors.ex"]
+  superseded_by: survivor-keys-name-one-mutant

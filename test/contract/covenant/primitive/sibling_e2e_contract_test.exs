@@ -12,9 +12,9 @@ defmodule Covenant.SiblingE2EContractTest do
 
   @project Path.expand("../../../fixtures/sibling_project", __DIR__)
 
-  defp mix(args) do
+  defp mix(args, env \\ []) do
     mix = System.find_executable("mix") || raise "mix not on PATH"
-    env = [{"MIX_ENV", "dev"}, {"COVENANT_RESULTS_DIR", nil}, {"COVENANT_ROOT", nil}]
+    env = [{"MIX_ENV", "dev"}, {"COVENANT_RESULTS_DIR", nil}, {"COVENANT_ROOT", nil}] ++ env
     System.cmd(mix, args, cd: @project, env: env, stderr_to_stdout: true)
   end
 
@@ -240,5 +240,32 @@ defmodule Covenant.SiblingE2EContractTest do
     assert prompt =~ "- `calc/A1` — Add returns the sum of its arguments."
     assert prompt =~ "  - `contract/calc/calc_test.exs`"
     refute prompt =~ "CONTRACT_CONVENTION.md"
+  end
+
+  @tag obligation: "covenant.primitive.I6"
+  test "with COVENANT_ROOT set, mix covenant.check still runs the sibling layout's tests" do
+    {output, status} = mix(["covenant.check"], [{"COVENANT_ROOT", @project}])
+    assert status == 0, output
+    assert output =~ "covenant.check: running mix test contract"
+    assert output =~ "  calc          2/2  100.0%"
+    assert output =~ "wrote contract/coverage.json"
+  end
+
+  @tag obligation: "covenant.primitive.I7"
+  test "a declaration whose occurrence is past the last fails the run" do
+    mutants = Path.join(@project, "contract/calc/mutants.md")
+
+    change(%{
+      "contract/calc/mutants.md" =>
+        String.replace(File.read!(mutants), "Calc.clamp/3: < -> <=", "Calc.clamp/3: < -> <= #2")
+    })
+
+    {output, status} = mix(["covenant.mutate", "calc"])
+    assert status == 1, output
+
+    assert output =~
+             "contract/calc/mutants.md:9: #2: only 1 mutant(s) in Calc.clamp/3 share < -> <="
+
+    assert output =~ "lib/calc.ex:12: mutant m007 (comparison_swap `<` → `<=`) survived"
   end
 end
