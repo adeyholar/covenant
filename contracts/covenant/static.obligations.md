@@ -22,7 +22,7 @@ contract tests resolve paths from.
 
 ### covenant.static.I2 — Only Covenant.Case modules count, each on its own
 - **scope:** `Covenant.Static.scan_source/2`
-- **must:** ignore modules without `use Covenant.Case` (helper modules in the same file included) and read a nested `defmodule` as its own module with its own component and tags
+- **must:** ignore modules without `use Covenant.Case` (helper modules in the same file included) and read a nested `defmodule` as its own module with its own component and tags; treat `use <wrapper>, component: "<literal>"` exactly like `use Covenant.Case` for each wrapper module listed in `config :covenant, case_modules: [...]`; a module that has an `obligation` tag but no `use` it can read is a problem at the module's file and line saying that static mode reads only a literal `use Covenant.Case, component: "..."` (or a listed wrapper), instead of silently ignoring its tests
 - **kind:** functional
 - **status:** active
 
@@ -52,4 +52,10 @@ contract tests resolve paths from.
 - **must:** return the configured `:test_paths` (default `["test/contract"]`) as absolute paths, each relative entry resolved against `Covenant.root/0` and never against the working directory, an absolute entry and a glob left as they are; with `--test-path` values typed on the command line, return them resolved against the working directory, and with none, the configured ones; the same answer from any directory under the root
 - **kind:** functional
 - **record:** test-paths-resolve-against-root
+- **status:** active
+
+### covenant.static.I7 — Test files are the ones the project's test pattern names
+- **scope:** `Covenant.Static.expand/1`
+- **must:** expand files, directories and globs to the files whose name matches the project's `test_pattern` from `Mix.Project.config/0` (default `*_test.exs`), so a project with `test_pattern: "*_check.exs"` is scanned for those files and not for `*_test.exs`
+- **kind:** functional
 - **status:** active

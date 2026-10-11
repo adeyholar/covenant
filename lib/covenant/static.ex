@@ -102,18 +102,48 @@ defmodule Covenant.Static do
     end)
   end
 
-  @doc "The `*_test.exs` files that `paths` (files, directories or globs) name, sorted and unique."
+  @doc """
+  The test files that `paths` (files, directories or globs) name, sorted and unique: those whose
+  name matches the project's `test_pattern` (`Mix.Project.config()`, default `*_test.exs`).
+  """
   @spec expand([Path.t()]) :: [Path.t()]
   def expand(paths) do
+    pattern = test_pattern()
+    matcher = pattern_regex(pattern)
+
     paths
     |> List.wrap()
     |> Enum.flat_map(&Path.wildcard/1)
     |> Enum.flat_map(fn path ->
-      if File.dir?(path), do: Path.wildcard(Path.join(path, "**/*_test.exs")), else: [path]
+      if File.dir?(path), do: Path.wildcard(Path.join(path, "**/" <> pattern)), else: [path]
     end)
-    |> Enum.filter(&(File.regular?(&1) and String.ends_with?(&1, "_test.exs")))
+    |> Enum.filter(&(File.regular?(&1) and Regex.match?(matcher, Path.basename(&1))))
     |> Enum.uniq()
     |> Enum.sort()
+  end
+
+  @default_test_pattern "*_test.exs"
+
+  defp test_pattern do
+    with true <- Code.ensure_loaded?(Mix.Project),
+         pattern when is_binary(pattern) <- Mix.Project.config()[:test_pattern] do
+      pattern
+    else
+      _ -> @default_test_pattern
+    end
+  end
+
+  defp pattern_regex(pattern) do
+    body =
+      pattern
+      |> String.graphemes()
+      |> Enum.map_join(fn
+        "*" -> ".*"
+        "?" -> "."
+        char -> Regex.escape(char)
+      end)
+
+    Regex.compile!("^" <> body <> "$")
   end
 
   @doc """
@@ -170,7 +200,7 @@ defmodule Covenant.Static do
     acc =
       case find_use(exprs, acc.primitive) do
         nil ->
-          acc
+          unseen_use(exprs, module, meta[:line], file, acc)
 
         {:ok, component} ->
           entry = %{module: module, component: component, file: file, line: meta[:line]}
@@ -213,38 +243,83 @@ defmodule Covenant.Static do
 
   defp module_name(other, _parent), do: Macro.to_string(other)
 
+  # A module that tags obligations but whose `use` this reader cannot see (a project wrapper
+  # around Covenant.Case, an alias) would otherwise be silently ignored.
+  defp unseen_use(exprs, module, line, file, acc) do
+    {_, tagged} =
+      Macro.prewalk(exprs, false, fn
+        {:defmodule, _, _}, found ->
+          {:ok, found}
+
+        {:@, _, [{level, _, [value]}]} = node, found
+        when level in [:tag, :moduletag, :describetag] ->
+          {node, found or obligation_value(value) != :none}
+
+        node, found ->
+          {node, found}
+      end)
+
+    if tagged do
+      message =
+        "module #{module} has `obligation` tags but no `use Covenant.Case, component: \"...\"` " <>
+          "that static mode can see: static mode reads only a literal `use Covenant.Case, " <>
+          "component: \"...\"` (or `use <wrapper>, component: \"...\"` for a wrapper listed in " <>
+          "`config :covenant, case_modules: [...]`)"
+
+      %{acc | problems: [Error.new(file, line, message) | acc.problems]}
+    else
+      acc
+    end
+  end
+
   defp part(atom) when is_atom(atom), do: Atom.to_string(atom)
   defp part(other), do: Macro.to_string(other)
 
   defp find_use(exprs, primitive) do
     Enum.find_value(exprs, fn
-      {:use, _, [{:__aliases__, _, [:Covenant, :Case]} | rest]} ->
-        opts = List.first(rest) || []
-
-        case is_list(opts) && Keyword.keyword?(opts) && Keyword.fetch(opts, :component) do
-          :error when primitive != nil ->
-            {:ok, primitive}
-
-          {:ok, component} when is_binary(component) and primitive in [nil, component] ->
-            {:ok, component}
-
-          {:ok, component} when is_binary(component) ->
-            {:error,
-             "use Covenant.Case names component #{inspect(component)}, but the file sits in the " <>
-               "sibling layout's `#{primitive}` primitive"}
-
-          {:ok, other} ->
-            {:error,
-             "use Covenant.Case names component #{Macro.to_string(other)}, which is not a literal string; " <>
-               "static mode reads only literals"}
-
-          _ ->
-            {:error, "use Covenant.Case without component: \"<app>.<component>\""}
-        end
+      {:use, _, [{:__aliases__, _, parts} | rest]} ->
+        if Enum.map_join(parts, ".", &part/1) in case_modules(),
+          do: use_component(rest, primitive)
 
       _ ->
         nil
     end)
+  end
+
+  # `Covenant.Case` and the wrapper modules the project declares with
+  # `config :covenant, case_modules: [MyApp.ContractCase]`, as names.
+  defp case_modules do
+    wrappers = Application.get_env(:covenant, :case_modules, [])
+
+    [
+      "Covenant.Case"
+      | wrappers |> List.wrap() |> Enum.map(&(&1 |> inspect() |> String.trim_leading(":")))
+    ]
+  end
+
+  defp use_component(rest, primitive) do
+    opts = List.first(rest) || []
+
+    case is_list(opts) && Keyword.keyword?(opts) && Keyword.fetch(opts, :component) do
+      :error when primitive != nil ->
+        {:ok, primitive}
+
+      {:ok, component} when is_binary(component) and primitive in [nil, component] ->
+        {:ok, component}
+
+      {:ok, component} when is_binary(component) ->
+        {:error,
+         "use Covenant.Case names component #{inspect(component)}, but the file sits in the " <>
+           "sibling layout's `#{primitive}` primitive"}
+
+      {:ok, other} ->
+        {:error,
+         "use Covenant.Case names component #{Macro.to_string(other)}, which is not a literal string; " <>
+           "static mode reads only literals"}
+
+      _ ->
+        {:error, "use Covenant.Case without component: \"<app>.<component>\""}
+    end
   end
 
   # -- tests ------------------------------------------------------------------
