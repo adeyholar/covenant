@@ -675,6 +675,7 @@ defmodule Covenant.MutateContractTest do
     reason: The struct default for value is already 0.
   - at: lib/example/counter.ex:30:1
     operator: guard_removal
+    mutation: "`when x` → `(no guard)`"
     sort: decision-hole
     reason: undecided
   """
@@ -693,7 +694,7 @@ defmodule Covenant.MutateContractTest do
              line: 2
            } = first
 
-    assert second.mutation == nil
+    assert second.mutation == "`when x` → `(no guard)`"
     assert second.line == 7
     assert second.sort == "decision-hole"
 
@@ -710,7 +711,8 @@ defmodule Covenant.MutateContractTest do
       Enum.map(errors, &Error.format/1)
     end
 
-    base = "at: a.ex:1:1\n  operator: integer_shift\n  sort: equivalent\n  reason: r\n"
+    base =
+      "at: a.ex:1:1\n  operator: integer_shift\n  mutation: \"`1` → `2`\"\n  sort: equivalent\n  reason: r\n"
 
     assert errors.("- " <> String.replace(base, "  reason: r\n", "")) ==
              ["s.yml:1: annotation #1 is missing `reason`"]
@@ -741,9 +743,10 @@ defmodule Covenant.MutateContractTest do
     # the second entry is reported at its own line
     assert errors.("- " <> base <> "- sort: equivalent\n") ==
              [
-               "s.yml:5: annotation #2 is missing `at`",
-               "s.yml:5: annotation #2 is missing `operator`",
-               "s.yml:5: annotation #2 is missing `reason`"
+               "s.yml:6: annotation #2 is missing `at`",
+               "s.yml:6: annotation #2 is missing `operator`",
+               "s.yml:6: annotation #2 is missing `mutation`",
+               "s.yml:6: annotation #2 is missing `reason`"
              ]
 
     assert errors.("key: value\n") == [
@@ -1248,7 +1251,7 @@ defmodule Covenant.MutateContractTest do
 
     assert {:ok, [annotation]} =
              Survivors.parse(
-               "[{at: a.ex:1:1, operator: integer_shift, sort: equivalent, reason: r}]",
+               "[{at: a.ex:1:1, operator: integer_shift, mutation: m, sort: equivalent, reason: r}]",
                "f.yml"
              )
 
@@ -1618,11 +1621,11 @@ defmodule Covenant.MutateContractTest do
     counter: counter
   } do
     entry = fn n ->
-      "- at: a.ex:#{n}:1\r\n  operator: integer_shift\r\n  sort: equivalent\r\n  reason: r\r\n"
+      "- at: a.ex:#{n}:1\r\n  operator: integer_shift\r\n  mutation: m\r\n  sort: equivalent\r\n  reason: r\r\n"
     end
 
     assert {:ok, [first, second]} = Survivors.parse(entry.(1) <> entry.(2), "crlf.yml")
-    assert {first.line, second.line} == {1, 5}
+    assert {first.line, second.line} == {1, 6}
 
     assert {:error, [error]} = Survivors.parse("- a: [1\n", "bad.yml")
     assert error.file == "bad.yml"
@@ -1630,13 +1633,16 @@ defmodule Covenant.MutateContractTest do
     assert error.message =~ "invalid YAML: "
 
     assert {:error, errors} =
-             Survivors.parse("- at: a.ex:1:1\n  operator: integer_shift\n  reason: r\n", "s.yml")
+             Survivors.parse(
+               "- at: a.ex:1:1\n  operator: integer_shift\n  mutation: m\n  reason: r\n",
+               "s.yml"
+             )
 
     assert Enum.map(errors, & &1.message) == ["annotation #1 is missing `sort`"]
 
     assert {:error, errors} =
              Survivors.parse(
-               "- at: 5\n  operator: integer_shift\n  sort: equivalent\n  reason: r\n",
+               "- at: 5\n  operator: integer_shift\n  mutation: m\n  sort: equivalent\n  reason: r\n",
                "s.yml"
              )
 
@@ -1899,7 +1905,7 @@ defmodule Covenant.MutateContractTest do
 
     File.write!(
       yml,
-      "- at: lib/x.ex:1:1\n  operator: integer_shift\n  sort: equivalent\n  reason: r\n"
+      "- at: lib/x.ex:1:1\n  operator: integer_shift\n  mutation: \"`1` → `2`\"\n  sort: equivalent\n  reason: r\n"
     )
 
     assert {:ok, [%{at: "lib/x.ex:1:1", unit: nil}]} = Survivors.load(yml)

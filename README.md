@@ -312,7 +312,7 @@ Docs, specs, types, `defmacro`, `defguard`, `use`, `import`, `alias`, `require`,
 
 A mutant is killed when a test fails for any reason but a timeout, survives when every test passes, and is invalid when it doesn't compile; a mutant the tests only time out against is a survivor. A kill is credited to the obligations tagged on every test that failed. An obligation's unique kills are the mutants only its tests caught. A test with no unique kill is mutation-blind and is listed as a warning; `@tag mutation_blind: "reason"` keeps the reason beside the warning.
 
-There's no score threshold. The score is printed for information. Every survivor is either killed by a new test or sorted in `contracts/<app>/<component>.survivors.yml`, under a reason a reviewer can check:
+There's no score threshold. The score is printed for information. Every survivor is either killed by a new test or sorted in `contracts/<app>/<component>.survivors.yml`, under a reason a reviewer can check. `at`, `operator` and `mutation` are all required, so an entry names one mutant:
 
 ```yaml
 - at: lib/example/counter.ex:18:20

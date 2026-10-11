@@ -78,11 +78,10 @@ defmodule Mix.Tasks.Covenant.Mutate do
         sort: equivalent
         reason: The struct default for value is already 0.
 
-  `at` is `file:line:column`, `operator` the mutation operator and `reason`
-  free text that says why this survivor may live. `mutation` is optional:
-  without it the entry covers every mutant with that `at` and `operator`, so
-  give it when two mutants share both and need different judgments. `sort` is
-  one of:
+  `at` is `file:line:column`, `operator` the mutation operator, `mutation` the
+  change as the task prints it and `reason` free text that says why this
+  survivor may live. All of them are required: `at`, `operator` and `mutation`
+  together name one mutant. `sort` is one of:
 
   * `equivalent` — the mutant behaves exactly like the original;
   * `log-only` — it changes only a message or a log line nobody pins;

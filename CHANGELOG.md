@@ -27,7 +27,8 @@ The first release: the Contract layer for Impatient Programming in Elixir.
   with thirteen operators, runs its contract tests against each mutant and
   writes a kill matrix that credits every kill to the obligations whose tests
   caught it. Survivors are sorted in `<component>.survivors.yml`; an unsorted
-  survivor or a stale entry fails the run. `--fail-fast` trades exact credit
+  survivor or a stale entry fails the run. An entry's `at`, `operator` and
+  `mutation` are all required, so it names one mutant. `--fail-fast` trades exact credit
   for speed, `--jobs N` runs isolated workers, and the per-test timeout is
   measured from the baseline.
 - The sibling layout that flinch, qualm and exhale read: `contract/<primitive>/`

@@ -215,6 +215,7 @@ defmodule Covenant.MutateE2EContractTest do
           reason: Stale on purpose.
         - at: lib/example/counter.ex:999:1
           operator: integer_shift
+          mutation: "`1` → `2`"
           sort: equivalent
           reason: Points at nothing.
         """

@@ -6,10 +6,14 @@ defmodule Covenant.Mutate.Survivors do
   ```yaml
   - at: lib/example/counter.ex:29:17
     operator: element_removal
-    mutation: "`value: 0` → `(removed)`"   # optional; needed when two mutants share at + operator
+    mutation: "`value: 0` → `(removed)`"
     sort: equivalent
     reason: The struct default for value is already 0.
   ```
+
+  An entry's key is `at`, `operator` and `mutation`, all three required, so an
+  entry names one mutant and never the next one to land on the same site
+  (record `survivor-keys-name-one-mutant`).
 
   `sort` is one of `equivalent`, `log-only`, `dead-code`, `timeout`,
   `evaluation-gap`, `decision-hole` or `unpromised`.
@@ -164,6 +168,7 @@ defmodule Covenant.Mutate.Survivors do
       [
         string(item, "at", label, file, line),
         string(item, "operator", label, file, line),
+        string(item, "mutation", label, file, line),
         string(item, "sort", label, file, line),
         string(item, "reason", label, file, line),
         enum(item, "operator", operators, label, file, line),

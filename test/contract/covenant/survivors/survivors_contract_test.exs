@@ -221,4 +221,30 @@ defmodule Covenant.SurvivorsContractTest do
     {[], [error]} = Survivors.resolve([by_parts], two)
     assert error.message =~ "2 mutants in Lab.Retry.run/1 share 1 -> 2;"
   end
+
+  @tag obligation: "covenant.mutate.I8"
+  test "a survivors-file entry without a mutation is an error naming the entry" do
+    text = """
+    - at: lib/lab.ex:10:9
+      operator: integer_shift
+      mutation: "`1` → `2`"
+      sort: equivalent
+      reason: named
+    - at: lib/lab.ex:40:9
+      operator: integer_shift
+      sort: equivalent
+      reason: unnamed
+    """
+
+    assert {:error, [error]} = Survivors.parse(text, "lab.survivors.yml")
+
+    assert Covenant.Error.format(error) ==
+             "lab.survivors.yml:6: annotation #2 is missing `mutation`"
+
+    {:ok, [entry]} =
+      Survivors.parse(String.split(text, "- at: lib/lab.ex:40") |> hd(), "lab.survivors.yml")
+
+    assert Survivors.matches?(entry, mutant("m001", 10))
+    refute Survivors.matches?(entry, mutant("m002", 10, to: "0"))
+  end
 end
