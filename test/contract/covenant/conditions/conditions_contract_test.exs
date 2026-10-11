@@ -3,7 +3,7 @@ defmodule Covenant.ConditionsContractTest do
 
   alias Covenant.{Conditions, Contract}
   alias Covenant.Conditions.Context
-  alias Covenant.Contract.Condition
+  alias Covenant.Contract.{Ceiling, Condition}
   alias Covenant.ContractBuilder
 
   @moduletag :tmp_dir
@@ -320,6 +320,83 @@ defmodule Covenant.ConditionsContractTest do
 
     assert {:suspect, "Covenant.ExampleLimits.gone/0 raised UndefinedFunctionError: " <> _} =
              Conditions.evaluate(value("Covenant.ExampleLimits.gone/0", 1), ctx)
+  end
+
+  @tag obligation: "covenant.conditions.I7"
+  test "value: a call into Elixir or OTP is refused as suspect, never made", %{ctx: ctx} do
+    assert {:suspect, message} = Conditions.evaluate(value("Kernel.node/0", :nonode@nohost), ctx)
+    assert message =~ "part of Elixir or OTP"
+
+    assert {:suspect, halt} = Conditions.evaluate(value("System.halt/0", 0), ctx)
+    assert halt =~ "System.halt/0"
+    assert halt =~ "part of Elixir or OTP"
+  end
+
+  @tag obligation: "covenant.conditions.I7"
+  test "a module counter in Elixir or OTP is refused, never called" do
+    for {module, function} <- [{System, :schedulers_online}, {System, :halt}, {Kernel, :node}] do
+      ceiling = %Ceiling{
+        name: "x",
+        ceiling: 100,
+        counter: {:module, module, function},
+        file: "system/scope.yml",
+        line: 1
+      }
+
+      assert {:error, message} = Ceiling.count(ceiling, [])
+      assert message =~ "#{inspect(module)}.#{function}/0"
+      assert message =~ "part of Elixir or OTP"
+    end
+  end
+
+  @tag obligation: "covenant.conditions.I8"
+  test "file: a path that leaves the project root is suspect even when the file exists", %{
+    ctx: ctx,
+    tmp_dir: dir
+  } do
+    sibling = "outside-#{System.unique_integer([:positive])}.txt"
+    File.write!(Path.join(Path.dirname(dir), sibling), "")
+    on_exit(fn -> File.rm(Path.join(Path.dirname(dir), sibling)) end)
+    up = Path.join("..", sibling)
+    assert File.exists?(Path.join(dir, up))
+
+    assert {:suspect, message} =
+             Conditions.evaluate(premise(%{"kind" => "file", "path" => up}), ctx)
+
+    assert message =~ "outside the project root"
+
+    absolute = Path.expand("mix.exs")
+    assert File.exists?(absolute)
+
+    assert {:suspect, message} =
+             Conditions.evaluate(premise(%{"kind" => "file", "path" => absolute}), ctx)
+
+    assert message =~ "outside the project root"
+
+    assert {:ok, _} =
+             Conditions.evaluate(premise(%{"kind" => "file", "path" => "./present.txt"}), ctx)
+
+    assert {:ok, _} = Conditions.evaluate(premise(%{"kind" => "file", "path" => "."}), ctx)
+  end
+
+  @tag obligation: "covenant.conditions.I9"
+  test "value: names from a record never become atoms", %{ctx: ctx} do
+    n = System.unique_integer([:positive])
+    module = "Covenant.Atomless#{n}.Deeper"
+    fun = "atomless_fun_#{n}"
+
+    assert {:unchecked, "module not compiled in this VM: " <> reported} =
+             Conditions.evaluate(value("#{module}.#{fun}/0", 1), ctx)
+
+    assert reported == module
+
+    assert {:suspect, message} =
+             Conditions.evaluate(value("Covenant.ExampleLimits.#{fun}/0", 1), ctx)
+
+    assert message =~ "Covenant.ExampleLimits.#{fun}/0 raised UndefinedFunctionError: "
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom("Elixir." <> module) end
+    assert_raise ArgumentError, fn -> String.to_existing_atom(fun) end
   end
 
   @tag obligation: "covenant.conditions.I6"
