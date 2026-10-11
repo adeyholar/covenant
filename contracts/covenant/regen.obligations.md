@@ -30,7 +30,7 @@ component from its Contract, with the implementation excluded.
 
 ### covenant.regen.I4 — Packs are found by declaration and rebuilt from scratch
 - **scope:** `Covenant.Regen.write_pack/3`, `Covenant.Regen.find_tests/3`
-- **must:** find contract tests by their `use Covenant.Case, component: "<id>"` declaration through the configured paths or globs, refuse an unknown component naming the known ones, and replace any existing pack directory entirely
+- **must:** find contract tests by their `use Covenant.Case, component: "<id>"` declaration, read from the syntax tree as `Covenant.Static.scan_source/3` reads it (so the call split over several lines, as `mix format` writes it, is found, and a commented-out line or text in a string or heredoc is not), through the configured paths or globs; refuse an unknown component naming the known ones; write a `.covenant-pack` marker holding the component id into every pack; and replace an existing `out` directory entirely only when it holds that marker, writing into one that is empty or missing, and otherwise returning an error that says why and deleting nothing (a non-empty directory without the marker, such as `lib` or `.`, or a path that is not a directory), clearing without following symlinks
 - **kind:** functional
 - **status:** active
 

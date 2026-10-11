@@ -17,6 +17,10 @@ defmodule Covenant.Regen do
     stubs/lib/<module path>.ex        # public-surface stubs (heavy form)
   ```
 
+  A `.covenant-pack` file in the pack root marks the directory as a pack Covenant wrote; writing
+  a pack into an existing `--out` directory clears it only when that marker is there (or the
+  directory is empty), and refuses any other non-empty directory without deleting anything.
+
   The old implementation is deliberately excluded: if the rebuilt
   component diverges, the Contract was missing a sentence.
 
@@ -44,6 +48,9 @@ defmodule Covenant.Regen do
   alias Covenant.Covers
   alias Covenant.Regen.Ownership
   alias Covenant.Static
+
+  # Written into every pack; only a directory holding it is ever cleared by a later run.
+  @marker ".covenant-pack"
 
   @type pack :: %{
           dir: Path.t(),
@@ -118,22 +125,71 @@ defmodule Covenant.Regen do
           {:write, "PROMPT.md", prompt(component, Enum.map(tests, &elem(&1, 1)), stub_opts)}
         ]
 
-    File.rm_rf!(out)
-    File.mkdir_p!(out)
+    with :ok <- prepare(out, component.id) do
+      write(Path.join(out, @marker), component.id <> "\n")
 
-    files =
-      Enum.map(writes, fn
-        {:copy, source, target} -> copy(source, Path.join(out, target))
-        {:write, target, text} -> write(Path.join(out, target), text)
-      end)
+      files =
+        Enum.map(writes, fn
+          {:copy, source, target} -> copy(source, Path.join(out, target))
+          {:write, target, text} -> write(Path.join(out, target), text)
+        end)
 
-    {:ok,
-     %{
-       dir: out,
-       files: Enum.sort(files),
-       skipped: skipped,
-       possibly_foreign: possibly_foreign
-     }}
+      {:ok,
+       %{
+         dir: out,
+         files: Enum.sort(files),
+         skipped: skipped,
+         possibly_foreign: possibly_foreign
+       }}
+    end
+  end
+
+  # An existing output directory is cleared only when it is a pack Covenant wrote (it holds the
+  # marker); an empty or missing one is fine; anything else is refused with nothing deleted.
+  defp prepare(out, component_id) do
+    marker = Path.join(out, @marker)
+
+    case File.lstat(out) do
+      {:error, :enoent} ->
+        File.mkdir_p!(out)
+
+      {:ok, %File.Stat{type: :directory}} ->
+        cond do
+          File.regular?(marker) ->
+            clear(out)
+
+          File.ls!(out) == [] ->
+            :ok
+
+          true ->
+            {:error,
+             "refusing to write the pack to #{out}: it is not empty and holds no #{@marker} " <>
+               "marker, so it is not a pack Covenant wrote (nothing was deleted); " <>
+               "choose a new or empty directory for `#{component_id}`"}
+        end
+
+      {:ok, _} ->
+        {:error, "refusing to write the pack to #{out}: it exists and is not a directory"}
+
+      {:error, reason} ->
+        {:error, "cannot write the pack to #{out}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  # Empties `dir`, unlinking symlinks rather than following them.
+  defp clear(dir) do
+    for entry <- File.ls!(dir), path = Path.join(dir, entry) do
+      case File.lstat!(path) do
+        %File.Stat{type: :directory} ->
+          clear(path)
+          File.rmdir!(path)
+
+        _ ->
+          File.rm!(path)
+      end
+    end
+
+    :ok
   end
 
   # Where the pack lays files out from: the root, or for a primitive the directory that holds
@@ -144,8 +200,9 @@ defmodule Covenant.Regen do
   defp layout(_component, root), do: root
 
   @doc """
-  Contract test files that declare `use Covenant.Case, component: "<id>"`, as paths relative to
-  `root`. `test_paths` entries (files, directories or globs, absolute or relative to `root`) are
+  Contract test files that declare `use Covenant.Case, component: "<id>"` (read from the syntax
+  tree by `Covenant.Static.scan_source/3`, so any layout of the call counts and a comment or a
+  string does not), as paths relative to `root`. `test_paths` entries (files, directories or globs, absolute or relative to `root`) are
   expanded as `Covenant.Static.expand/1` does for `mix covenant.check --static`. A primitive of
   the sibling layout's tests are the `*_test.exs` files beside its README.
   """
@@ -164,7 +221,6 @@ defmodule Covenant.Regen do
   def find_tests(%Component{id: id}, test_paths, root), do: find_tests(id, test_paths, root)
 
   def find_tests(component_id, test_paths, root) do
-    pattern = ~r/use\s+Covenant\.Case\s*,[^\n]*component:\s*"#{Regex.escape(component_id)}"/
     root = Path.expand(root)
 
     test_paths
@@ -173,8 +229,12 @@ defmodule Covenant.Regen do
     |> Static.expand()
     |> Enum.filter(fn file ->
       case File.read(file) do
-        {:ok, source} -> Regex.match?(pattern, source)
-        _ -> false
+        {:ok, source} ->
+          %{modules: modules} = Static.scan_source(source, file)
+          Enum.any?(modules, &(&1.component == component_id))
+
+        _ ->
+          false
       end
     end)
     |> Enum.map(&Path.relative_to(&1, root))
