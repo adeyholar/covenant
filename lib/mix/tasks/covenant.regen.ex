@@ -62,7 +62,7 @@ defmodule Mix.Tasks.Covenant.Regen do
     test_paths = Covenant.test_paths(Keyword.get_values(opts, :test_path))
 
     contract =
-      case Contract.load(contracts_dir, sibling: Path.relative_to_cwd(Covenant.sibling_dir())) do
+      case Contract.load(contracts_dir, sibling: sibling_relative()) do
         {:ok, contract} ->
           contract
 
@@ -119,4 +119,9 @@ defmodule Mix.Tasks.Covenant.Regen do
   end
 
   defp module_names(modules), do: modules |> Enum.uniq() |> Enum.sort() |> Enum.join(", ")
+
+  defp sibling_relative do
+    sibling = Covenant.sibling_dir()
+    sibling && Path.relative_to_cwd(sibling)
+  end
 end

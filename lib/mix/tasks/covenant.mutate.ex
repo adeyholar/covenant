@@ -619,7 +619,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
   # -- shared -----------------------------------------------------------------
 
   defp load_contract(dir) do
-    case Contract.load(dir, sibling: Path.relative_to_cwd(Covenant.sibling_dir())) do
+    case Contract.load(dir, sibling: sibling_relative()) do
       {:ok, contract} -> contract
       {:error, errors} -> fail_with(errors, "the Contract in #{dir} could not be parsed")
     end
@@ -639,5 +639,10 @@ defmodule Mix.Tasks.Covenant.Mutate do
     )
 
     exit({:shutdown, 1})
+  end
+
+  defp sibling_relative do
+    sibling = Covenant.sibling_dir()
+    sibling && Path.relative_to_cwd(sibling)
   end
 end
