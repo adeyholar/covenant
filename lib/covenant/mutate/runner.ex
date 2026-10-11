@@ -241,6 +241,9 @@ defmodule Covenant.Mutate.Runner do
              "this worker's results are unreliable:\n#{format_red(tests)}"}
         end
 
+      {:error, reason} ->
+        {:error, "after the last mutant, #{describe(last)}: #{reason}"}
+
       :budget ->
         {:error,
          "the unmutated suite did not finish within #{env.budget} ms after the last mutant, " <>
@@ -330,6 +333,9 @@ defmodule Covenant.Mutate.Runner do
          [] <- red(tests) do
       :ok
     else
+      {:error, reason} ->
+        {:error, "#{describe(mutant)} broke the VM: it stopped #{names}: #{reason}"}
+
       {app, reason} ->
         {:error,
          "#{describe(mutant)} broke the VM: it stopped #{names} and #{inspect(app)} " <>
@@ -538,40 +544,49 @@ defmodule Covenant.Mutate.Runner do
   end
 
   defp baseline(modules) do
-    {us, {:ok, tests}} = :timer.tc(fn -> run_tests(modules, :infinity, :infinity) end)
-    red = red(tests)
+    {us, ran} = :timer.tc(fn -> run_tests(modules, :infinity, :infinity) end)
 
-    cond do
-      tests == [] ->
-        {:error, "the contract test modules #{inspect(modules)} define no tests"}
+    with {:ok, tests} <- ran do
+      red = red(tests)
 
-      red != [] ->
-        {:error,
-         "the baseline is red; fix the suite before mutating:\n" <>
-           Enum.map_join(red, "\n", &"  #{&1.name} (#{&1.module}) #{&1.outcome}")}
+      cond do
+        tests == [] ->
+          {:error, "the contract test modules #{inspect(modules)} define no tests"}
 
-      true ->
-        {:ok, tests, div(us, 1000)}
+        red != [] ->
+          {:error,
+           "the baseline is red; fix the suite before mutating:\n" <>
+             Enum.map_join(red, "\n", &"  #{&1.name} (#{&1.module}) #{&1.outcome}")}
+
+        true ->
+          {:ok, tests, div(us, 1000)}
+      end
     end
   end
 
-  # The suite runs in a task and this process waits for the collector's report, so
-  # a suite that never ends (a `setup_all` that loops) is `:budget`, not a hang.
+  # The suite runs in a task, so a suite that never ends (a `setup_all` that loops) is
+  # `:budget`, not a hang; and a run that ends without the collector's report is an
+  # error, not a wait.
   @doc false
   @spec run_tests([module()], pos_integer() | :infinity, pos_integer() | :infinity) ::
-          {:ok, [entry()]} | :budget
+          {:ok, [entry()]} | {:error, String.t()} | :budget
   def run_tests(modules, max_failures, budget) do
     ExUnit.configure(max_failures: max_failures)
     task = Task.async(fn -> ExUnit.run(modules) end)
 
-    receive do
-      {:covenant_mutate_run, tests} ->
-        Task.yield(task, 5_000) || Task.shutdown(task, :brutal_kill)
-        {:ok, tests}
-    after
-      budget ->
-        Task.shutdown(task, :brutal_kill)
+    case Task.yield(task, budget) || Task.shutdown(task, :brutal_kill) do
+      {:ok, _} ->
+        receive do
+          {:covenant_mutate_run, tests} -> {:ok, tests}
+        after
+          5_000 -> {:error, "the mutant run finished but the collector reported nothing"}
+        end
+
+      nil ->
         :budget
+
+      {:exit, reason} ->
+        exit(reason)
     end
   end
 
@@ -588,6 +603,7 @@ defmodule Covenant.Mutate.Runner do
 
     case {judged, restore(file.originals)} do
       {_, {:error, reason}} -> {:error, "#{describe(mutant)}: #{reason}"}
+      {{:error, reason}, :ok} -> {:error, "#{describe(mutant)}: #{reason}"}
       {{:ok, result}, :ok} -> {:ok, %{result | replacement: nil}}
       {:budget, :ok} -> :budget
     end
