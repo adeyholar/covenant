@@ -560,10 +560,16 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
   defp drain_stdin do
     case IO.binread(:stdio, :eof) do
-      :eof -> System.halt(1)
-      {:error, _} -> System.halt(1)
+      :eof -> orphaned()
+      {:error, _} -> orphaned()
       _data -> drain_stdin()
     end
+  end
+
+  # The parent is gone: take the private copy of the project with us.
+  defp orphaned do
+    Covenant.Mutate.Runner.remove_workdir()
+    System.halt(1)
   end
 
   # A primitive is mutated only in the code its covers own by the most specific reference.

@@ -107,8 +107,8 @@ defmodule Covenant.MutateRunnerE2EContractTest do
     # the callback ran inside the worker's copy, and the cwd never went back to the project
     assert [_, in_callback] = Regex.run(~r/CWD_IN_CALLBACK (\S+)/, output)
     assert Path.basename(in_callback) =~ ~r/^covenant-mutate-/
-    assert [_, at_halt] = Regex.run(~r/CWD_AT_HALT \{:ok, "([^"]+)"\}/, output)
-    assert Path.basename(at_halt) =~ ~r/^covenant-mutate-/
+    # the copy is gone at the halt (not recreated empty), stray writers or not
+    refute File.exists?(in_callback)
     # the probe waits a second after the timeout before it halts: nothing appeared in the project
     refute File.exists?(Path.join(@project, "tmp"))
   end

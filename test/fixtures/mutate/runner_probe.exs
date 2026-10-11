@@ -15,6 +15,7 @@ plan = %{
   # after it has removed the copy; the pause lets a mutant's stray processes write
   on_timeout: fn result, mutant ->
     IO.puts("ON_TIMEOUT #{mutant.id} #{length(result.mutants)}")
+    IO.puts("LAST_VERDICT #{mutant.verdict} #{mutant.credit} #{inspect(mutant.killed_by)}")
     if System.get_env("PROBE_RAISE"), do: raise("the callback failed")
     IO.puts("CWD_IN_CALLBACK #{File.cwd!()}")
   end,
@@ -28,8 +29,12 @@ plan = %{
 IO.inspect(
   Covenant.Mutate.Runner.run(plan)
   |> then(fn
-    {:ok, r} -> {:ok, length(r.mutants)}
-    e -> e
+    {:ok, r} ->
+      IO.puts("VERDICTS #{inspect(Enum.frequencies_by(r.mutants, & &1.verdict))}")
+      {:ok, length(r.mutants)}
+
+    e ->
+      e
   end),
   label: "RESULT"
 )
