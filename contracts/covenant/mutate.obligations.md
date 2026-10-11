@@ -79,7 +79,7 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I11 — The plan and the worker results
 - **scope:** `Covenant.Mutate.plan/3`, `Covenant.Mutate.covered_by?/3`, `Covenant.Mutate.Mutant.decode/1`, `Covenant.Mutate.encode_raw/2`, `Covenant.Mutate.decode_raw/1`, `Covenant.Mutate.merge/1`
-- **must:** resolve a component to its module names and its contract test files (a primitive's are the `*_test.exs` files beside its README), or fail naming the problem (an unknown component, with the known ones; no module, or covers naming no code; no contract test file); tell whether a primitive owns a mutant by the most specific covers reference; carry a worker's results, the per-test timeout it used (`timeout_ms`) and each mutant's credit through JSON and back unchanged, answering a mutant of an unknown operator with an error naming it rather than guessing one (`Covenant.Mutate.Mutant.decode/1`); merge the workers' results by concatenating their mutants sorted by id and keeping the largest `timeout_ms`, refusing results that overlap or leave a mutant without a verdict
+- **must:** resolve a component to its module names and its contract test files (a primitive's are the `*_test.exs` files beside its README), or fail naming the problem (an unknown component, with the known ones; no module, or covers naming no code; no contract test file); tell whether a primitive owns a mutant by the most specific covers reference; carry a worker's results, the per-test timeout it used (`timeout_ms`) and each mutant's credit through JSON and back unchanged, answering a mutant of an unknown operator with an error naming it rather than guessing one (`Covenant.Mutate.Mutant.decode/1`), and `decode_raw/1` answering a results file with such a mutant `{:error, "<path>: <message>"}` for the first one, not raising; merge the workers' results by concatenating their mutants sorted by id and keeping the largest `timeout_ms`, refusing results that overlap or leave a mutant without a verdict
 - **kind:** functional
 - **status:** active
 
@@ -137,7 +137,7 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I20 — A mutant that never ends is stopped by a wall-clock budget
 - **scope:** `Covenant.Mutate.Runner.run/1`, `Covenant.Mutate.Runner.budget_ms/2`, `Covenant.Mutate.Runner.timeout_exit/0`
-- **must:** bound each run of the suite against a mutant by a progress budget: the longest it may go without finishing a test is ten times the baseline's duration, plus five seconds, plus the per-test timeout, in milliseconds (`budget_ms/2`), the timer starting over at every finished test, because a loop in `setup_all` and a test tagged `timeout: :infinity` finish nothing and are not bounded by ExUnit's per-test timeout, while many tests that each hit that timeout are finished tests and are no hang; when a mutant outruns it, run no further mutant, call the `:on_timeout` callback of the plan, from inside the private copy of the project (the working directory is the copy: the callback writes to an absolute path), with the results so far and that mutant as the last, verdict `timeout`; then remove the copy without raising, leave the working directory in a new empty directory and never restore it to the project (the mutant's processes may still run and write by a relative path), halt the VM with the status `timeout_exit/0` (3) and, when nothing halts, return an error naming the mutant
+- **must:** bound each run of the suite against a mutant by a progress budget: the longest it may go without finishing a test is ten times the baseline's duration, plus five seconds, plus the per-test timeout, in milliseconds (`budget_ms/2`), the timer starting over at every finished test, because a loop in `setup_all` and a test tagged `timeout: :infinity` finish nothing and are not bounded by ExUnit's per-test timeout, while many tests that each hit that timeout are finished tests and are no hang; when a mutant outruns it, run no further mutant, call the `:on_timeout` callback of the plan, from inside the private copy of the project (the working directory is the copy: the callback writes to an absolute path), with the results so far and that mutant as the last, verdict `timeout`, reporting a callback that raises or throws on the standard error stream and going on as if it had returned; then remove the copy without raising, leave the working directory in a new empty directory and never restore it to the project (the mutant's processes may still run and write by a relative path), halt the VM with the status `timeout_exit/0` (3) and, when nothing halts, return an error naming the mutant
 - **why:** a mutant looping inside `setup_all` hung the run forever; the first watchdog, a budget for the whole run, called eight tests that each hit the per-test timeout a hang; and killing the task that ran the suite left the mutant's own processes writing into the real project after the working directory had been restored
 - **kind:** functional
 - **status:** active
@@ -145,5 +145,19 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 ### covenant.mutate.I21 — An empty run is visible
 - **scope:** `Covenant.Mutate.Runner.run/1`
 - **must:** warn on the standard error stream, naming the module and its file, of every module to mutate in which no mutant was found, and end the run with an error when no mutant was found in any of them, instead of reporting a matrix of nothing
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I22 — The task runs every worker in a private copy and carries on past a stopped one
+- **scope:** `mix covenant.mutate`
+- **must:** run every worker in a private copy of the project, `--jobs 1` included, so that a mutant's write or delete by a relative path never touches the project; give each run its own subdirectory (`run-<random id>`) of the component's `tmp/covenant/mutate/` directory for the workers' results, written to absolute paths, and remove it after merging, so that two runs of one component at once do not clobber each other; when a worker exits with the status `Covenant.Mutate.Runner.timeout_exit/0` (3), which is not an error, read its results file, take the mutants it judged (the timed-out one last, with the verdict `timeout`, a survivor and never a kill), start a worker for the rest (`--skip m001,m002` passes the ids to the worker as `:skip`) writing to a file of its own, and repeat until a worker exits 0, then merge every file; report any other exit status as an error
+- **why:** a mutant deleted a whole project, `.git` included, under `--jobs 1`, where the worker ran in the real project; and a mutant that looped in `setup_all` stopped its worker, and with it the whole run
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I23 — The task's workers live and die with it
+- **scope:** `mix covenant.mutate`
+- **must:** start no more workers than there are mutants and warn on the standard output when `--jobs` exceeds the schedulers online; stop the other workers as soon as one fails instead of waiting for them; make a worker halt (status 1) when its standard input reaches the end, which is what happens when the task that spawned it dies, so that a worker stuck in a mutant does not run on for ever
+- **why:** a worker stuck in a mutant was found running at 98% CPU as a child of init after its parent had died
 - **kind:** functional
 - **status:** active

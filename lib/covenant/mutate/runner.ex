@@ -303,7 +303,7 @@ defmodule Covenant.Mutate.Runner do
   # abandons the directory and `halt` stops the VM. Without a `:halt` that
   # returns, no error comes back before that.
   defp expire({:timeout, result, mutant}, plan) do
-    with %{on_timeout: on_timeout} <- plan, do: on_timeout.(result, mutant)
+    with %{on_timeout: on_timeout} <- plan, do: notify(on_timeout, result, mutant)
 
     {:abandon, plan,
      {:error,
@@ -312,6 +312,20 @@ defmodule Covenant.Mutate.Runner do
   end
 
   defp expire(other, _plan), do: other
+
+  # A callback that fails must not end the run here: the abandon path (the copy
+  # removed, the cwd parked, the halt) is what keeps the mutant's processes out of
+  # the project.
+  defp notify(on_timeout, result, mutant) do
+    on_timeout.(result, mutant)
+  catch
+    kind, reason ->
+      IO.puts(
+        :stderr,
+        "covenant.mutate: the :on_timeout callback failed: " <>
+          Exception.format(kind, reason, __STACKTRACE__)
+      )
+  end
 
   @doc """
   The progress budget of one mutant's run, in ms: the longest the suite may go

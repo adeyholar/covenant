@@ -15,6 +15,7 @@ plan = %{
   # after it has removed the copy; the pause lets a mutant's stray processes write
   on_timeout: fn result, mutant ->
     IO.puts("ON_TIMEOUT #{mutant.id} #{length(result.mutants)}")
+    if System.get_env("PROBE_RAISE"), do: raise("the callback failed")
     IO.puts("CWD_IN_CALLBACK #{File.cwd!()}")
   end,
   halt: fn status ->

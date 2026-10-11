@@ -183,7 +183,8 @@ defmodule Covenant.Mutate do
   def decode_raw(path) do
     with {:ok, text} <- File.read(path),
          {:ok, %{"mutants" => mutants, "tests" => tests} = raw} when is_list(mutants) <-
-           JSON.decode(text) do
+           JSON.decode(text),
+         {:ok, mutants} <- decode_mutants(mutants, path) do
       {:ok,
        %{
          component: raw["component"],
@@ -195,12 +196,26 @@ defmodule Covenant.Mutate do
          baseline_ms: raw["baseline_ms"] || 0,
          timeout_ms: raw["timeout_ms"] || 0,
          tests: Enum.map(tests, &decode_test/1),
-         mutants: Enum.map(mutants, &Mutant.from_map/1)
+         mutants: mutants
        }}
     else
       {:ok, _} -> {:error, "#{path}: not a covenant.mutate results file"}
+      {:error, reason} when is_binary(reason) -> {:error, reason}
       {:error, reason} when is_atom(reason) -> {:error, "#{path}: #{:file.format_error(reason)}"}
       {:error, reason} -> {:error, "#{path}: invalid JSON: #{inspect(reason)}"}
+    end
+  end
+
+  defp decode_mutants(maps, path) do
+    Enum.reduce_while(maps, {:ok, []}, fn map, {:ok, acc} ->
+      case Mutant.decode(map) do
+        {:ok, mutant} -> {:cont, {:ok, [mutant | acc]}}
+        {:error, message} -> {:halt, {:error, "#{path}: #{message}"}}
+      end
+    end)
+    |> case do
+      {:ok, mutants} -> {:ok, Enum.reverse(mutants)}
+      error -> error
     end
   end
 
