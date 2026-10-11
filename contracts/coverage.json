@@ -472,11 +472,12 @@
         "covenant.mutate.I10": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 6,
           "status": "active",
           "testable": true,
           "tests": [
             "test a module is located by its source file; derived ones that cannot be are skipped, explicit ones refused",
+            "test a primitive's modules are the ones its covers name, a tree expanded when located",
             "test located modules come back sorted by name, with every reason spelled out",
             "test module names are read from inline code spans, never from fenced blocks",
             "test the Public surface section alone names the modules to mutate",
@@ -486,12 +487,13 @@
         "covenant.mutate.I11": {
           "failing": 0,
           "kind": "functional",
-          "passing": 6,
+          "passing": 7,
           "status": "active",
           "testable": true,
           "tests": [
             "test a component that names no module cannot be planned",
             "test a mutant survives to_map and from_map, whatever its verdict",
+            "test a primitive's plan takes the tests beside its README, and covered_by? applies the most specific covers",
             "test a worker's results survive JSON and merging puts the mutants in id order",
             "test every outcome and the defaults of a worker's results survive JSON",
             "test from_map takes the index when it is given",
@@ -665,12 +667,13 @@
         "covenant.mutate.I8": {
           "failing": 0,
           "kind": "functional",
-          "passing": 6,
+          "passing": 7,
           "status": "active",
           "testable": true,
           "tests": [
             "test a YAML error is reported at its own line, a flow list gets line 1",
             "test a missing or empty file is no annotations; the file lives beside the component's contract",
+            "test a primitive's survivors file is the mutants.md beside its README, read as declarations",
             "test a valid survivors file is a list of annotations with their line",
             "test every kind of bad entry is reported as file:line: message",
             "test find and matches? compare location, operator and mutation",
@@ -680,10 +683,12 @@
         "covenant.mutate.I9": {
           "failing": 0,
           "kind": "functional",
-          "passing": 5,
+          "passing": 7,
           "status": "active",
           "testable": true,
           "tests": [
+            "test a declaration a test kills is contradicted, and one matching no survivor is unmatched",
+            "test a declaration matches the survivors of its unit by from and to, or all of them as a wildcard",
             "test a survivor inside the target of an active exception is a decision-hole without an entry",
             "test an annotation matching no mutant is moved, one matching only a killed mutant is stale",
             "test an annotation sorts the survivor it names by location, operator and, when given, mutation",
