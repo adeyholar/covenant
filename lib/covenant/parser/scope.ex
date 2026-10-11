@@ -126,7 +126,7 @@ defmodule Covenant.Parser.Scope do
          _line
        )
        when is_binary(module) and is_binary(function) do
-    {:ok, {:module, Module.concat([module]), String.to_atom(function)}}
+    {:ok, {:module, module, function}}
   end
 
   defp counter(_, label, file, line) do
