@@ -14,13 +14,31 @@ defmodule Covenant.Mutate.Workdir do
   The same directory keeps parallel workers from sharing ExUnit's `:tmp_dir`
   paths (`tmp/<module>/<test>` below the working directory).
 
-  Not copied: a directory named `_build`, `deps` or `node_modules`, at any
-  depth (Phoenix's `assets/node_modules`, an umbrella app's `_build`), is a
-  symlink to the project's (too big to copy; `File.rm_rf!/1` does not follow a
+  Not copied: a directory named `node_modules`, at any depth, and a directory
+  named `_build` or `deps` whose parent directory holds a `mix.exs` (a Mix
+  build or dependency tree: an umbrella app's `_build`, the root's `deps`;
+  a `test/fixtures/deps` of plain data is copied like any directory), is a
+  symlink to the project's (too big to copy; `File.rm_rf/1` does not follow a
   symlink, but a write through one reaches the project); `.git` and
   `.elixir_ls`, directory or file, are left out at any depth; the top-level
-  `tmp` is a fresh, empty directory; a symlink is copied as a symlink, never
-  followed.
+  `tmp` is a fresh, empty directory.
+
+  Symlinks are copied as symlinks, never followed, and never left pointing into
+  the project: an absolute link whose target lies under the project root is
+  rewritten to the same place under the workdir; a relative link that resolves
+  outside the root (it would dangle in the copy) becomes an absolute link to
+  the original target; a relative link that stays inside the root is copied
+  as it is.
+
+  Everything else is copied, ignored and untracked files included (the cost is
+  about one copy of the tree per worker). `.git` is left out, so a test that
+  shells out to `git` sees no repository and its baseline will say so.
+
+  An entry that cannot be read (`:eacces`: a mode-000 `data/pg` of an
+  in-project Postgres volume, say) is left out with a warning on the standard
+  error stream; any other failure removes the half-built directory and
+  re-raises. `remove/1` makes the directories of the copy writable first (a
+  test may leave a read-only one) and never raises.
 
   What this does **not** protect: absolute paths, paths reached through the
   `_build` and `deps` links, and paths derived from the project's location
@@ -30,7 +48,6 @@ defmodule Covenant.Mutate.Workdir do
   would run anyway, from a clean working tree.
   """
 
-  @linked ~w(_build deps node_modules)
   @left_out ~w(.git .elixir_ls)
 
   @doc """
@@ -45,32 +62,40 @@ defmodule Covenant.Mutate.Workdir do
     dir = Path.join(base, "covenant-mutate-#{System.pid()}-#{suffix}")
 
     File.mkdir!(dir)
-    File.chmod!(dir, 0o700)
-    File.mkdir!(Path.join(dir, "tmp"))
 
-    for entry <- File.ls!(root), entry not in ["tmp" | @left_out] do
-      copy(Path.join(root, entry), Path.join(dir, entry))
+    try do
+      File.chmod!(dir, 0o700)
+      File.mkdir!(Path.join(dir, "tmp"))
+
+      for entry <- File.ls!(root), entry not in ["tmp" | @left_out] do
+        copy(Path.join(root, entry), Path.join(dir, entry), root, dir)
+      end
+
+      dir
+    rescue
+      error ->
+        remove(dir)
+        reraise error, __STACKTRACE__
     end
-
-    dir
   end
 
-  # Directories named like a build or dependency tree are linked, at any depth; a
-  # symlink is copied as a symlink, never followed; what is not a directory, a link
-  # or a regular file (a socket, say) is left out.
-  defp copy(source, target) do
+  # Directories named like a build or dependency tree are linked; a symlink is copied
+  # as a symlink (see `link_target/4`), never followed; what is not a directory, a link
+  # or a regular file (a socket, say) is left out; an entry the OS will not let us read
+  # is left out with a warning.
+  defp copy(source, target, root, dir) do
     case File.lstat!(source) do
       %File.Stat{type: :symlink} ->
-        File.ln_s!(File.read_link!(source), target)
+        File.ln_s!(link_target(source, File.read_link!(source), root, dir), target)
 
       %File.Stat{type: :directory} ->
-        if Path.basename(source) in @linked do
+        if linked?(source) do
           File.ln_s!(source, target)
         else
           File.mkdir!(target)
 
           for entry <- File.ls!(source), entry not in @left_out do
-            copy(Path.join(source, entry), Path.join(target, entry))
+            copy(Path.join(source, entry), Path.join(target, entry), root, dir)
           end
         end
 
@@ -80,6 +105,50 @@ defmodule Covenant.Mutate.Workdir do
       _ ->
         :ok
     end
+  rescue
+    error in [File.Error, File.CopyError] ->
+      if error.reason == :eacces do
+        IO.puts(:stderr, "warning: mutate workdir: left out #{source}: permission denied")
+        File.rm_rf(target)
+        :ok
+      else
+        reraise error, __STACKTRACE__
+      end
+  end
+
+  defp linked?(source) do
+    case Path.basename(source) do
+      "node_modules" ->
+        true
+
+      name when name in ["_build", "deps"] ->
+        File.regular?(Path.join(Path.dirname(source), "mix.exs"))
+
+      _ ->
+        false
+    end
+  end
+
+  defp link_target(source, target, root, dir) do
+    if Path.type(target) == :absolute do
+      case under(target, root) do
+        {:ok, relative} -> Path.join(dir, relative)
+        :error -> target
+      end
+    else
+      resolved = Path.expand(target, Path.dirname(source))
+      if under(resolved, root) == :error, do: resolved, else: target
+    end
+  end
+
+  defp under(path, root) do
+    path = Path.expand(path)
+
+    cond do
+      path == root -> {:ok, ""}
+      String.starts_with?(path, root <> "/") -> {:ok, Path.relative_to(path, root)}
+      true -> :error
+    end
   end
 
   defp random_suffix,
@@ -88,7 +157,9 @@ defmodule Covenant.Mutate.Workdir do
   @doc """
   Removes the directory, if it is still there (a mutant may have deleted it).
   It never follows a symlink: the links go, never what they point at, whether
-  they are at the top or inside a copied entry.
+  they are at the top or inside a copied entry. A directory a test left
+  read-only is made writable first, and nothing raises: what cannot be removed
+  is reported on the standard error stream.
   """
   @spec remove(Path.t()) :: :ok
   def remove(dir) do
@@ -96,12 +167,53 @@ defmodule Covenant.Mutate.Workdir do
       for entry <- entries,
           path = Path.join(dir, entry),
           match?({:ok, %File.Stat{type: :symlink}}, File.lstat(path)) do
-        File.rm!(path)
+        File.rm(path)
       end
 
-      File.rm_rf!(dir)
+      make_writable(dir)
+
+      case File.rm_rf(dir) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason, path} ->
+          IO.puts(
+            :stderr,
+            "warning: mutate workdir: could not remove #{path}: #{:file.format_error(reason)}"
+          )
+      end
     end
 
+    :ok
+  end
+
+  # `chmod u+rwx` on every real directory of the tree; a link is never followed.
+  defp make_writable(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :directory, mode: mode}} ->
+        File.chmod(path, Bitwise.bor(mode, 0o700))
+
+        with {:ok, entries} <- File.ls(path) do
+          Enum.each(entries, &make_writable(Path.join(path, &1)))
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  @doc """
+  Removes the directory like `remove/1`, then leaves the process's working
+  directory in a new, empty directory at the same path: a stray process of a
+  mutant that still writes by a relative path fails with `:enoent` instead of
+  writing anywhere that matters, and the VM still has a working directory.
+  """
+  @spec abandon(Path.t()) :: :ok
+  def abandon(dir) do
+    remove(dir)
+    File.mkdir_p(dir)
+    File.chmod(dir, 0o500)
+    File.cd(dir)
     :ok
   end
 
