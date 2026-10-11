@@ -145,7 +145,7 @@ Parsing is strict. A malformed obligation block is an error at its line, never s
 - an unclosed code fence
 - a known field outside a block, or misspelled (`**Record:**`, `**record**:`)
 - a repeated field
-- a Markdown or YAML file under `contracts/` that Covenant doesn't read, such as a misnamed `x.obligation.md` or one in a nested directory (`README.md` files, `coverage*.json` and `*.survivors.yml` are fine)
+- a file under `contracts/` named like a Contract file (its name contains obligation, intent, decision, survivor or scope) that Covenant doesn't read, such as a misnamed `x.obligation.md`, an `x.obligations.markdown`, or one in a nested directory. Other files there, such as notes and ADRs, are prose and are ignored
 
 `kind` and `status` take one value; nothing after them continues them. A YAML contract file, front matter included, is rejected for multiple documents, `<<` merge keys, repeated keys and fields of the wrong type. A leading BOM is fine, and so are bold-label bullets in prose.
 
@@ -506,7 +506,7 @@ config :covenant,
   case_modules: []                         # your wrappers around Covenant.Case, for --static and regen
 ```
 
-Covenant resolves paths from the project root, never from the directory `mix` runs in. The root is the Mix project's directory, or the umbrella's for an app of one. It is never an ancestor of the project, and `--contracts docs/contracts` doesn't move it. In an umbrella, set `contracts_dir: Path.expand("../contracts", __DIR__)` in `config/config.exs` and `test_paths: ["apps/*/test/contract"]`. Run from inside an app, `mix covenant.check` runs the tests from the umbrella root, so each app's tests run in that app's own VM; each app's results are written separately and merged. [`test/fixtures/umbrella_project`](https://github.com/tools4imps/covenant/tree/main/test/fixtures/umbrella_project) runs the tasks from inside an app.
+Covenant resolves paths from the project root, never from the directory `mix` runs in. The root is the Mix project's directory, or the umbrella's for an app of one. It is never an ancestor of the project, and `--contracts docs/contracts` doesn't move it. When `contracts/` lives above the Mix project (a poncho layout, or a Mix project below the repository root), set `contracts_dir: "../contracts"`, or set the root with `COVENANT_ROOT` or `config :covenant, root: ...`. In an umbrella, set `contracts_dir: Path.expand("../contracts", __DIR__)` in `config/config.exs` and `test_paths: ["apps/*/test/contract"]`. Run from inside an app, `mix covenant.check` runs the tests from the umbrella root, so each app's tests run in that app's own VM; each app's results are written separately and merged. [`test/fixtures/umbrella_project`](https://github.com/tools4imps/covenant/tree/main/test/fixtures/umbrella_project) runs the tasks from inside an app.
 
 `--static` and regen read `use Covenant.Case, component: "..."` literally. If your contract tests `use MyApp.ContractCase` instead, list it in `case_modules`; otherwise `--static` reports the module as one it can't read. Both follow the project's `test_pattern`.
 
