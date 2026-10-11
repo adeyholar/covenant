@@ -19,7 +19,7 @@ problem anchored to a file and line.
 
 ### covenant.contract.I2 — Obligation blocks are read in the convention's shape
 - **scope:** `Covenant.Parser.Markdown`
-- **must:** read `### <id> — <title>` (em dash, en dash or hyphen) followed by `- **field:** value` lines, joining indented continuation lines, keeping unknown fields, stripping backticks from `record` and `target`, ignoring headings and fields inside fenced code, in every form
+- **must:** read `### <id> — <title>` (em dash, en dash or hyphen) followed by `- **field:** value` lines, joining indented continuation lines, keeping unknown fields, stripping backticks from `record` and `target`, ignoring headings and fields inside fenced code (a fence closes only with the same character and at least the same length), ignoring a leading byte-order mark, in every form
 - **kind:** functional
 - **status:** active
 
@@ -64,4 +64,10 @@ problem anchored to a file and line.
 - **must:** report an obligation whose `record`, a record whose `invariant`, `superseded_by` or `depends_on`, and a ceiling whose `record` names something that does not exist, each at its own line, and report nothing for a consistent Contract
 - **kind:** functional
 - **record:** references-checked-at-check-time
+- **status:** active
+
+### covenant.contract.I10 — A malformed obligation block is rejected, never skipped
+- **scope:** `Covenant.Parser.Markdown`
+- **must:** fail, at the offending line, an obligation-shaped heading (`<id>.I<n> — <title>`) at any level but `###`, an obligation heading indented by one to three spaces, a code fence never closed, a field line outside an obligation block, and a field repeated within one block; an obligation must not vanish or change because of how its neighbours are written
+- **kind:** functional
 - **status:** active

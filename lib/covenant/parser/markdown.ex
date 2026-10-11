@@ -42,10 +42,14 @@ defmodule Covenant.Parser.Markdown do
   @field ~r/^[ \t]*[-*][ \t]+\*\*([a-z_]+):\*\*[ \t]*(.*)$/
   @block_heading ~r/^(\S+)[ \t]+(?:—|–|--|-)[ \t]+(.+)$/
   @block_id_like ~r/^[a-z0-9_.]+\.I[0-9]+$/
-  @fence ~r/^[ \t]*(```|~~~)/
+  @fence ~r/^[ \t]*(`{3,}|~{3,})(.*)$/
+  @indented_heading ~r/^ {1,3}(\#{1,6})[ \t]+(.+?)[ \t]*\#*[ \t]*$/
+  @id_tail ~r/(^|\.)I[0-9]+$/
 
   @typep token ::
            {:heading, 1..6, String.t(), pos_integer()}
+           | {:indented_heading, 1..6, String.t(), pos_integer()}
+           | {:unclosed_fence, pos_integer()}
            | {:field, String.t(), String.t(), pos_integer()}
            | {:text, String.t(), pos_integer()}
 
@@ -73,6 +77,8 @@ defmodule Covenant.Parser.Markdown do
   @spec parse(String.t(), Path.t(), String.t(), Component.form()) ::
           {:ok, Component.t()} | {:error, [Error.t()]}
   def parse(text, file, component_id, form) do
+    text = String.trim_leading(text, "\uFEFF")
+
     {meta, meta_errors, lines} =
       text |> String.split(["\r\n", "\n"]) |> Enum.with_index(1) |> front_matter(file)
 
@@ -183,16 +189,31 @@ defmodule Covenant.Parser.Markdown do
 
   @spec tokenize([{String.t(), pos_integer()}]) :: [token()]
   defp tokenize(lines) do
-    {tokens, _in_fence?} =
-      Enum.reduce(lines, {[], false}, fn {line, n}, {acc, in_fence?} ->
-        cond do
-          Regex.match?(@fence, line) -> {[{:text, line, n} | acc], not in_fence?}
-          in_fence? -> {[{:text, line, n} | acc], true}
-          true -> {[classify(line, n) | acc], false}
+    {tokens, fence} =
+      Enum.reduce(lines, {[], nil}, fn {line, n}, {acc, fence} ->
+        case {fence, Regex.run(@fence, line)} do
+          {nil, [_, marker, info]} ->
+            if String.starts_with?(marker, "`") and String.contains?(info, "`"),
+              do: {[classify(line, n) | acc], nil},
+              else: {[{:text, line, n} | acc], {String.first(marker), String.length(marker), n}}
+
+          {{char, size, _}, [_, marker, info]} when binary_part(marker, 0, 1) == char ->
+            if String.length(marker) >= size and String.trim(info) == "",
+              do: {[{:text, line, n} | acc], nil},
+              else: {[{:text, line, n} | acc], fence}
+
+          {nil, _} ->
+            {[classify(line, n) | acc], nil}
+
+          {_, _} ->
+            {[{:text, line, n} | acc], fence}
         end
       end)
 
-    Enum.reverse(tokens)
+    case fence do
+      nil -> Enum.reverse(tokens)
+      {_, _, n} -> Enum.reverse([{:unclosed_fence, n} | tokens])
+    end
   end
 
   defp classify(line, n) do
@@ -201,12 +222,23 @@ defmodule Covenant.Parser.Markdown do
         [_, hashes, title] = match
         {:heading, String.length(hashes), title, n}
 
+      (match = Regex.run(@indented_heading, line)) && obligation_shaped?(Enum.at(match, 2)) ->
+        [_, hashes, title] = match
+        {:indented_heading, String.length(hashes), title, n}
+
       match = Regex.run(@field, line) ->
         [_, key, value] = match
         {:field, key, String.trim(value), n}
 
       true ->
         {:text, line, n}
+    end
+  end
+
+  defp obligation_shaped?(title) do
+    case Regex.run(@block_heading, title) do
+      [_, id, _] -> Regex.match?(@id_tail, id)
+      nil -> false
     end
   end
 
@@ -248,50 +280,104 @@ defmodule Covenant.Parser.Markdown do
   defp obligations(tokens, component_id, file, form) do
     tokens
     |> blocks()
-    |> Enum.reduce({[], [], %{}}, fn {title, n, body}, {obls, errors, seen} ->
-      case block(title, n, body, component_id, file, form) do
-        :skip ->
+    |> Enum.reduce({[], heading_errors(tokens, file), %{}}, fn
+      {:stray, key, n}, {obls, errors, seen} ->
+        message = "field `#{key}` is outside an obligation block"
+        {obls, [Error.new(file, n, message) | errors], seen}
+
+      {title, n, body}, {obls, errors, seen} ->
+        reduce_block(
+          block(title, n, body, component_id, file, form),
+          n,
+          file,
           {obls, errors, seen}
-
-        {:ok, %Obligation{id: id} = obligation} ->
-          case Map.fetch(seen, id) do
-            {:ok, first} ->
-              message = "obligation `#{id}` is declared twice (first at line #{first})"
-              {obls, [Error.new(file, n, message) | errors], seen}
-
-            :error ->
-              {[obligation | obls], errors, Map.put(seen, id, n)}
-          end
-
-        {:error, new_errors} ->
-          {obls, new_errors ++ errors, seen}
-      end
+        )
     end)
-    |> then(fn {obls, errors, _} -> {Enum.reverse(obls), Enum.reverse(errors)} end)
+    |> then(fn {obls, errors, _} ->
+      {Enum.reverse(obls), errors |> Enum.reverse() |> Enum.sort_by(& &1.line)}
+    end)
+  end
+
+  # Problems with how a block is introduced, found whatever the block holds.
+  defp heading_errors(tokens, file) do
+    tokens
+    |> Enum.flat_map(fn
+      {:heading, level, title, n} when level != 3 ->
+        if obligation_shaped?(title) do
+          id = title |> String.split() |> hd()
+
+          message =
+            "obligation heading `#{id}` must be a `###` heading, found `#{String.duplicate("#", level)}`"
+
+          [Error.new(file, n, message)]
+        else
+          []
+        end
+
+      {:indented_heading, _, title, n} ->
+        id = title |> String.split() |> hd()
+        [Error.new(file, n, "obligation heading `#{id}` must start in column 1")]
+
+      {:unclosed_fence, n} ->
+        [Error.new(file, n, "code fence opened here is never closed")]
+
+      _ ->
+        []
+    end)
+    |> Enum.reverse()
+  end
+
+  defp reduce_block(result, n, file, {obls, errors, seen}) do
+    case result do
+      :skip ->
+        {obls, errors, seen}
+
+      {:ok, %Obligation{id: id} = obligation} ->
+        case Map.fetch(seen, id) do
+          {:ok, first} ->
+            message = "obligation `#{id}` is declared twice (first at line #{first})"
+            {obls, [Error.new(file, n, message) | errors], seen}
+
+          :error ->
+            {[obligation | obls], errors, Map.put(seen, id, n)}
+        end
+
+      {:error, new_errors} ->
+        {obls, new_errors ++ errors, seen}
+    end
   end
 
   # Every `###` heading with the tokens that follow it up to the next heading.
   defp blocks(tokens) do
     tokens
-    |> Enum.chunk_while(nil, &chunk_block/2, &{:cont, &1, nil})
+    |> Enum.chunk_while(nil, &chunk_block/2, &{:cont, emit(&1), nil})
     |> Enum.reject(&is_nil/1)
   end
 
-  defp chunk_block({:heading, 3, title, n}, current), do: {:cont, current, {title, n, []}}
-  defp chunk_block({:heading, _, _, _}, current), do: {:cont, current, nil}
-  defp chunk_block(_token, nil), do: {:cont, nil}
+  defp chunk_block({:heading, 3, title, n}, current), do: {:cont, emit(current), {title, n, []}}
+
+  defp chunk_block({:heading, _, title, _}, current) do
+    {:cont, emit(current), if(obligation_shaped?(title), do: :ignored)}
+  end
+
+  defp chunk_block({:indented_heading, _, _, _}, current), do: {:cont, emit(current), :ignored}
+  defp chunk_block({:field, key, _, n}, nil), do: {:cont, {:stray, key, n}, nil}
+  defp chunk_block(_token, current) when current in [nil, :ignored], do: {:cont, current}
 
   defp chunk_block(token, {title, n, body}), do: {:cont, {title, n, [token | body]}}
 
+  defp emit(block) when is_tuple(block), do: block
+  defp emit(_), do: nil
+
   defp block(title, n, body_rev, component_id, file, form) do
     body = Enum.reverse(body_rev)
-    fields = fields(body)
+    {fields, repeats} = fields(body)
 
     case Regex.run(@block_heading, title) do
       [_, id, block_title] ->
         cond do
           Regex.match?(@block_id_like, id) ->
-            build(id, String.trim(block_title), n, fields, component_id, file, form)
+            build(id, String.trim(block_title), n, {fields, repeats}, component_id, file, form)
 
           fields == %{} ->
             :skip
@@ -312,26 +398,33 @@ defmodule Covenant.Parser.Markdown do
 
   # `- **key:** value` lines; an indented line directly after a field continues it.
   defp fields(tokens) do
-    tokens
-    |> Enum.reduce({%{}, nil}, fn
-      {:field, key, value, n}, {acc, _} ->
-        {Map.put(acc, key, {value, n}), key}
+    {fields, _key, repeats} =
+      Enum.reduce(tokens, {%{}, nil, []}, fn
+        {:field, key, value, n}, {acc, _, repeats} ->
+          repeats =
+            case acc do
+              %{^key => {_, first}} -> [{key, first, n} | repeats]
+              _ -> repeats
+            end
 
-      {:text, line, _}, {acc, key} when is_binary(key) ->
-        if Regex.match?(~r/^[ \t]{2,}\S/, line) do
-          {value, n} = acc[key]
-          {Map.put(acc, key, {value <> " " <> String.trim(line), n}), key}
-        else
-          {acc, nil}
-        end
+          {Map.put_new(acc, key, {value, n}), key, repeats}
 
-      _, {acc, _} ->
-        {acc, nil}
-    end)
-    |> elem(0)
+        {:text, line, _}, {acc, key, repeats} when is_binary(key) ->
+          if Regex.match?(~r/^[ \t]{2,}\S/, line) do
+            {value, n} = acc[key]
+            {Map.put(acc, key, {value <> " " <> String.trim(line), n}), key, repeats}
+          else
+            {acc, nil, repeats}
+          end
+
+        _, {acc, _, repeats} ->
+          {acc, nil, repeats}
+      end)
+
+    {fields, Enum.reverse(repeats)}
   end
 
-  defp build(id, title, n, fields, component_id, file, form) do
+  defp build(id, title, n, {fields, repeats}, component_id, file, form) do
     value = fn key -> fields |> Map.get(key) |> maybe(&elem(&1, 0)) end
     line = fn key -> fields |> Map.get(key) |> maybe(&elem(&1, 1)) end
     kind_name = value.("kind")
@@ -340,7 +433,11 @@ defmodule Covenant.Parser.Markdown do
     status = status_name && Obligation.parse_status(status_name)
 
     errors =
-      []
+      repeats
+      |> Enum.map(fn {key, first, line} ->
+        Error.new(file, line, "obligation `#{id}` repeats `#{key}` (first at line #{first})")
+      end)
+      |> Enum.reverse()
       |> check(
         not Obligation.valid_id?(id) or Obligation.component_of(id) != component_id,
         file,

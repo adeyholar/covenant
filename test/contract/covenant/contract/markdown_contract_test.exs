@@ -330,6 +330,104 @@ defmodule Covenant.Contract.MarkdownContractTest do
     end
   end
 
+  describe "malformed obligation blocks are rejected, never skipped" do
+    defp intent, do: ContractBuilder.heavy_intent()
+
+    @tag obligation: "covenant.contract.I10"
+    test "an id-shaped heading at the wrong level is an error" do
+      text = String.replace(intent(), "### demo.widget.I2", "#### demo.widget.I2")
+
+      assert messages(parse(text)) == [
+               "demo/widget.intent.md:34: obligation heading `demo.widget.I2` must be a `###` heading, found `####`"
+             ]
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "an obligation heading indented by one to three spaces is an error" do
+      for indent <- [" ", "  ", "   "] do
+        text = String.replace(intent(), "### demo.widget.I2", indent <> "### demo.widget.I2")
+
+        assert messages(parse(text)) == [
+                 "demo/widget.intent.md:34: obligation heading `demo.widget.I2` must start in column 1"
+               ]
+      end
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "an indented block's fields are not merged into the block above" do
+      text =
+        intent()
+        |> String.replace("### demo.widget.I2", "  ### I2")
+        |> String.replace("- **status:** retired", "- **status:** active")
+
+      assert Enum.any?(messages(parse(text)), &(&1 =~ ":34: obligation heading `I2`"))
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "a code fence that is never closed is an error at its opening line" do
+      text = String.replace(intent(), "## Decisions\n", "## Decisions\n\n```\n")
+
+      assert "demo/widget.intent.md:43: code fence opened here is never closed" in messages(
+               parse(text)
+             )
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "a fence closes only with the same character and at least the same length" do
+      longer =
+        String.replace(
+          intent(),
+          "## Orderings\n",
+          "## Orderings\n\n````\n```\n## Not a section\n````\n"
+        )
+
+      assert {:ok, component} = parse(longer)
+      refute Enum.any?(component.sections, &(&1.title == "Not a section"))
+
+      mixed =
+        String.replace(
+          intent(),
+          "## Orderings\n",
+          "## Orderings\n\n```\n~~~\n## Not a section\n```\n"
+        )
+
+      assert {:ok, component} = parse(mixed)
+      refute Enum.any?(component.sections, &(&1.title == "Not a section"))
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "a field line outside any obligation block is an error" do
+      text = String.replace(intent(), "## Decisions\n", "## Decisions\n\n- **status:** retired\n")
+
+      assert [message] = messages(parse(text))
+
+      assert message =~
+               ~r/^demo\/widget.intent.md:\d+: field `status` is outside an obligation block$/
+    end
+
+    @tag obligation: "covenant.contract.I10"
+    test "a field repeated in one block is an error at the repeat" do
+      text =
+        String.replace(
+          intent(),
+          "- **status:** retired",
+          "- **status:** active\n- **status:** retired"
+        )
+
+      assert messages(parse(text)) == [
+               "demo/widget.intent.md:40: obligation `demo.widget.I2` repeats `status` (first at line 39)"
+             ]
+    end
+
+    @tag obligation: "covenant.contract.I2"
+    test "a leading byte-order mark does not hide the front matter" do
+      text = "\uFEFF---\nmodules: [Demo.Widget]\n---\n" <> intent()
+
+      assert {:ok, component} = parse(text)
+      assert component.meta == %{"modules" => ["Demo.Widget"]}
+    end
+  end
+
   @tag obligation: "covenant.contract.I7"
   test "parse_file reports an unreadable file" do
     assert {:error, [%Error{file: "nope/missing.intent.md", line: nil, message: message}]} =
