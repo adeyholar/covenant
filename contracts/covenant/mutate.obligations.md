@@ -66,7 +66,7 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I9 — Every survivor is sorted and every annotation is current
 - **scope:** `Covenant.Mutate.Survivors.find/2`, `Covenant.Mutate.Matrix.build/2`
-- **must:** match an annotation to a survivor by `at` and `operator`, and by `mutation` when the annotation gives one; sort an unannotated survivor inside the target of an active exception `decision-hole`; report every other unannotated survivor or timeout as a problem naming the mutant; report an annotation that matches no mutant at all as moved or changed, and one that matches only a killed mutant as stale; fail on nothing else
+- **must:** match an annotation to a survivor by `at` and `operator`, and by `mutation` when the annotation gives one; sort an unannotated survivor inside the target of an active exception `decision-hole`; report every other unannotated survivor or timeout as a problem naming the mutant; report an annotation that matches no mutant at all as moved or changed, and one that matches only a killed mutant as stale (now killed) or only an invalid one as stale (it does not compile); fail on nothing else
 - **kind:** functional
 - **status:** active
 
@@ -77,8 +77,8 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 - **status:** active
 
 ### covenant.mutate.I11 — The plan and the worker results
-- **scope:** `Covenant.Mutate.plan/3`, `Covenant.Mutate.encode_raw/2`, `Covenant.Mutate.decode_raw/1`, `Covenant.Mutate.merge/1`
-- **must:** resolve a component to its module names and its contract test files, or fail naming the problem (an unknown component, with the known ones; no module; no contract test file); carry a worker's results, the per-test timeout it used (`timeout_ms`) and each mutant's credit through JSON and back unchanged; merge the workers' results by concatenating their mutants sorted by id and keeping the largest `timeout_ms`, refusing results that overlap or leave a mutant without a verdict
+- **scope:** `Covenant.Mutate.plan/3`, `Covenant.Mutate.Mutant.decode/1`, `Covenant.Mutate.encode_raw/2`, `Covenant.Mutate.decode_raw/1`, `Covenant.Mutate.merge/1`
+- **must:** resolve a component to its module names and its contract test files, or fail naming the problem (an unknown component, with the known ones; no module; no contract test file); carry a worker's results, the per-test timeout it used (`timeout_ms`) and each mutant's credit through JSON and back unchanged, answering a mutant of an unknown operator with an error naming it rather than guessing one (`Covenant.Mutate.Mutant.decode/1`); merge the workers' results by concatenating their mutants sorted by id and keeping the largest `timeout_ms`, refusing results that overlap or leave a mutant without a verdict
 - **kind:** functional
 - **status:** active
 

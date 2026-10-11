@@ -634,6 +634,21 @@ defmodule Covenant.MutateContractTest do
     assert [%{sort: "timeout"}] = timed_out.survivors
   end
 
+  @tag obligation: "covenant.mutate.I11"
+  test "a mutant with an unknown operator is an error, not a boolean_flip" do
+    assert {:ok, %Mutant{operator: :guard_removal}} =
+             Mutant.decode(%{"operator" => "guard_removal"})
+
+    for map <- [%{"id" => "m007", "operator" => "frobnicate"}, %{"id" => "m008"}] do
+      assert {:error, message} = Mutant.decode(map)
+
+      assert message =~
+               "mutant #{inspect(map["id"])}: unknown operator #{inspect(map["operator"])}"
+
+      assert_raise ArgumentError, message, fn -> Mutant.from_map(map) end
+    end
+  end
+
   @tag obligation: "covenant.mutate.I9"
   test "an unannotated survivor or timeout is a problem naming the mutant", %{counter: counter} do
     matrix = build(counter, [mutant("m001", :survived), mutant("m002", :timeout, line: 9)], [])
@@ -672,8 +687,10 @@ defmodule Covenant.MutateContractTest do
 
     invalid = build(counter, [mutant("m001", :invalid)], [annotation([])])
 
-    assert [%{message: "annotation for lib/x.ex:4:7 integer_shift (m001) is stale" <> _}] =
-             invalid.problems
+    assert [%{message: message}] = invalid.problems
+
+    assert message ==
+             "annotation for lib/x.ex:4:7 integer_shift (m001) is stale: that mutant is invalid (it does not compile) — delete it"
   end
 
   @tag obligation: "covenant.mutate.I9"
@@ -1276,8 +1293,8 @@ defmodule Covenant.MutateContractTest do
 
   @tag obligation: "covenant.mutate.I11"
   test "from_map takes the index when it is given" do
-    assert Mutant.from_map(%{"index" => 7}).index == 7
-    assert Mutant.from_map(%{}).index == 0
+    assert Mutant.from_map(%{"operator" => "integer_shift", "index" => 7}).index == 7
+    assert Mutant.from_map(%{"operator" => "integer_shift"}).index == 0
   end
 
   @tag obligation: "covenant.mutate.I8"
@@ -1564,16 +1581,19 @@ defmodule Covenant.MutateContractTest do
              |> Map.fetch!(:operator) == operator
     end
 
-    assert Mutant.from_map(%{"verdict" => "weird"}).verdict == nil
-    assert Mutant.from_map(%{}).killed_by == []
-    assert Mutant.from_map(%{}).timeouts == []
+    assert Mutant.from_map(%{"operator" => "integer_shift", "verdict" => "weird"}).verdict == nil
+    assert Mutant.from_map(%{"operator" => "integer_shift"}).killed_by == []
+    assert Mutant.from_map(%{"operator" => "integer_shift"}).timeouts == []
 
     assert Mutant.to_map(mutant("m001", :killed, credit: :partial))["credit"] == "partial"
     assert Mutant.to_map(mutant("m001", :killed))["credit"] == "exact"
-    assert Mutant.from_map(%{"credit" => "partial"}).credit == :partial
-    assert Mutant.from_map(%{"credit" => "exact"}).credit == :exact
-    assert Mutant.from_map(%{"credit" => "weird"}).credit == :exact
-    assert Mutant.from_map(%{}).credit == :exact
+
+    assert Mutant.from_map(%{"operator" => "integer_shift", "credit" => "partial"}).credit ==
+             :partial
+
+    assert Mutant.from_map(%{"operator" => "integer_shift", "credit" => "exact"}).credit == :exact
+    assert Mutant.from_map(%{"operator" => "integer_shift", "credit" => "weird"}).credit == :exact
+    assert Mutant.from_map(%{"operator" => "integer_shift"}).credit == :exact
   end
 
   @tag obligation: "covenant.mutate.I2"
@@ -1624,7 +1644,11 @@ defmodule Covenant.MutateContractTest do
               all: 0
             }} = Mutate.decode_raw(path)
 
-    File.write!(path, ~s({"tests": [], "mutants": [{"id": "m1"}, {"id": "m2"}]}))
+    File.write!(
+      path,
+      ~s({"tests": [], "mutants": [{"id": "m1", "operator": "integer_shift"}, {"id": "m2", "operator": "integer_shift"}]})
+    )
+
     assert {:ok, %{all: 2, files: [], modules: []}} = Mutate.decode_raw(path)
 
     File.write!(path, ~s({"tests": [], "mutants": 5}))

@@ -244,22 +244,28 @@ defmodule Covenant.Mutate.Matrix do
             "annotation for #{annotation.at} #{annotation.operator} matches no mutant; the code moved or the mutation changed — delete or update it"
           )
 
-        %Mutant{id: id} when annotation.unit != nil ->
+        %Mutant{id: id, verdict: verdict} when annotation.unit != nil ->
           Error.new(
             annotation.file,
             annotation.line,
-            "declaration `#{declared(annotation)}` (#{id}) is contradicted: a Contract test kills that mutant — delete it"
+            "declaration `#{declared(annotation)}` (#{id}) is contradicted: #{why_gone(verdict)} — delete it"
           )
 
-        %Mutant{id: id} ->
+        %Mutant{id: id, verdict: verdict} ->
           Error.new(
             annotation.file,
             annotation.line,
-            "annotation for #{annotation.at} #{annotation.operator} (#{id}) is stale: that mutant is now killed — delete it"
+            "annotation for #{annotation.at} #{annotation.operator} (#{id}) is stale: that mutant is #{now_gone(verdict)} — delete it"
           )
       end
     end
   end
+
+  defp why_gone(:invalid), do: "that mutant does not compile, so it cannot survive"
+  defp why_gone(_), do: "a Contract test kills that mutant"
+
+  defp now_gone(:invalid), do: "invalid (it does not compile)"
+  defp now_gone(_), do: "now killed"
 
   defp declared(%Annotation{unit: unit, from: nil}), do: "#{unit}: *"
   defp declared(%Annotation{unit: unit, from: from, to: to}), do: "#{unit}: #{from} -> #{to}"
