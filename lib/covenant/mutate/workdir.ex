@@ -20,8 +20,13 @@ defmodule Covenant.Mutate.Workdir do
   a `test/fixtures/deps` of plain data is copied like any directory), is a
   symlink to the project's (too big to copy; `File.rm_rf/1` does not follow a
   symlink, but a write through one reaches the project); `.git` and
-  `.elixir_ls`, directory or file, are left out at any depth; the top-level
-  `tmp` is a fresh, empty directory.
+  `.elixir_ls`, directory or file, are left out at any depth; at the top level
+  `cover`, `doc`, `.lexical`, `.expert`, `erl_crash.dump` and `priv/plts`
+  (dialyzer PLTs: hundreds of megabytes no test reads) are left out too; the
+  top-level `tmp` is a fresh, empty directory. The base directory must not lie
+  under the project root (a copy would copy itself): `build/3` raises
+  `ArgumentError` when it does, except under the top-level `tmp/`, which is not
+  copied.
 
   Symlinks are copied as symlinks, never followed, and never left pointing into
   the project: an absolute link whose target lies under the project root is
@@ -32,7 +37,9 @@ defmodule Covenant.Mutate.Workdir do
 
   Everything else is copied, ignored and untracked files included (the cost is
   about one copy of the tree per worker). `.git` is left out, so a test that
-  shells out to `git` sees no repository and its baseline will say so.
+  shells out to `git` doesn't see the project's repository (git looks in the
+  parent directories too: if the system temp directory lies inside some other
+  repository, that one is what it sees) and its baseline will say so.
 
   An entry that cannot be read (`:eacces`: a mode-000 `data/pg` of an
   in-project Postgres volume, say) is left out with a warning on the standard
@@ -49,6 +56,8 @@ defmodule Covenant.Mutate.Workdir do
   """
 
   @left_out ~w(.git .elixir_ls)
+  # left out at the top level only (`priv/plts` is a path)
+  @top_left_out ~w(cover doc .lexical .expert erl_crash.dump priv/plts)
 
   @doc """
   Creates the directory for the current OS process under `base` (the system
@@ -59,6 +68,7 @@ defmodule Covenant.Mutate.Workdir do
   @spec build(Path.t(), Path.t(), String.t()) :: Path.t()
   def build(root, base \\ System.tmp_dir!(), suffix \\ random_suffix()) do
     root = Path.expand(root)
+    check_base!(Path.expand(base), root)
     dir = Path.join(base, "covenant-mutate-#{System.pid()}-#{suffix}")
 
     File.mkdir!(dir)
@@ -67,7 +77,9 @@ defmodule Covenant.Mutate.Workdir do
       File.chmod!(dir, 0o700)
       File.mkdir!(Path.join(dir, "tmp"))
 
-      for entry <- File.ls!(root), entry not in ["tmp" | @left_out] do
+      for entry <- File.ls!(root),
+          entry not in ["tmp" | @left_out],
+          not top_left_out?(root, entry) do
         copy(Path.join(root, entry), Path.join(dir, entry), root, dir)
       end
 
@@ -94,7 +106,9 @@ defmodule Covenant.Mutate.Workdir do
         else
           File.mkdir!(target)
 
-          for entry <- File.ls!(source), entry not in @left_out do
+          for entry <- File.ls!(source),
+              entry not in @left_out,
+              not top_left_out?(root, Path.relative_to(Path.join(source, entry), root)) do
             copy(Path.join(source, entry), Path.join(target, entry), root, dir)
           end
         end
@@ -114,6 +128,24 @@ defmodule Covenant.Mutate.Workdir do
       else
         reraise error, __STACKTRACE__
       end
+  end
+
+  defp top_left_out?(_root, relative), do: relative in @top_left_out
+
+  # A base under the root would be copied into itself, without end.
+  defp check_base!(base, root) do
+    case under(base, root) do
+      :error ->
+        :ok
+
+      {:ok, relative} ->
+        unless relative |> Path.split() |> List.first() == "tmp" do
+          raise ArgumentError,
+                "the base directory #{base} for the mutate workdir lies under the project " <>
+                  "root #{root}, which it would copy into itself; set TMPDIR to a directory " <>
+                  "outside the project (or under its top-level tmp/)"
+        end
+    end
   end
 
   defp linked?(source) do
@@ -170,20 +202,42 @@ defmodule Covenant.Mutate.Workdir do
         File.rm(path)
       end
 
-      make_writable(dir)
-
-      case File.rm_rf(dir) do
-        {:ok, _} ->
-          :ok
-
-        {:error, reason, path} ->
-          IO.puts(
-            :stderr,
-            "warning: mutate workdir: could not remove #{path}: #{:file.format_error(reason)}"
-          )
-      end
+      rm_rf(dir, 5)
     end
 
+    :ok
+  end
+
+  # A stray process of a mutant may be writing into the tree while it goes (the removal
+  # then fails half way): try again a few times before giving up with a warning.
+  defp rm_rf(dir, attempts) do
+    make_writable(dir)
+
+    case File.rm_rf(dir) do
+      {:ok, _} ->
+        :ok
+
+      {:error, _, _} when attempts > 1 ->
+        Process.sleep(100)
+        rm_rf(dir, attempts - 1)
+
+      {:error, reason, path} ->
+        IO.puts(
+          :stderr,
+          "warning: mutate workdir: could not remove #{path}: #{:file.format_error(reason)}"
+        )
+    end
+  end
+
+  @doc """
+  Makes every directory of the tree owner-writable (`u+rwx`), never following a
+  symlink. The runner does it to the worker copy's `tmp/` before every suite run:
+  ExUnit clears a test's `:tmp_dir` with `File.rm_rf!/1`, which fails on a
+  directory an earlier run of the test left read-only.
+  """
+  @spec unlock(Path.t()) :: :ok
+  def unlock(dir) do
+    make_writable(dir)
     :ok
   end
 
@@ -207,6 +261,9 @@ defmodule Covenant.Mutate.Workdir do
   directory in a new, empty directory at the same path: a stray process of a
   mutant that still writes by a relative path fails with `:enoent` instead of
   writing anywhere that matters, and the VM still has a working directory.
+  The runner calls it only when the VM is not about to halt: before a halt the
+  removal alone is enough (a deleted working directory gives `:enoent` as well)
+  and no empty directory is left behind.
   """
   @spec abandon(Path.t()) :: :ok
   def abandon(dir) do
