@@ -72,6 +72,28 @@ defmodule Covenant.TasksUmbrellaContractTest do
   end
 
   @tag obligation: "covenant.tasks.I9"
+  test "mix covenant.check run from an app counts a glob ceiling against the root" do
+    scope = Path.join(@umbrella, "contracts/system/scope.yml")
+    File.mkdir_p!(Path.dirname(scope))
+    on_exit(fn -> File.rm_rf!(Path.dirname(scope)) end)
+
+    File.write!(scope, """
+    - name: shop-lib
+      ceiling: 0
+      counter: { kind: glob, pattern: "apps/*/lib/**/*.ex" }
+      why: A ceiling only the root can count.
+    """)
+
+    {output, status} = mix(["covenant.check"])
+    assert status == 1, output
+    assert output =~ "scope ceiling `shop-lib` exceeded: 2 > 0"
+
+    {output, status} = mix(["covenant.check", "--static"])
+    assert status == 1, output
+    assert output =~ "scope ceiling `shop-lib` exceeded: 2 > 0"
+  end
+
+  @tag obligation: "covenant.tasks.I9"
   test "a --test-path typed on the command line is relative to the working directory" do
     # from apps/shop, `test/contract` is the app's own tests and `apps/*/test/contract` is nothing
     # (the configured path of the same spelling finds them: it is relative to the root)

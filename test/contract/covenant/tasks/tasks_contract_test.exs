@@ -161,6 +161,43 @@ defmodule Covenant.TasksContractTest do
     assert output =~ "contract suite failed (exit status 2)"
   end
 
+  @tag obligation: "covenant.tasks.I1"
+  test "mix covenant.check --results-dir deletes only the Covenant result files it finds there" do
+    reports = Path.join(@project, "tmp/reports")
+    File.rm_rf!(reports)
+    File.mkdir_p!(Path.join(reports, "nested"))
+    File.write!(Path.join(reports, "q3-audit.txt"), "keep")
+    File.write!(Path.join(reports, "other.json"), ~s({"app": "mine"}))
+    File.write!(Path.join(reports, "nested/deep.json"), "{}")
+    Covenant.Results.write(reports, "stale_app", [])
+
+    {output, status} = mix(["covenant.check", "--results-dir", "tmp/reports"])
+    assert status == 0, output
+
+    assert File.read!(Path.join(reports, "q3-audit.txt")) == "keep"
+    assert File.read!(Path.join(reports, "other.json")) == ~s({"app": "mine"})
+    assert File.exists?(Path.join(reports, "nested/deep.json"))
+    refute File.exists?(Path.join(reports, "stale_app.json"))
+
+    assert [_ | _] =
+             Path.wildcard(Path.join(reports, "*.json")) -- [Path.join(reports, "other.json")]
+
+    assert Path.wildcard(Path.join(reports, ".run-*")) == []
+  end
+
+  @tag obligation: "covenant.tasks.I6"
+  test "mix covenant.check --static runs when the project's lib does not compile" do
+    broken = Path.join(@project, "lib/example/broken_ahead.ex")
+    File.write!(broken, "defmodule Example.BrokenAhead do\n  def (\nend\n")
+    on_exit(fn -> File.rm(broken) end)
+    on_exit(fn -> File.rm(Path.join(@project, "contracts/coverage.static.json")) end)
+
+    {output, status} = mix(["covenant.check", "--static"])
+    assert status == 0, output
+    assert output =~ "covenant.check: the Contract holds statically"
+    refute output =~ "Compiling"
+  end
+
   @tag obligation: "covenant.tasks.I4"
   test "mix covenant.conditions passes on the fixture and lists the checked premises" do
     {output, status} = mix(["covenant.conditions", "--verbose"])

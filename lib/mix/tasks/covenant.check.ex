@@ -73,8 +73,6 @@ defmodule Mix.Tasks.Covenant.Check do
 
   alias Covenant.{Check, Contract, Coverage, Error, Results, Static}
 
-  @requirements ["app.config"]
-
   @switches [
     run: :boolean,
     static: :boolean,
@@ -91,6 +89,9 @@ defmodule Mix.Tasks.Covenant.Check do
     if invalid != [] do
       Mix.raise("invalid options: #{inspect(invalid)}; see `mix help covenant.check`")
     end
+
+    # `--static` reads source and compiles nothing: a Contract written ahead of its code is checkable
+    unless opts[:static], do: Mix.Task.run("app.config")
 
     contracts_dir = opts[:contracts] || Covenant.contracts_dir()
     results_dir = opts[:results_dir] || Covenant.results_dir()
@@ -114,9 +115,15 @@ defmodule Mix.Tasks.Covenant.Check do
   defp check(contracts_dir, test_paths, results_dir, run?) do
     contract = load_contract(contracts_dir)
     sibling = Covenant.sibling_dir()
-    suite_status = if run?, do: run_suite(test_paths ++ sibling_paths(), results_dir), else: :ok
-    results = read_results(results_dir)
-    report = Check.run(contract, results, sibling: sibling)
+
+    {suite_status, results} =
+      if run? do
+        run_suite(test_paths ++ sibling_paths(), results_dir)
+      else
+        {:ok, read_results(results_dir)}
+      end
+
+    report = Check.run(contract, results, root: Covenant.root(), sibling: sibling)
     report = %{report | problems: Error.sort(report.problems ++ strays(test_paths, sibling))}
 
     Enum.each(report.problems, &Mix.shell().error(Error.format(&1)))
@@ -263,6 +270,9 @@ defmodule Mix.Tasks.Covenant.Check do
     end
   end
 
+  # Runs the suite writing its results to a directory of its own, so a `mix test` running in
+  # the background (an editor, a watcher) cannot overwrite them mid-run; then replaces the
+  # Covenant result files in `results_dir` with them, for a later `--no-run`.
   defp run_suite(test_paths, results_dir) do
     paths =
       test_paths
@@ -276,26 +286,62 @@ defmodule Mix.Tasks.Covenant.Check do
         "covenant.check: no contract test paths found (looked for #{Enum.join(Enum.map(test_paths, &Path.relative_to_cwd/1), ", ")})"
       )
 
-      File.rm_rf!(results_dir)
-      :ok
+      clear_results(results_dir)
+      {:ok, read_results(results_dir)}
     else
-      File.rm_rf!(results_dir)
       mix = System.find_executable("mix") || Mix.raise("cannot find the `mix` executable on PATH")
+
+      run_dir =
+        Path.join(results_dir, ".run-#{System.pid()}-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(run_dir)
 
       args = paths ++ ["--formatter", "Covenant.Formatter", "--formatter", "ExUnit.CLIFormatter"]
       Mix.shell().info("covenant.check: running mix test #{Enum.join(paths, " ")}")
 
-      env = [{"MIX_ENV", "test"}, {"COVENANT_RESULTS_DIR", Path.expand(results_dir)}]
+      env = [{"MIX_ENV", "test"}, {"COVENANT_RESULTS_DIR", Path.expand(run_dir)}]
 
-      case System.cmd(mix, ["test" | args],
-             env: env,
-             into: Covenant.Relay.new(),
-             stderr_to_stdout: true
-           ) do
-        {_, 0} -> :ok
-        {_, status} -> "exit status #{status}"
-      end
+      status =
+        case System.cmd(mix, ["test" | args],
+               env: env,
+               into: Covenant.Relay.new(),
+               stderr_to_stdout: true
+             ) do
+          {_, 0} -> :ok
+          {_, status} -> "exit status #{status}"
+        end
+
+      results = read_results(run_dir)
+      publish_results(run_dir, results_dir)
+      File.rm_rf!(run_dir)
+      {status, results}
     end
+  end
+
+  defp publish_results(run_dir, results_dir) do
+    clear_results(results_dir)
+
+    for file <- Path.wildcard(Path.join(run_dir, "*.json")) do
+      File.cp!(file, Path.join(results_dir, Path.basename(file)))
+    end
+  end
+
+  # Removes the files `Covenant.Formatter` wrote (`<app>.json` holding a Covenant results
+  # document) and nothing else: the directory may be anyone's, and is never removed.
+  defp clear_results(dir) do
+    for file <- Path.wildcard(Path.join(dir, "*.json")),
+        match?({:ok, %File.Stat{type: :regular}}, File.lstat(file)),
+        covenant_results?(file) do
+      File.rm!(file)
+    end
+  end
+
+  defp covenant_results?(file) do
+    with {:ok, text} <- File.read(file),
+         {:ok, %{"covenant" => _, "app" => _, "tests" => tests}} when is_list(tests) <-
+           JSON.decode(text),
+         do: true,
+         else: (_ -> false)
   end
 
   defp read_results(results_dir) do

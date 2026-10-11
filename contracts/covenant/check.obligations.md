@@ -23,9 +23,9 @@ Contract and a test run it returns every problem and the coverage table.
 - **kind:** functional
 - **status:** active
 
-### covenant.check.I3 — Failed tests fail the check; skipped tests do not count as coverage
+### covenant.check.I3 — Failed tests fail the check; an obligation needs a passing test
 - **scope:** `Covenant.Check.run/3`
-- **must:** report a tagged test that failed or was invalid; count skipped and excluded tests as tagged (no "untested" problem) but not as coverage
+- **must:** report a tagged test that failed or was invalid; in a run, report an active obligation none of whose tagged tests passed because some were skipped or excluded (`@tag :skip`, `--exclude`, `ExUnit.configure(exclude:)`) as an `active obligation <id> has no passing test: N tagged test(s) were skipped or excluded: <names>` problem, so a skipped or excluded test is never coverage (a proof that lives elsewhere is declared a `kind: exception`); in `mode: :static`, where nothing runs, a tagged test is enough
 - **kind:** functional
 - **status:** active
 

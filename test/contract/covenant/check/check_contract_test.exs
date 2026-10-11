@@ -69,10 +69,8 @@ defmodule Covenant.CheckContractTest do
 
   @tag :tmp_dir
   @tag obligation: "covenant.check.I3"
-  test "skipped and excluded tests count as tagged but not as coverage", %{
-    contract: contract,
-    dir: dir
-  } do
+  test "an obligation whose tagged tests were all skipped or excluded has no passing test and fails",
+       %{contract: contract, dir: dir} do
     report =
       Check.run(
         contract,
@@ -80,8 +78,31 @@ defmodule Covenant.CheckContractTest do
         root: dir
       )
 
-    assert Check.Report.ok?(report)
+    assert [widget, gadget] = report.problems |> Enum.map(&Error.format/1) |> Enum.sort()
+
+    assert widget =~
+             "active obligation `demo.gadget.I1` has no passing test: 1 tagged test(s) were skipped or excluded: test demo.gadget.I1 #2"
+
+    assert gadget =~
+             "active obligation `demo.widget.I1` has no passing test: 1 tagged test(s) were skipped or excluded: test demo.widget.I1 #1"
+
+    refute Check.Report.ok?(report)
     assert report.coverage.totals.covered == 0
+  end
+
+  @tag :tmp_dir
+  @tag obligation: "covenant.check.I3"
+  test "a passing test beside a skipped one is enough; static mode asks only for a tagged test",
+       %{contract: contract, dir: dir} do
+    results = %{
+      ResultsBuilder.results(["demo.widget.I1", {"demo.widget.I1", :skipped}, "demo.gadget.I1"])
+      | apps: ["demo"]
+    }
+
+    assert Check.Report.ok?(Check.run(contract, results, root: dir))
+
+    tagged = ResultsBuilder.results([{"demo.widget.I1", :tagged}, {"demo.gadget.I1", :tagged}])
+    assert Check.Report.ok?(Check.run(contract, tagged, root: dir, mode: :static))
   end
 
   @tag :tmp_dir
