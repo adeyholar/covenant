@@ -3,5 +3,6 @@
 # target of exception `example.greeter.I2` and is sorted `decision-hole`.
 - at: lib/example/greeter.ex:10:19
   operator: guard_removal
+  mutation: "`when is_binary(name)` → `(no guard)`"
   sort: decision-hole
   reason: I1 only speaks of names and nil; what greet/1 does with a non-string is deliberately undecided.

@@ -14,6 +14,7 @@
   reason: new/1 sets value explicitly; the defstruct default is never read.
 - at: lib/example/counter.ex:25:29
   operator: logical_swap
+  mutation: "`and` → `or`"
   sort: evaluation-gap
   reason: new/1 rejecting a non-integer max is not an obligation yet; add one before callers rely on it.
 - at: lib/example/counter.ex:25:37
@@ -28,14 +29,17 @@
   reason: new/1 rejecting max 0 is not an obligation yet; same gap as the non-integer case.
 - at: lib/example/counter.ex:26:28
   operator: string_empty
+  mutation: "`\"max must be a positive integer, got: #{inspect(max)}\"` → `\"\"`"
   sort: log-only
   reason: The ArgumentError message is prose for humans; the Contract pins the exception, not its text.
 - at: lib/example/counter.ex:29:17
   operator: element_removal
+  mutation: "`value: 0` → `(removed)`"
   sort: equivalent
   reason: The struct default for value is 0 already.
 - at: lib/example/counter.ex:29:37
   operator: element_removal
+  mutation: "`events: []` → `(removed)`"
   sort: equivalent
   reason: The struct default for events is [] already.
 - at: lib/example/counter.ex:34:48
@@ -60,9 +64,11 @@
   reason: The Contract lists decrement/2 only; whether a default step exists is deliberately undecided.
 - at: lib/example/counter.ex:69:60
   operator: return_nil
+  mutation: "`:ok` → `nil`"
   sort: dead-code
   reason: check_step!/1's return value is never read; only its raise is observable.
 - at: lib/example/counter.ex:72:26
   operator: string_empty
+  mutation: "`\"step must be a positive integer, got: #{inspect(by)}\"` → `\"\"`"
   sort: log-only
   reason: The ArgumentError message is prose for humans; the Contract pins the exception, not its text.
