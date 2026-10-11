@@ -2248,6 +2248,8 @@ defmodule Covenant.MutateWorkdirContractTest do
     File.write!(Path.join(root, "mix.exs"), "mix")
     File.write!(Path.join(root, "lib/a.ex"), "a")
     File.write!(Path.join(root, "tmp/theirs.txt"), "theirs")
+    # some tests leave read-only directories here; under mutation the suite runs again in one VM
+    on_exit(fn -> System.cmd("chmod", ["-R", "u+rwx", dir]) end)
     {:ok, root: root, base: base}
   end
 
