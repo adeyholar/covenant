@@ -100,14 +100,17 @@ defmodule Covenant.Contract do
     end
   end
 
-  # Markdown and YAML files the loader never reads (a nested directory, a
-  # misnamed `x.obligation.md`) would take whole components with them.
+  # Files the loader never reads, but whose names say they are Contract files (a
+  # nested directory, a misnamed `x.obligation.md`), would take whole components
+  # with them. Any other file (notes, ADRs) is prose and left alone.
   defp unread(dir) do
     if File.dir?(dir) do
       read = MapSet.new(for({f, _} <- component_files(dir), do: f) ++ record_files(dir))
       scope = Path.join([dir, "system", "scope.yml"])
 
-      for file <- Path.wildcard(Path.join(dir, "**/*.{md,yml,yaml}")) |> Enum.sort(),
+      for file <- Path.wildcard(Path.join(dir, "**/*")) |> Enum.sort(),
+          File.regular?(file),
+          contract_name?(file),
           not MapSet.member?(read, file),
           file != scope,
           not known_file?(file) do
@@ -125,6 +128,13 @@ defmodule Covenant.Contract do
     else
       []
     end
+  end
+
+  @contract_words ~w(obligation intent decision survivor scope)
+
+  defp contract_name?(file) do
+    base = file |> Path.basename() |> String.downcase()
+    Enum.any?(@contract_words, &String.contains?(base, &1))
   end
 
   defp known_file?(file) do
