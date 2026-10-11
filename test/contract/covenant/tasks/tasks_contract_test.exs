@@ -192,6 +192,10 @@ defmodule Covenant.TasksContractTest do
     on_exit(fn -> File.rm(broken) end)
     on_exit(fn -> File.rm(Path.join(@project, "contracts/coverage.static.json")) end)
 
+    # Mix builds the dependencies, Covenant among them, before any task runs: done here,
+    # so that whatever is compiled below is the project's own code
+    {_, 0} = mix(["deps.compile"])
+
     {output, status} = mix(["covenant.check", "--static"])
     assert status == 0, output
     assert output =~ "covenant.check: the Contract holds statically"
