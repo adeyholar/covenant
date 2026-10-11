@@ -31,7 +31,7 @@ Contract and a test run it returns every problem and the coverage table.
 
 ### covenant.check.I4 — Stale exceptions fail
 - **scope:** `Covenant.Check.run/3`, `Covenant.Target`
-- **must:** resolve an active exception's `target` as `Module.function/arity` (public function or macro), `Module` or a file path relative to the root and report it when it no longer exists or cannot be read; accept targets that exist; skip retired exceptions
+- **must:** resolve an active exception's `target` as `Module.function/arity` (public function or macro), `Module` or a file path relative to the root and report it when it no longer exists or cannot be read; accept targets that exist; skip retired exceptions. A file path that expanded against the root (`..`, an absolute path, `~`) is not under the root is reported as outside the project root and never resolved (a symlink inside the root pointing outside it is followed). The names in a target never become atoms: a module is looked up only when its atom already exists, a function is matched by name against the loaded module's exports, and a target whose names are unknown is reported as no longer existing
 - **kind:** functional
 - **record:** targets-are-public-code
 - **status:** active

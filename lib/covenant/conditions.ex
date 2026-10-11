@@ -9,7 +9,8 @@ defmodule Covenant.Conditions do
   """
 
   alias Covenant.Contract
-  alias Covenant.Contract.{Condition, Record}
+  alias Covenant.Contract.{Ceiling, Condition, Record}
+  alias Covenant.Target
 
   defmodule Context do
     @moduledoc "The facts conditions are checked against; built by `Covenant.Conditions.context/1`."
@@ -106,10 +107,18 @@ defmodule Covenant.Conditions do
       else: {:suspect, "env `#{name}` is not set"}
   end
 
-  def evaluate(%Condition{check: %{"kind" => "file", "path" => path}}, ctx) do
-    if ctx.root |> Path.join(path) |> File.exists?(),
-      do: {:ok, "file `#{path}` exists"},
-      else: {:suspect, "file `#{path}` does not exist"}
+  def evaluate(%Condition{check: %{"kind" => "file", "path" => path}}, ctx)
+      when is_binary(path) do
+    cond do
+      not Target.within?(path, ctx.root) ->
+        {:suspect, "file `#{path}` is outside the project root"}
+
+      ctx.root |> Path.join(path) |> File.exists?() ->
+        {:ok, "file `#{path}` exists"}
+
+      true ->
+        {:suspect, "file `#{path}` does not exist"}
+    end
   end
 
   def evaluate(%Condition{check: %{"kind" => "otp", "version" => req}}, ctx),
@@ -140,10 +149,16 @@ defmodule Covenant.Conditions do
 
     with {:ok, module, fun} <- parse_call(call),
          true <- is_list(path) and Enum.all?(path, &(is_binary(&1) or is_atom(&1))) do
-      if Code.ensure_loaded?(module) do
-        read_value(call, module, fun, path, expected)
-      else
-        {:unchecked, "module not compiled in this VM: #{inspect(module)}"}
+      cond do
+        not (is_atom(module) and Code.ensure_loaded?(module)) ->
+          {:unchecked, "module not compiled in this VM: #{Target.describe({:module, module})}"}
+
+        Ceiling.system_module?(module) ->
+          {:suspect,
+           "#{call} is refused: #{inspect(module)} is part of Elixir or OTP and is not called"}
+
+        true ->
+          read_value(call, module, fun, path, expected)
       end
     else
       _ -> incomplete("value", check)
@@ -154,9 +169,16 @@ defmodule Covenant.Conditions do
 
   defp parse_call(call) do
     case Regex.run(~r/\A([A-Z]\w*(?:\.[A-Z]\w*)*)\.([a-z_]\w*[?!]?)\/(\d+)\z/, call) do
-      [_, module, fun, "0"] -> {:ok, Module.concat([module]), String.to_atom(fun)}
+      [_, module, fun, "0"] -> {:ok, existing_module(module), fun}
       _ -> :error
     end
+  end
+
+  # No new atom: the module's atom if it already exists, else its name.
+  defp existing_module(name) do
+    String.to_existing_atom("Elixir." <> name)
+  rescue
+    ArgumentError -> name
   end
 
   defp read_value(call, module, fun, path, expected) do
@@ -173,13 +195,22 @@ defmodule Covenant.Conditions do
     end
   end
 
+  # The function atom is taken from the module's own exports by name, never made from the string.
   defp invoke(module, fun) do
-    {:ok, apply(module, fun, [])}
+    case Enum.find(module.module_info(:exports), &(elem(&1, 1) == 0 and name_is?(&1, fun))) do
+      {name, 0} ->
+        {:ok, apply(module, name, [])}
+
+      nil ->
+        {:raised, "UndefinedFunctionError: function #{inspect(module)}.#{fun}/0 is undefined"}
+    end
   rescue
     exception -> {:raised, "#{inspect(exception.__struct__)}: #{Exception.message(exception)}"}
   catch
     kind, reason -> {:raised, "#{kind} #{inspect(reason)}"}
   end
+
+  defp name_is?({name, _arity}, fun), do: Atom.to_string(name) == fun
 
   defp dig(value, []), do: {:ok, value}
 

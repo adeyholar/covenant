@@ -47,3 +47,21 @@ supports is relied on.
 - **why:** a limit that a record decides but nothing verifies drifts: a kill matrix showed a mutated `claim_batch: 20` → `21` survive in a project's `limits/0` because no test read the value against its record; the record that decides a value should verify it
 - **kind:** functional
 - **status:** active
+
+### covenant.conditions.I7 — Contract data does not call into Elixir or OTP
+- **scope:** `Covenant.Conditions.evaluate/2`, `Covenant.Contract.Ceiling.count/2`
+- **must:** refuse a `value` call whose module is part of Elixir or OTP (its beam, `:code.which/1`, lies under the OTP root or Elixir's install) as suspect, and a `module` counter of a scope ceiling whose module is part of Elixir or OTP as an error, each naming the call and saying the module is part of Elixir or OTP; the function is not called. `System.halt/0` ends the VM with a status the caller reads as success and `rescue` cannot stop it. This is a mitigation, not a sandbox: a project function can still halt, because `contracts/` runs project code and is trusted input, like `mix.exs`
+- **kind:** functional
+- **status:** active
+
+### covenant.conditions.I8 — A file check stays under the project root
+- **scope:** `Covenant.Conditions.evaluate/2`
+- **must:** mark a `file` check suspect, saying the path is outside the project root, when the path expanded against the root (`..`, an absolute path and `~` included) is neither the root nor under it, whether or not the file exists there; a symlink inside the root that points outside it is not resolved and is followed
+- **kind:** functional
+- **status:** active
+
+### covenant.conditions.I9 — Names from a record never become atoms
+- **scope:** `Covenant.Conditions.evaluate/2`
+- **must:** keep the module and function of a `value` call as strings: the module is looked up as an atom only when that atom already exists, and a module with no atom is unchecked as a module that is not compiled in this VM; the function is found by comparing its name with the loaded module's exports, and one that is not exported is suspect as a call that raises `UndefinedFunctionError`. A Contract cannot grow the atom table, and a name written ahead of its implementation is never a crash
+- **kind:** functional
+- **status:** active

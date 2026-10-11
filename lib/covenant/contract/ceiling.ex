@@ -56,6 +56,10 @@ defmodule Covenant.Contract.Ceiling do
       not Code.ensure_loaded?(module) ->
         {:error, "counter module #{inspect(module)} is not loaded"}
 
+      system_module?(module) ->
+        {:error,
+         "counter #{inspect(module)}.#{function}/0 is refused: #{inspect(module)} is part of Elixir or OTP"}
+
       not function_exported?(module, function, 0) ->
         {:error, "counter #{inspect(module)}.#{function}/0 is not exported"}
 
@@ -71,6 +75,19 @@ defmodule Covenant.Contract.Ceiling do
             {:unchecked, what}
         end
     end
+  end
+
+  @doc """
+  True when the loaded `module`'s beam lies under the OTP or Elixir installation. A counter or
+  value check calls project functions; one that reaches `System.halt/0` would end the VM, which
+  `rescue` cannot stop. This is a mitigation, not a sandbox.
+  """
+  @spec system_module?(module()) :: boolean()
+  def system_module?(module) do
+    Covenant.Regen.Ownership.classify_beam(
+      :code.which(module),
+      Covenant.Regen.Ownership.environment(%{})
+    ) == :foreign
   end
 
   defp call(module, function) do
