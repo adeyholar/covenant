@@ -60,25 +60,25 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I8 — The survivors file is read strictly
 - **scope:** `Covenant.Mutate.Survivors.parse/2`, `Covenant.Mutate.Survivors.load/1`, `Covenant.Mutate.Survivors.path/2`
-- **must:** read a YAML list of mappings with `at` (`file:line:column`), `operator` (one of the thirteen), `sort` (`equivalent`, `log-only`, `dead-code`, `timeout`, `evaluation-gap`, `decision-hole` or `unpromised`) and `reason`, and an optional `mutation`; report every bad entry as `file:line: message` (a missing or empty key, a key of the wrong type, an unknown operator or sort, a malformed `at`, an entry that is not a mapping, a document that is not a list, invalid YAML); read a missing or empty file as no annotations; keep the file at `<contracts>/<app>/<component>.survivors.yml` (`<contracts>/system/survivors.yml` for the system component)
+- **must:** read a YAML list of mappings with `at` (`file:line:column`), `operator` (one of the thirteen), `sort` (`equivalent`, `log-only`, `dead-code`, `timeout`, `evaluation-gap`, `decision-hole` or `unpromised`) and `reason`, and an optional `mutation`; report every bad entry as `file:line: message` (a missing or empty key, a key of the wrong type, an unknown operator or sort, a malformed `at`, an entry that is not a mapping, a document that is not a list, invalid YAML); read a missing or empty file as no annotations; keep the file at `<contracts>/<app>/<component>.survivors.yml` (`<contracts>/system/survivors.yml` for the system component), and a sibling-layout primitive's at the `mutants.md` beside its README, read as declarations by its extension
 - **kind:** functional
 - **status:** active
 
 ### covenant.mutate.I9 — Every survivor is sorted and every annotation is current
-- **scope:** `Covenant.Mutate.Survivors.find/2`, `Covenant.Mutate.Matrix.build/2`
-- **must:** match an annotation to a survivor by `at` and `operator`, and by `mutation` when the annotation gives one; sort an unannotated survivor inside the target of an active exception `decision-hole`; report every other unannotated survivor or timeout as a problem naming the mutant; report an annotation that matches no mutant at all as moved or changed, and one that matches only a killed mutant as stale; fail on nothing else
+- **scope:** `Covenant.Mutate.Survivors.find/2`, `Covenant.Mutate.Survivors.matches?/2`, `Covenant.Mutate.Survivors.unit/1`, `Covenant.Mutate.Survivors.template/2`, `Covenant.Mutate.Matrix.build/2`
+- **must:** match an annotation to a survivor by `at` and `operator`, and by `mutation` when the annotation gives one; sort an unannotated survivor inside the target of an active exception `decision-hole`; report every other unannotated survivor or timeout as a problem naming the mutant; report an annotation that matches no mutant at all as moved or changed, and one that matches only a killed mutant as stale; match a `mutants.md` declaration to the survivors of its unit (`Module.function/arity`, or the module for code outside a function) with the same `from` and `to`, or all of them for a wildcard, and report one that matches no survivor as unmatched and one a test kills as contradicted, naming the declaration; fail on nothing else
 - **kind:** functional
 - **status:** active
 
 ### covenant.mutate.I10 — The modules to mutate come from the flags, the front matter or the Contract
 - **scope:** `Covenant.Mutate.Modules.resolve/2`, `Covenant.Mutate.Modules.derive/1`, `Covenant.Mutate.Modules.references/1`, `Covenant.Mutate.Modules.locate/3`
-- **must:** take the `--module` flags first, then the front matter's `modules:`, then the module names in the inline code spans of the Public surface and of the obligation scopes (fenced blocks ignored), sorted and unique; find each module's source file, skipping a derived module that is not loaded or whose source lies outside the project root and listing it with the reason, and refusing an explicit one
+- **must:** take the `--module` flags first, then the front matter's `modules:` (for a sibling-layout primitive, the modules its `covers` name, a tree as `Module.*`), then the module names in the inline code spans of the Public surface and of the obligation scopes (fenced blocks ignored), sorted and unique; expand a `Module.*` name to the project's modules under it; find each module's source file, skipping a derived module that is not loaded or whose source lies outside the project root and listing it with the reason, and refusing an explicit one
 - **kind:** functional
 - **status:** active
 
 ### covenant.mutate.I11 — The plan and the worker results
-- **scope:** `Covenant.Mutate.plan/3`, `Covenant.Mutate.encode_raw/2`, `Covenant.Mutate.decode_raw/1`, `Covenant.Mutate.merge/1`
-- **must:** resolve a component to its module names and its contract test files, or fail naming the problem (an unknown component, with the known ones; no module; no contract test file); carry a worker's results, the per-test timeout it used (`timeout_ms`) and each mutant's credit through JSON and back unchanged; merge the workers' results by concatenating their mutants sorted by id and keeping the largest `timeout_ms`, refusing results that overlap or leave a mutant without a verdict
+- **scope:** `Covenant.Mutate.plan/3`, `Covenant.Mutate.covered_by?/3`, `Covenant.Mutate.encode_raw/2`, `Covenant.Mutate.decode_raw/1`, `Covenant.Mutate.merge/1`
+- **must:** resolve a component to its module names and its contract test files (a primitive's are the `*_test.exs` files beside its README), or fail naming the problem (an unknown component, with the known ones; no module, or covers naming no code; no contract test file); tell whether a primitive owns a mutant by the most specific covers reference; carry a worker's results, the per-test timeout it used (`timeout_ms`) and each mutant's credit through JSON and back unchanged; merge the workers' results by concatenating their mutants sorted by id and keeping the largest `timeout_ms`, refusing results that overlap or leave a mutant without a verdict
 - **kind:** functional
 - **status:** active
 

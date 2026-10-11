@@ -2,42 +2,42 @@
 # The Runner, Workdir and Mix task are not in `modules:` (the worker executes them while it swaps mutants), so none of their mutants exist here.
 # Every entry below was read against the code: a guard the AST shape always satisfies, a catch-all no valid source reaches, a falsy nil for false, or a
 # position that only reaches diagnostics. Sorts: equivalent | log-only | dead-code | timeout | evaluation-gap | decision-hole.
-- at: lib/covenant/mutate.ex:202:5
+- at: lib/covenant/mutate.ex:224:5
   operator: element_removal
   mutation: "`\"invalid\" => :invalid` → `(removed)`"
   sort: equivalent
   reason: "decode_raw falls back to :invalid for any unknown outcome name (`Map.get(@outcomes, name, :invalid)`), so the explicit \"invalid\" entry is redundant."
-- at: lib/covenant/mutate.ex:202:5
+- at: lib/covenant/mutate.ex:224:5
   operator: string_empty
   mutation: "`\"invalid\"` → `\"\"`"
   sort: equivalent
   reason: "The key \"\" is never written; an unknown outcome name decodes to :invalid by the Map.get default, which is what \"invalid\" decodes to."
-- at: lib/covenant/mutate/matrix.ex:364:88
+- at: lib/covenant/mutate/matrix.ex:381:88
   operator: integer_shift
   mutation: "`10` → `9`"
   sort: equivalent
   reason: "The default width of an empty obligation table is raised to at least 10 by `max(width, 10)` on the next line, so 9 or 10 gives the same header."
-- at: lib/covenant/mutate/modules.ex:69:24
+- at: lib/covenant/mutate/modules.ex:77:24
   operator: string_empty
   mutation: "`\"\\n\"` → `\"\"`"
   sort: equivalent
   reason: "Code spans are delimited by backticks and never cross a line, so joining the Public surface and the scopes with \"\" instead of \"\\n\" tokenises to the same spans."
-- at: lib/covenant/mutate/modules.ex:71:27
+- at: lib/covenant/mutate/modules.ex:79:27
   operator: string_empty
   mutation: "`\"\\n\"` → `\"\"`"
   sort: equivalent
   reason: "Scopes are joined into one text that is scanned for backtick-delimited code spans; \"\\n\" or \"\" between two scopes yields the same spans."
-- at: lib/covenant/mutate/modules.ex:157:13
+- at: lib/covenant/mutate/modules.ex:175:13
   operator: clause_removal
   mutation: "`case _ ->` → `(removed)`"
   sort: evaluation-gap
   reason: "A loaded module whose compile info has no :source (built from forms without a source option) is needed to reach this branch; Elixir-compiled modules always record one and names are resolved under Elixir., so no test module can be built for it."
-- at: lib/covenant/mutate/modules.ex:143:18
+- at: lib/covenant/mutate/modules.ex:161:18
   operator: guard_removal
   mutation: "`when is_list(source)` → `(no guard)`"
   sort: evaluation-gap
   reason: "Same branch as m0500: only a module with a non-list :source reaches the guard's other side."
-- at: lib/covenant/mutate/modules.ex:158:21
+- at: lib/covenant/mutate/modules.ex:176:21
   operator: string_empty
   mutation: "`\"has no source file\"` → `\"\"`"
   sort: evaluation-gap
@@ -267,38 +267,48 @@
   mutation: "`nil` → `(removed)`"
   sort: dead-code
   reason: "The catch-all anchor/2 clause is never reached: elements are pairs or nodes with meta."
-- at: lib/covenant/mutate/survivors.ex:78:20
+- at: lib/covenant/mutate/survivors.ex:102:20
   operator: clause_removal
   mutation: "`case {:ok, nil} ->` → `(removed)`"
   sort: dead-code
   reason: "YamlElixir 2.x answers an empty document with {:ok, %{}} (probed with null, ~, --- and a comment-only file), never {:ok, nil}."
-- at: lib/covenant/mutate/survivors.ex:95:25
+- at: lib/covenant/mutate/survivors.ex:119:25
   operator: clause_removal
   mutation: "`case {:error, error} ->` → `(removed)`"
   sort: dead-code
   reason: "YamlElixir.read_from_string/1 reports every error as a ParsingError carrying line and message, which the clause above handles; this generic fallback never runs."
-- at: lib/covenant/mutate/survivors.ex:96:27
+- at: lib/covenant/mutate/survivors.ex:120:27
   operator: element_removal
   mutation: "`Error.new(file, 1, \"invalid YAML: #{Exception.message(error…` → `(removed)`"
   sort: dead-code
   reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
-- at: lib/covenant/mutate/survivors.ex:96:37
+- at: lib/covenant/mutate/survivors.ex:120:37
   operator: integer_shift
   mutation: "`1` → `2`"
   sort: dead-code
   reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
-- at: lib/covenant/mutate/survivors.ex:96:37
+- at: lib/covenant/mutate/survivors.ex:120:37
   operator: integer_shift
   mutation: "`1` → `0`"
   sort: dead-code
   reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
-- at: lib/covenant/mutate/survivors.ex:96:40
+- at: lib/covenant/mutate/survivors.ex:120:40
   operator: string_empty
   mutation: "`\"invalid YAML: #{Exception.message(error)}\"` → `\"\"`"
   sort: dead-code
   reason: "Part of the generic error fallback that YamlElixir.read_from_string/1 never reaches (every error is a ParsingError with a line)."
-- at: lib/covenant/mutate/survivors.ex:110:22
+- at: lib/covenant/mutate/survivors.ex:134:22
   operator: element_removal
   mutation: "`\"\\r\\n\"` → `(removed)`"
   sort: equivalent
   reason: "A trailing \\r does not change which lines start with `- `, so splitting on \"\\n\" alone finds the same item lines."
+- at: lib/covenant/mutate.ex:54:28
+  operator: element_removal
+  mutation: "`form: :primitive` → `(removed)`"
+  sort: equivalent
+  reason: Only a primitive has covers; every other component's list is empty, scores nothing in owners/3 and can't take a mutant from a primitive.
+- at: lib/covenant/mutate/modules.ex:144:48
+  operator: string_empty
+  mutation: "`\".*\"` → `\"\"`"
+  sort: equivalent
+  reason: With an empty suffix every name list is expanded, and Covers.expand/2 returns a name without `.*` unchanged, so the names are the same; only a needless call to project_modules/0 is added.
