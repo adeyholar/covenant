@@ -56,6 +56,6 @@ contract tests resolve paths from.
 
 ### covenant.static.I7 — Test files are the ones the project's test pattern names
 - **scope:** `Covenant.Static.expand/1`
-- **must:** expand files, directories and globs to the files whose name matches the project's `test_pattern` from `Mix.Project.config/0` (default `*_test.exs`), so a project with `test_pattern: "*_check.exs"` is scanned for those files and not for `*_test.exs`
+- **must:** expand files, directories and globs to the files whose name matches the project's `test_pattern` from `Mix.Project.config/0` (default `*_test.exs`; `*` and `?` are wildcards and `{a,b}` is an alternation, so `*_{test,spec}.exs` matches both suffixes), so a project with `test_pattern: "*_check.exs"` is scanned for those files and not for `*_test.exs`
 - **kind:** functional
 - **status:** active
