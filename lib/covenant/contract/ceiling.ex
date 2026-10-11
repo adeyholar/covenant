@@ -55,7 +55,12 @@ defmodule Covenant.Contract.Ceiling do
        "glob pattern `#{pattern}` is not under the project root " <>
          "(a pattern must be relative and may not contain `..`)"}
     else
-      {:ok, root |> Path.join(pattern) |> Path.wildcard(match_dot: false) |> length()}
+      try do
+        {:ok, root |> Path.join(pattern) |> Path.wildcard(match_dot: false) |> length()}
+      rescue
+        e in ErlangError ->
+          {:error, "glob pattern `#{pattern}` is malformed: #{inspect(e.original)}"}
+      end
     end
   end
 

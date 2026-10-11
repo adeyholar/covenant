@@ -287,10 +287,15 @@ defmodule Covenant.Regen do
   # A path outside the layout stays absolute; the pack holds and records it as `<path without the root slash>`.
   defp in_pack(path), do: String.trim_leading(path, "/")
 
+  # The sibling layout's helper sits in the sibling directory, whatever `sibling_dir` names it:
+  # two levels above the primitive's README (`<sibling dir>/<primitive>/README.md`).
+  defp primitive_helper(readme),
+    do: readme |> Path.dirname() |> Path.dirname() |> Path.join("test_helper.exs")
+
   # `{source, target}` pairs, the target relative to the pack.
   defp contract_files(contract, %Component{form: :primitive, file: readme}, layout) do
     # `mutants.md` stays out: the survivors it lists describe the implementation.
-    helper = Path.join(layout, "contract/test_helper.exs")
+    helper = primitive_helper(readme)
     convention = Path.join(contract.dir, "README.md")
 
     primitive =
@@ -771,9 +776,13 @@ defmodule Covenant.Regen do
     do:
       "the component's #{form_name(component)}: purpose, scope,\n  environment facts, public surface, obligations, decisions, orderings and\n  known limits."
 
-  defp helper_line(%Component{form: :primitive}, opts) do
-    if opts[:layout] && File.exists?(Path.join(opts[:layout], "contract/test_helper.exs")),
-      do: "- `contract/test_helper.exs` — the helper the contract tests start with.\n",
+  defp helper_line(%Component{form: :primitive, file: readme}, opts) do
+    helper = primitive_helper(readme)
+
+    if opts[:layout] && File.exists?(helper),
+      do:
+        "- `#{Path.relative_to(Path.expand(helper), Path.expand(opts[:layout]))}` — " <>
+          "the helper the contract tests start with.\n",
       else: ""
   end
 
