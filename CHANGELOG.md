@@ -30,5 +30,13 @@ The first release: the Contract layer for Impatient Programming in Elixir.
   survivor or a stale entry fails the run. `--fail-fast` trades exact credit
   for speed, `--jobs N` runs isolated workers, and the per-test timeout is
   measured from the baseline.
-- Covenant governs itself: 77 obligations across nine components, each proved
+- The sibling layout that flinch, qualm and exhale read: `contract/<primitive>/`
+  with `- **A1**` obligations and a `covers` block in its README, Contract tests
+  beside it that name their obligations in `# Contract: calc/A1` comments, and
+  an optional `mutants.md` of `equivalent` and `unpromised` declarations.
+  `Covenant.Case` reads the comments at compile time; `mix covenant.check`
+  applies the rules of `flinch contract`; `mix covenant.mutate` and
+  `mix covenant.regen` take a primitive by name. A project can use either
+  layout or both. The survivor sorts gain `unpromised`.
+- Covenant governs itself: 85 obligations across ten components, each proved
   by a `Covenant.Case` test.

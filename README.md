@@ -2,7 +2,7 @@
 
 Covenant fails a build when an Elixir project's Contract stops being true. It is the Contract layer for [Impatient Programming](https://impatientprogramming.org) in Elixir, and the sibling of [flinch](https://github.com/tools4imps/flinch), [qualm](https://github.com/tools4imps/qualm) and [exhale](https://github.com/tools4imps/exhale-ruby).
 
-A Contract, in Impatient Programming, is what a component promises, written down well enough that the component could be deleted and rebuilt from it alone: an intent, decision records that give the reason behind every value that looks arbitrary, and numbered obligations, each proved by a contract test. Covenant reads the Contract under `contracts/`, binds every contract test to the obligations it proves when the test compiles, publishes contract coverage, re-checks the premises of decisions, writes regeneration packs, and mutates a component to show which obligation's tests notice when its code breaks.
+A Contract, in Impatient Programming, is what a component promises, written down well enough that the component could be deleted and rebuilt from it alone: an intent, decision records that give the reason behind every value that looks arbitrary, and numbered obligations, each proved by a contract test. Covenant reads the Contract under `contracts/`, or in the [sibling layout](#the-sibling-layout) the other tools read, binds every contract test to the obligations it proves when the test compiles, publishes contract coverage, re-checks the premises of decisions, writes regeneration packs, and mutates a component to show which obligation's tests notice when its code breaks.
 
 `mix covenant.mutate` is the Elixir counterpart of flinch's mutation gate. It breaks a component's code one change at a time, runs the component's contract tests against each broken copy, and credits every kill to the obligations tagged on the tests that caught it. A test that catches nothing is named. qualm judges a change in any language, so it runs beside Covenant as it is.
 
@@ -330,21 +330,156 @@ There's no score threshold. The score is printed for information. Every survivor
 | `timeout` | a mutant the tests only timed out against |
 | `evaluation-gap` | a behaviour that matters and no test pins yet |
 | `decision-hole` | a behaviour the Contract leaves undecided on purpose |
+| `unpromised` | a behaviour that changes and that the Contract leaves open, as the sibling layout declares it |
 
 A mutant inside the target of an active `kind: exception` obligation is sorted `decision-hole` without an entry. An entry that matches no survivor fails the run, so the file stays true.
 
 Without `--timeout`, each test's timeout is five times the slowest baseline test, and never under a second. `--fail-fast` stops each mutant's run at its first failing test: the verdicts are the same as a full run's, but the kill credit is partial, so use it to sort survivors on a slow suite and a full run to credit obligations. `--jobs N` splits the mutants over N worker processes, each running from its own directory so ExUnit's `:tmp_dir` isn't shared. A suite that shares anything else, such as a database or a fixed port, needs `--jobs 1`. `mix help covenant.mutate` has the rest.
+
+## The sibling layout
+
+flinch, qualm and exhale read a smaller Contract: a directory per primitive, numbered obligations in its README, and the Contract tests beside it. Covenant reads that layout too, so a team running them beside Covenant keeps one Contract. A project can use it, the `contracts/` layout, or both.
+
+```text
+contract/
+  calc/
+    README.md         obligations and a covers block
+    calc_test.exs     the calc Contract tests
+    mutants.md        declared survivors, optional
+  test_helper.exs     empty: Mix wants a helper in every test path
+```
+
+The calc example from flinch's README, in Elixir. The README lists the obligations and names the code it covers:
+
+````markdown
+# calc
+
+Small sums.
+
+## Obligations
+
+- **A1** Add returns the sum of its arguments.
+- **A2** Clamp returns n when it sits between lo and hi, and the nearer bound otherwise.
+
+```covers
+Calc
+```
+````
+
+A `covers` line is a module (`Calc`), a tree (`Calc.*`: the module and every module under it) or a function (`Calc.add/2`). When primitives overlap, the most specific reference wins.
+
+The Contract tests name the obligations they prove in a comment directly above each test:
+
+```elixir
+defmodule Calc.ContractTest do
+  use Covenant.Case, async: true
+
+  # Contract: calc/A1
+  test "add sums its arguments" do
+    assert Calc.add(2, 3) == 5
+  end
+
+  # Contract: calc/A2
+  test "clamp returns the nearer bound outside them" do
+    assert Calc.clamp(-3, 1, 10) == 1
+  end
+end
+```
+
+`Covenant.Case` takes the primitive from the file's directory and reads the comments when the module compiles, so `# Contract: calc/A1` counts exactly as `@tag obligation: "calc/A1"` does, and that works too. Several ids go on one line, separated by commas. A test that names nothing, an unknown id and another primitive's id are compile errors, and so is a `# Contract:` comment anywhere else.
+
+For `mix test` to run them, add the directory to the test paths and give it an empty `contract/test_helper.exs`; `test/test_helper.exs` still starts ExUnit. The default `test_pattern`, `*_test.exs`, already matches.
+
+```elixir
+# mix.exs
+def project do
+  [
+    # ...
+    test_paths: ["test", "contract"]
+  ]
+end
+```
+
+`mix covenant.check` runs `contract/` whether or not it's in `test_paths`. A real run on [`test/fixtures/sibling_project`](https://github.com/tools4imps/covenant/tree/main/test/fixtures/sibling_project):
+
+```text
+$ mix covenant.check
+covenant.check: running mix test contract
+Running ExUnit with seed: 844304, max_cases: 20
+
+...
+Finished in 0.01 seconds (0.01s async, 0.00s sync)
+3 tests, 0 failures
+
+Contract coverage (obligations with a passing test / active obligations)
+
+  calc          2/2  100.0%
+
+  app contract      2/2  100.0%
+
+  total             2/2  100.0%
+
+wrote contract/coverage.json
+covenant.check: the Contract holds
+```
+
+It checks what `flinch contract` checks: every obligation is named by a Contract test, every Contract test names an obligation of its own primitive, no test outside `contract/` carries a Contract comment or tag, and every `covers` line names code that loads (`--static` lists those as skipped). Two primitives covering the same code fail it too. Coverage goes to `contract/coverage.json` when the project has no `contracts/`.
+
+`mix covenant.mutate calc` mutates the code the covers name, keeping only what the primitive owns by the most specific reference, and runs the tests beside the README:
+
+```text
+$ mix covenant.mutate calc
+covenant.mutate: calc — modules (covers): Calc
+covenant.mutate: tests: contract/calc/calc_test.exs
+covenant.mutate: Calc (lib/calc.ex)
+  m001 lib/calc.ex:6:24 return_nil `a + b` → `nil`  killed by 1 test(s)
+  ...
+  m007 lib/calc.ex:12:9 comparison_swap `<` → `<=`  SURVIVED
+  ...
+Kill matrix — calc (Calc)
+  11 mutants: 9 killed, 2 survived, 0 timed out, 0 invalid — score 81.8%
+  3 tests, baseline 10 ms, seed 0, timeout 1000 ms
+
+  obligation  killed  unique
+  calc/A1          2       2
+  calc/A2          7       7
+
+Survivors (2; 0 unsorted)
+  m007 lib/calc.ex:12:9 comparison_swap `<` → `<=`  equivalent — At a bound, the bound is n: When `n` equals `lo`, the first clause returns `lo`, which is `n`, so `<` and `<=` agree. The same holds for `hi`.
+  m009 lib/calc.ex:13:9 comparison_swap `>` → `>=`  equivalent — At a bound, the bound is n: When `n` equals `lo`, the first clause returns `lo`, which is `n`, so `<` and `<=` agree. The same holds for `hi`.
+
+covenant.mutate: every mutant is caught or sorted
+```
+
+Survivors are declared in the primitive's `mutants.md`, under a heading that gives the reason:
+
+````markdown
+## At a bound, the bound is n
+
+When `n` equals `lo`, the first clause returns `lo`, which is `n`, so `<` and
+`<=` agree. The same holds for `hi`.
+
+```equivalent
+Calc.clamp/3: < -> <=
+Calc.clamp/3: > -> >=
+```
+````
+
+A line is a unit and the mutation as the run prints it, `Module.function/arity: from -> to`. An `equivalent` block claims no program can tell the mutant from the original; an `unpromised` block says the behaviour changes and the Contract leaves it open, and also takes `Module.function/arity: *` for every survivor of the unit. A declaration that a test contradicts, or that matches nothing, fails the run. An unsorted survivor is printed as a block ready to paste.
+
+`mix covenant.regen calc` writes the README, `mutants.md`, the Contract tests and a stub of every public function the primitive covers.
 
 ## Configuration
 
 ```elixir
 config :covenant,
   contracts_dir: "contracts",              # default
+  sibling_dir: "contract",                 # default; the sibling layout
   test_paths: ["test/contract"],           # default; globs allowed
   results_dir: "_build/covenant/results"   # default
 ```
 
-Covenant resolves paths from the directory that holds `contracts/`, never from the directory `mix` runs in. In an umbrella, set `contracts_dir: Path.expand("../contracts", __DIR__)` in `config/config.exs` and `test_paths: ["apps/*/test/contract"]`; each app's results are written separately and merged by `mix covenant.check`. [`test/fixtures/umbrella_project`](https://github.com/tools4imps/covenant/tree/main/test/fixtures/umbrella_project) runs the tasks from inside an app.
+Covenant resolves paths from the directory that holds `contracts/` (or, without one, `contract/`), never from the directory `mix` runs in. In an umbrella, set `contracts_dir: Path.expand("../contracts", __DIR__)` in `config/config.exs` and `test_paths: ["apps/*/test/contract"]`; each app's results are written separately and merged by `mix covenant.check`. [`test/fixtures/umbrella_project`](https://github.com/tools4imps/covenant/tree/main/test/fixtures/umbrella_project) runs the tasks from inside an app.
 
 ## In CI
 
@@ -368,7 +503,7 @@ The test of a Contract is regeneration. If a component can be deleted and rebuil
 
 ## How Covenant holds itself to account
 
-Covenant has its own Contract in [`contracts/`](https://github.com/tools4imps/covenant/tree/main/contracts): 77 obligations across nine light-form components, a system intent and the decision records behind its policies. Every test in `test/contract/` is a `Covenant.Case` test that names its obligations. CI runs the suite and `mix covenant.check` on every push, on Elixir 1.18 and 1.19.
+Covenant has its own Contract in [`contracts/`](https://github.com/tools4imps/covenant/tree/main/contracts): 85 obligations across ten light-form components, a system intent and the decision records behind its policies. Every test in `test/contract/` is a `Covenant.Case` test that names its obligations. CI runs the suite and `mix covenant.check` on every push, on Elixir 1.18 and 1.19.
 
 Two components are mutated with Covenant itself. `covenant.conditions` makes 206 mutants: 177 killed, 27 invalid, and 2 survivors. `covenant.mutate`, run against its own unit tests, makes 1396: 1197 killed, 139 invalid, and 60 survivors. Every survivor is sorted, with its reason, in `contracts/covenant/*.survivors.yml`.
 
@@ -386,6 +521,8 @@ mix covenant.check     # Covenant against its own Contract
 - Mutation runs one component at a time. There is no mode that mutates only what a branch changed.
 - `--jobs` isolates `tmp/` and nothing else.
 - The modules that run the mutation worker can't be mutated by their own run.
+- In the sibling layout, a `covers` function must be public: the check finds it with `__info__/1`.
+- A `mutants.md` declaration names Covenant's printed mutation, so declarations don't carry over between flinch and Covenant.
 
 ## License
 

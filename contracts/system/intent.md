@@ -3,7 +3,8 @@
 ## Purpose
 
 Covenant is the Contract layer of IMP for Elixir: it parses a `contracts/`
-directory (intents, obligations files, decision records, scope ceilings),
+directory (intents, obligations files, decision records, scope ceilings) and
+the sibling layout's `contract/` directory that flinch, qualm and exhale read,
 binds contract tests to obligations at compile time, measures contract
 coverage, re-checks record premises, writes regeneration packs and mutates
 a component to show which obligations its tests hold. It is a library plus

@@ -42,6 +42,12 @@ Component ids are `<app>.<component>` in snake_case (`billing.invoices`).
 Obligation ids are `<component id>.I<n>` (`billing.invoices.I3`). Ids are
 never reused; a retired obligation keeps its number with status `retired`.
 
+Covenant also reads the smaller layout that flinch, qualm and exhale use:
+`contract/<primitive>/README.md` with `- **A1**` obligations and a `covers`
+block, the Contract tests beside it, and an optional `mutants.md`. A project
+can keep either layout or both; the README's "The sibling layout" section
+describes it. The rest of this document is about the `contracts/` layout.
+
 ## Which form
 
 Heavy form is for components where a regenerated implementation could repeat

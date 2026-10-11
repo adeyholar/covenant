@@ -9,7 +9,7 @@ Covenant is governed by its own Contract, in the convention it enforces
 - `system/scope.yml` — the scope budget.
 - `covenant/<component>.obligations.md` — light-form obligations, one file per
   component: `contract`, `case`, `check`, `static`, `conditions`, `regen`,
-  `results`, `tasks` and `mutate`.
+  `results`, `tasks`, `mutate` and `primitive` (the sibling layout).
 - `covenant/<component>.survivors.yml` — the sorted survivors of
   `mix covenant.mutate` for `conditions` and `mutate`.
 - `test/contract/covenant/**/*_contract_test.exs` — the executable obligations.
