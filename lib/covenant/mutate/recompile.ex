@@ -77,17 +77,72 @@ defmodule Covenant.Mutate.Recompile do
   end
 
   @doc false
+  @spec with_cleanup((-> result)) :: result when result: var
+  def with_cleanup(fun) do
+    loaded = loaded_modules()
+    tracer = spawn_link(fn -> collect(MapSet.new()) end)
+    session = :trace.session_create(__MODULE__, tracer, [])
+    # Only the module name is sent, never the potentially large BEAM binary.
+    match = [{[:"$1", [], :_], [], [{:message, :"$1"}]}]
+    :trace.function(session, {:code, :load_binary, 3}, match, [:local])
+    :trace.process(session, :all, true, [:call, :arity])
+
+    try do
+      fun.()
+    after
+      :trace.process(session, :all, false, [:call])
+      ref = :trace.delivered(session, :all)
+
+      receive do
+        {:trace_delivered, :all, ^ref} -> :ok
+      end
+
+      send(tracer, {:modules, self(), ref})
+
+      compiled =
+        receive do
+          {^ref, modules} -> modules
+        end
+
+      :trace.session_destroy(session)
+      send(tracer, :stop)
+      remove_generated(loaded, compiled)
+    end
+  end
+
+  # Code.load_binary/3 observes Module.create/3 as well as compiler workers.
+  # A deleted helper is absent from all_loaded/0 while old code can remain.
+  defp collect(modules) do
+    receive do
+      {:trace, _pid, :call, {:code, :load_binary, 3}, module} ->
+        collect(MapSet.put(modules, module))
+
+      {:modules, caller, ref} ->
+        send(caller, {ref, MapSet.to_list(modules)})
+        collect(modules)
+
+      :stop ->
+        :ok
+
+      _ ->
+        collect(modules)
+    end
+  end
+
+  @doc false
   @spec loaded_modules() :: MapSet.t(module())
   def loaded_modules, do: MapSet.new(:code.all_loaded(), &elem(&1, 0))
 
   @doc false
   @spec remove_generated(MapSet.t(module())) :: :ok
-  def remove_generated(loaded) do
+  def remove_generated(loaded, compiled \\ []) do
     # Elixir loads compiled modules with an empty code filename, including
     # Module.create/3 with virtual sources. Disk modules loaded on demand have
     # a BEAM filename and must remain loaded. The snapshot also protects all
     # modules that existed before this mutant, including in-memory fixtures.
-    for {module, []} <- :code.all_loaded(), not MapSet.member?(loaded, module) do
+    memory = for {module, []} <- :code.all_loaded(), do: module
+
+    for module <- Enum.uniq(memory ++ compiled), not MapSet.member?(loaded, module) do
       :code.purge(module)
       :code.delete(module)
       :code.purge(module)

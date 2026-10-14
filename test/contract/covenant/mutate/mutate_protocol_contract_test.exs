@@ -1,7 +1,79 @@
 defmodule Covenant.MutateProtocolContractTest do
   use Covenant.Case, component: "covenant.mutate", async: true
 
-  alias Covenant.Mutate.Mutator
+  alias Covenant.Mutate.{Mutant, Mutator, Runner}
+
+  @tag obligation: "covenant.mutate.I26"
+  test "a shared implementation keeps all module identities without duplicate mutations" do
+    source = "defimpl Sample.Protocol, for: [Map, List] do\n def value(_), do: 42\nend"
+    assert {:ok, ast} = Mutator.parse(source, "shared.ex")
+    modules = ["Sample.Protocol.Map", "Sample.Protocol.List"]
+    sites = Mutator.sites(ast, modules: modules)
+    assert length(sites) == 3
+    assert Enum.all?(sites, &(Mutant.modules(&1) == modules))
+    assert Runner.without_mutants(modules, sites) == []
+
+    for site <- sites do
+      assert {:ok, decoded} = site |> Mutant.to_map() |> Mutant.decode()
+      assert Mutant.modules(decoded) == modules
+    end
+  end
+
+  @tag obligation: "covenant.mutate.I26"
+  test "either implementation owns a shared body when covers use different primitives" do
+    modules = ["Sample.Protocol.Map", "Sample.Protocol.List"]
+    source = "defimpl Sample.Protocol, for: [Map, List] do\n def value(_), do: 42\nend"
+    {:ok, ast} = Mutator.parse(source, "shared.ex")
+    [site | _] = Mutator.sites(ast, modules: modules)
+
+    components =
+      for {module, id} <- Enum.zip(modules, ["maps", "lists"]), into: %{} do
+        covers = %Covenant.Covers{
+          ref: {:function, module, "value", 1},
+          text: "#{module}.value/1",
+          file: "contract/#{id}/README.md",
+          line: 1
+        }
+
+        {id,
+         %Covenant.Contract.Component{
+           id: id,
+           app: "contract",
+           name: id,
+           form: :primitive,
+           file: covers.file,
+           covers: [covers]
+         }}
+      end
+
+    contract = %Covenant.Contract{components: components}
+    assert Covenant.Mutate.covered_by?(contract, "maps", site)
+    assert Covenant.Mutate.covered_by?(contract, "lists", site)
+  end
+
+  @tag obligation: "covenant.mutate.I26"
+  test "an exception for one module cannot exempt a shared body" do
+    {:ok, contract} = Covenant.Contract.load(Covenant.ContractBuilder.fixture_contracts())
+    component = Covenant.Contract.component(contract, "example.greeter")
+
+    {:ok, ast} =
+      Mutator.parse("defmodule Example.Greeter do\n def clamp(_), do: 42\nend", "shared.ex")
+
+    [site | _] = Mutator.sites(ast)
+    site = %{site | id: "m001", verdict: :survived, modules: ["Example.Greeter", "Other.Greeter"]}
+
+    results = %{
+      tests: [],
+      mutants: [site],
+      modules: site.modules,
+      files: [site.file],
+      baseline_ms: 0
+    }
+
+    matrix = Covenant.Mutate.Matrix.build(results, component: component)
+    assert [%{sort: nil}] = matrix.survivors
+    refute Covenant.Mutate.Matrix.ok?(matrix)
+  end
 
   @tag obligation: "covenant.mutate.I26"
   test "protocol implementations are selected by their implementation module" do

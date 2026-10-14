@@ -67,6 +67,7 @@ defmodule Covenant.Mutate.Mutator do
       defs: [],
       macros: [],
       implementation_headers: [],
+      implementation_modules: [],
       macros_enabled: Keyword.get(opts, :macros, false),
       skip: 0,
       sites: [],
@@ -109,6 +110,7 @@ defmodule Covenant.Mutate.Mutator do
             from: variant.from,
             to: variant.to,
             module: List.first(state.modules),
+            modules: shared_modules(state),
             # Definitions in macro output belong to the outer provider macro.
             function: List.last(state.macros) || List.first(state.defs),
             index: state.counter,
@@ -134,7 +136,8 @@ defmodule Covenant.Mutate.Mutator do
   defp push({:defimpl, _, [_protocol | args]}, %{macros: [_ | _]} = state),
     do: %{
       state
-      | implementation_headers: [implementation_header(args) | state.implementation_headers]
+      | implementation_headers: [implementation_header(args) | state.implementation_headers],
+        implementation_modules: [[] | state.implementation_modules]
     }
 
   defp push({:defimpl, _, [protocol | args]}, state) do
@@ -147,15 +150,15 @@ defmodule Covenant.Mutate.Mutator do
       |> List.wrap()
       |> Enum.map(&(protocol <> "." <> reference_name(&1, state.modules)))
 
-    # One AST body can implement several types. Pick the selected implementation
-    # for reporting; applying the mutation still changes that shared body once.
+    # Keep a primary module for older reports, and all identities for ownership.
     selected =
       Enum.find(names, &(state.targets == nil or &1 in state.targets)) || List.first(names)
 
     %{
       state
       | modules: [selected | state.modules],
-        implementation_headers: [implementation_header(args) | state.implementation_headers]
+        implementation_headers: [implementation_header(args) | state.implementation_headers],
+        implementation_modules: [names | state.implementation_modules]
     }
   end
 
@@ -177,13 +180,18 @@ defmodule Covenant.Mutate.Mutator do
   defp pop({:defmodule, _, [_, _]}, state), do: %{state | modules: tl(state.modules)}
 
   defp pop({:defimpl, _, _}, %{macros: [_ | _]} = state),
-    do: %{state | implementation_headers: tl(state.implementation_headers)}
+    do: %{
+      state
+      | implementation_headers: tl(state.implementation_headers),
+        implementation_modules: tl(state.implementation_modules)
+    }
 
   defp pop({:defimpl, _, _}, state),
     do: %{
       state
       | modules: tl(state.modules),
-        implementation_headers: tl(state.implementation_headers)
+        implementation_headers: tl(state.implementation_headers),
+        implementation_modules: tl(state.implementation_modules)
     }
 
   defp pop({form, _, [_ | _]}, state) when form in [:defmacro, :defmacrop],
@@ -219,6 +227,12 @@ defmodule Covenant.Mutate.Mutator do
     do: String.starts_with?(Atom.to_string(form), "sigil_")
 
   defp skip?(_, _state), do: false
+
+  defp shared_modules(%{macros: [], modules: [current | _], implementation_modules: [names | _]}) do
+    if current in names and length(names) > 1, do: names, else: []
+  end
+
+  defp shared_modules(_state), do: []
 
   defp targeted?(%{targets: nil, modules: [_ | _]}), do: true
   defp targeted?(%{targets: nil}), do: false

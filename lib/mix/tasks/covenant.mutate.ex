@@ -36,6 +36,11 @@ defmodule Mix.Tasks.Covenant.Mutate do
   ## Options
 
   * `--module MOD` — an implementation module (repeatable; overrides the Contract);
+  * `--max-runtime MS` — total task deadline, including preparation and worker
+    replacements (default 3600000, one hour). SIGTERM cancels the job. Owned
+    worker ports are closed on cancellation; workers remove their copies and
+    halt. Each completed verdict is saved atomically. A failed or cancelled
+    job keeps its partial raw results and cannot pass as a complete matrix;
   * `--timeout MS` — per-test timeout for mutant runs. Without it the baseline is
     measured and the timeout is five times the slowest baseline test, never under
     1000 ms, so a mutant that loops forever is cut off quickly instead of holding
@@ -141,6 +146,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
   @switches [
     module: :keep,
     timeout: :integer,
+    max_runtime: :integer,
     fail_fast: :boolean,
     macros: :boolean,
     recompile: :keep,
@@ -185,6 +191,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
       component: component_id,
       modules: Keyword.get_values(opts, :module),
       timeout: opts[:timeout],
+      max_runtime: opts[:max_runtime] || 3_600_000,
       fail_fast: opts[:fail_fast] || false,
       macros: opts[:macros] || false,
       recompile: Keyword.get_values(opts, :recompile),
@@ -195,12 +202,19 @@ defmodule Mix.Tasks.Covenant.Mutate do
       out: opts[:out] || Path.join(Mutate.default_dir(component_id), "kill_matrix.json")
     }
 
+    if settings.max_runtime <= 0, do: Mix.raise("--max-runtime must be positive")
+
     if settings.recompile != [] and not settings.macros,
       do: Mix.raise("--recompile requires --macros")
 
     case opts[:raw] do
-      nil -> parent(settings)
-      raw -> worker(settings, raw, opts[:slice] || "1/1", skip_ids(opts[:skip]))
+      nil ->
+        Covenant.Mutate.Job.run(settings.max_runtime, fn guard ->
+          parent(Map.put(settings, :job_guard, guard))
+        end)
+
+      raw ->
+        worker(settings, raw, opts[:slice] || "1/1", skip_ids(opts[:skip]))
     end
   end
 
@@ -256,23 +270,33 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     File.mkdir_p!(run_dir)
 
+    Covenant.Mutate.Job.artifacts(settings.job_guard, run_dir)
+    Mix.shell().info("covenant.mutate: raw results: #{run_dir}")
+
     raws =
-      try do
-        1..settings.jobs
-        |> Enum.map(fn i -> Task.async(fn -> run_worker(settings, plan, i, run_dir) end) end)
-        |> await_workers()
-        |> case do
-          {:ok, raws} -> raws
-          {:error, reason} -> fail(reason)
-        end
-      after
-        File.rm_rf(run_dir)
+      1..settings.jobs
+      |> Enum.map(fn i ->
+        task = Task.async(fn -> run_worker(settings, plan, i, run_dir) end)
+        Covenant.Mutate.Job.watch(settings.job_guard, task)
+      end)
+      |> await_workers()
+      |> case do
+        {:ok, raws} ->
+          raws
+
+        {:error, reason} ->
+          Mix.shell().error("covenant.mutate: partial results: #{run_dir}")
+          fail(reason)
       end
 
     results =
       case Mutate.merge(raws) do
-        {:ok, results} -> results
-        {:error, reason} -> fail(reason)
+        {:ok, results} ->
+          results
+
+        {:error, reason} ->
+          Mix.shell().error("covenant.mutate: partial results: #{run_dir}")
+          fail(reason)
       end
 
     Enum.each(results.ignored, fn {name, why} ->
@@ -306,7 +330,10 @@ defmodule Mix.Tasks.Covenant.Mutate do
         do: Map.merge(report, %{"macros" => true, "recompile" => settings.recompile}),
         else: report
 
-    File.write!(settings.out, [Covenant.JSON.pretty(report), "\n"])
+    temporary = settings.out <> ".tmp"
+    File.write!(temporary, [Covenant.JSON.pretty(report), "\n"], [:sync])
+    File.rename!(temporary, settings.out)
+    File.rm_rf(run_dir)
     Mix.shell().info("\nwrote #{settings.out}")
 
     unsorted = for %{mutant: m, sort: nil} <- matrix.survivors, do: m
@@ -437,6 +464,10 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
   defp await_workers(pending, raws) do
     receive do
+      {:DOWN, ref, :process, _pid, reason} when is_map_key(pending, ref) ->
+        pending |> Map.delete(ref) |> Map.values() |> Enum.each(&Task.shutdown(&1, :brutal_kill))
+        {:error, "worker task stopped: #{inspect(reason)}"}
+
       {ref, result} when is_map_key(pending, ref) ->
         Process.demonitor(ref, [:flush])
 
@@ -466,13 +497,17 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     case spawn_worker(settings, plan, i, raw_path, skip) do
       0 ->
-        with {:ok, raw} <- Mutate.decode_raw(raw_path), do: {:ok, [raw | raws]}
+        with {:ok, raw} <- Mutate.decode_raw(raw_path) do
+          if raw.complete,
+            do: {:ok, [raw | raws]},
+            else: {:error, "#{worker} exited before final verification; results are incomplete"}
+        end
 
       @timeout_status ->
         # no results file: it was stopped while no mutant was running (an unmutated
         # re-run outran its budget). That is no mutant's verdict, and a new worker would
         # meet the same state, so it is an error; the worker named the last mutant on its output
-        if File.exists?(raw_path) do
+        if match?({:ok, %{stopped: true}}, Mutate.decode_raw(raw_path)) do
           stopped(settings, plan, i, run_dir, {attempt, skip, raws}, raw_path)
         else
           {:error,
@@ -590,11 +625,14 @@ defmodule Mix.Tasks.Covenant.Mutate do
       slice: {i, n},
       skip: skip,
       keep: keep(contract, plan, source),
+      on_checkpoint: fn result ->
+        write_raw(raw_path, result, settings, slice, modules, ignored, false)
+      end,
       on_progress: &Mix.shell().info(prefix <> progress(&1)),
       on_eta: &Mix.shell().info(prefix <> eta(&1)),
       # runs in the worker's private copy, so the path is absolute; the runner halts
       on_timeout: fn result, _mutant ->
-        write_raw(raw_path, result, settings, slice, modules, ignored)
+        write_raw(raw_path, result, settings, slice, modules, ignored, false, true)
       end
     }
 
@@ -613,14 +651,27 @@ defmodule Mix.Tasks.Covenant.Mutate do
     end
   end
 
-  defp write_raw(raw_path, result, settings, slice, modules, ignored) do
+  defp write_raw(
+         raw_path,
+         result,
+         settings,
+         slice,
+         modules,
+         ignored,
+         complete \\ true,
+         stopped \\ false
+       ) do
     File.mkdir_p!(Path.dirname(raw_path))
 
+    temporary = raw_path <> ".tmp"
+
     File.write!(
-      raw_path,
+      temporary,
       [
         Mutate.encode_raw(result,
           component: settings.component,
+          complete: complete,
+          stopped: stopped,
           slice: slice,
           modules: Enum.map(modules, fn {m, _} -> inspect(m) end),
           ignored: ignored
@@ -629,6 +680,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
       ],
       [:sync]
     )
+
+    File.rename!(temporary, raw_path)
   end
 
   # The task that spawned this worker holds the other end of its standard input, and

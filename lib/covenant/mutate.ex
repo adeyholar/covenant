@@ -49,13 +49,13 @@ defmodule Covenant.Mutate do
   specific rule (`Covenant.Covers.owners/3`).
   """
   @spec covered_by?(Contract.t(), String.t(), Mutant.t()) :: boolean()
-  def covered_by?(%Contract{} = contract, id, %Mutant{module: module, function: function}) do
+  def covered_by?(%Contract{} = contract, id, %Mutant{function: function} = mutant) do
     primitives =
       for {pid, %Component{form: :primitive, covers: covers}} <- contract.components,
           into: %{},
           do: {pid, covers}
 
-    id in Covenant.Covers.owners(primitives, module, function)
+    Enum.any?(Mutant.modules(mutant), &(id in Covenant.Covers.owners(primitives, &1, function)))
   end
 
   @doc "Whether a progress line is due after `done` of `total` mutants: every 25th, but not the last."
@@ -155,6 +155,8 @@ defmodule Covenant.Mutate do
       "covenant" => Covenant.version(),
       "component" => Keyword.fetch!(meta, :component),
       "slice" => Keyword.get(meta, :slice, "1/1"),
+      "complete" => Keyword.get(meta, :complete, true),
+      "stopped" => Keyword.get(meta, :stopped, false),
       "modules" => Keyword.get(meta, :modules, []),
       "ignored" => Enum.map(Keyword.get(meta, :ignored, []), fn {name, why} -> [name, why] end),
       "files" => result.files,
@@ -188,6 +190,8 @@ defmodule Covenant.Mutate do
       {:ok,
        %{
          component: raw["component"],
+         complete: Map.get(raw, "complete", true),
+         stopped: Map.get(raw, "stopped", false),
          slice: raw["slice"],
          modules: List.wrap(raw["modules"]),
          ignored: Enum.map(List.wrap(raw["ignored"]), fn [name, why] -> {name, why} end),

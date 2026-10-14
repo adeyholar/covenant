@@ -168,6 +168,8 @@ defmodule Covenant.Mutate.Runner do
     after every 25th mutant of the slice (`Covenant.Mutate.progress_due?/2`);
   * `:fail_fast` — (optional, default `false`) stop each mutant's run at its
     first failing test: exact verdict, `credit: :partial` on a kill;
+  * `:on_checkpoint` — (optional) receives results after each completed verdict,
+    before progress is printed; partial results require final verification;
   * `:on_timeout` — (optional) called with the results so far, the timed-out
     mutant included with the verdict `:timeout`, and that mutant when a
     mutant's run goes longer than `budget_ms/2` without finishing a test. It
@@ -201,6 +203,7 @@ defmodule Covenant.Mutate.Runner do
           optional(:on_eta) => (map() -> any()),
           optional(:fail_fast) => boolean(),
           optional(:keep) => (Mutant.t() -> boolean()),
+          optional(:on_checkpoint) => (result() -> any()),
           optional(:on_timeout) => (result(), Mutant.t() -> any()),
           optional(:halt) => (pos_integer() -> any()),
           optional(:skip) => [String.t()],
@@ -295,6 +298,9 @@ defmodule Covenant.Mutate.Runner do
     case run_mutant(mutant, file, env.modules, fail_fast, env.budget, env.callers) do
       {:ok, ran} ->
         with :ok <- healthy(ran, env) do
+          if checkpoint = Map.get(env.plan, :on_checkpoint),
+            do: checkpoint.(env.result.(Enum.reverse([ran | verdicts])))
+
           env.plan.on_progress.(ran)
           eta(env.plan, done, env.total, env.started)
           {:ok, ran}
@@ -658,7 +664,7 @@ defmodule Covenant.Mutate.Runner do
   @doc false
   @spec without_mutants([String.t()], [Mutant.t()]) :: [String.t()]
   def without_mutants(targets, mutants) do
-    present = MapSet.new(mutants, & &1.module)
+    present = mutants |> Enum.flat_map(&Mutant.modules/1) |> MapSet.new()
     Enum.reject(targets, &MapSet.member?(present, &1))
   end
 
@@ -790,6 +796,10 @@ defmodule Covenant.Mutate.Runner do
   @spec run_tests([module()], pos_integer() | :infinity, pos_integer() | :infinity) ::
           {:ok, [entry()]} | {:error, String.t()} | {:budget, [entry()]}
   def run_tests(modules, max_failures, budget) do
+    Recompile.with_cleanup(fn -> do_run_tests(modules, max_failures, budget) end)
+  end
+
+  defp do_run_tests(modules, max_failures, budget) do
     ExUnit.configure(max_failures: max_failures)
     unlock_tmp()
     flush_heartbeats()
@@ -850,24 +860,24 @@ defmodule Covenant.Mutate.Runner do
 
   defp run_mutant(mutant, file, modules, fail_fast, budget, callers) do
     originals = Enum.uniq_by(file.originals ++ callers.originals, &elem(&1, 0))
-    loaded = if callers.files != [], do: Recompile.loaded_modules()
-    purge(originals)
 
-    judged =
-      case compile(Mutator.apply(file.ast, mutant), file.file, budget, callers) do
-        {:error, reason} -> {:ok, %{mutant | verdict: :invalid, reason: reason}}
-        {:ok, _} -> judge(mutant, modules, fail_fast, budget)
-        :budget -> {:budget, []}
+    Recompile.with_cleanup(fn ->
+      purge(originals)
+
+      judged =
+        case compile(Mutator.apply(file.ast, mutant), file.file, budget, callers) do
+          {:error, reason} -> {:ok, %{mutant | verdict: :invalid, reason: reason}}
+          {:ok, _} -> judge(mutant, modules, fail_fast, budget)
+          :budget -> {:budget, []}
+        end
+
+      case {judged, restore(originals)} do
+        {_, {:error, reason}} -> {:error, "#{describe(mutant)}: #{reason}"}
+        {{:error, reason}, :ok} -> {:error, "#{describe(mutant)}: #{reason}"}
+        {{:ok, result}, :ok} -> {:ok, %{result | replacement: nil}}
+        {{:budget, entries}, :ok} -> {:budget, entries}
       end
-
-    if loaded, do: Recompile.remove_generated(loaded)
-
-    case {judged, restore(originals)} do
-      {_, {:error, reason}} -> {:error, "#{describe(mutant)}: #{reason}"}
-      {{:error, reason}, :ok} -> {:error, "#{describe(mutant)}: #{reason}"}
-      {{:ok, result}, :ok} -> {:ok, %{result | replacement: nil}}
-      {{:budget, entries}, :ok} -> {:budget, entries}
-    end
+    end)
   end
 
   # Compiling runs the mutant's own macros and module bodies, so a mutant can hang here

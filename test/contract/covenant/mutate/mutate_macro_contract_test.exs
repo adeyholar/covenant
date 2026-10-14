@@ -244,6 +244,42 @@ defmodule Covenant.MutateMacroContractTest do
     assert disk.value() == :kept
   end
 
+  @tag obligation: "covenant.mutate.I25"
+  test "cleanup tracks deleted helpers, including Module.create and exceptions" do
+    previous = Code.get_compiler_option(:tracers)
+
+    for create <- [:compile, :module_create] do
+      module = Module.concat(Covenant.DeletedHelper, "M#{System.unique_integer([:positive])}")
+      on_exit(fn -> unload(module) end)
+
+      assert_raise RuntimeError, "probe", fn ->
+        Recompile.with_cleanup(fn ->
+          case create do
+            :compile ->
+              {:ok, ast} =
+                Mutator.parse(
+                  "defmodule #{inspect(module)} do\n def value, do: 42\nend",
+                  "virtual.ex"
+                )
+
+              assert {:ok, _} = Mutator.compile(ast, "virtual.ex")
+
+            :module_create ->
+              Module.create(module, quote(do: def(value, do: 42)), file: "virtual.ex", line: 1)
+          end
+
+          :code.purge(module)
+          :code.delete(module)
+          assert :erlang.check_old_code(module)
+          raise "probe"
+        end)
+      end
+
+      refute :erlang.check_old_code(module)
+      assert Code.get_compiler_option(:tracers) == previous
+    end
+  end
+
   defp unload(module) do
     :code.purge(module)
     :code.delete(module)

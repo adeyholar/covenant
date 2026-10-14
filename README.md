@@ -325,6 +325,24 @@ The modules to mutate come from `--module` flags, else the `modules:` front matt
 
 By default, docs, specs, types, `defmacro`, `defguard`, `defstruct` and `defexception` fields, `use`, `import`, `alias`, `require`, sigils and `quote` are not mutated. Struct literals in tests are expanded at compile time, so a mutant of a struct default could never be killed. A run that finds nothing to mutate is an error, and a module with no mutants is warned about.
 
+Mutation jobs have a one-hour total deadline. Use `--max-runtime MS` to set
+another positive limit. This includes preparation and worker replacements;
+`--timeout` remains the per-test limit. SIGTERM cancels the job and closes its
+worker ports. Completed verdicts are saved atomically before progress is printed.
+An incomplete or cancelled job keeps its raw-result directory and names it in the
+output. These partial files do not establish a complete mutation gate.
+
+Mutation cleanup uses independent VM trace sessions and needs Erlang/OTP 27 or
+later. It tracks in-memory module loads in runtime and macro mode, including
+helpers deleted by tests. Tracking records module names, never code binaries.
+Baseline, mutant and final verification test runs all use this cleanup.
+
+A `defimpl` body shared by several types has one mutation per source change.
+Its JSON records all implementation modules in `modules`, while `module` keeps
+the primary name for compatibility. Both module selection and primitive
+ownership use all names. An exception for only one implementation does not
+exempt the other implementations in the shared body.
+
 To test a macro provider such as `__using__/1`, select macro mode and name the
 compiled callers that the contract tests use:
 
