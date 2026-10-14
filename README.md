@@ -332,6 +332,13 @@ worker ports. Completed verdicts are saved atomically before progress is printed
 An incomplete or cancelled job keeps its raw-result directory and names it in the
 output. These partial files do not establish a complete mutation gate.
 
+Each worker VM handles at most 50 mutation verdicts. Set a positive
+`--max-mutants-per-worker N` to change this limit. The original tests must pass
+after each group before its worker retires. A fresh VM then checks the remaining
+IDs, with the same concurrent worker limit and whole-job deadline. This bounds
+the accumulation of VM module indices and atoms from repeated compilation;
+purging generated code alone cannot reclaim all of this VM bookkeeping.
+
 Mutation cleanup uses independent VM trace sessions and needs Erlang/OTP 27 or
 later. It tracks in-memory module loads in runtime and macro mode, including
 helpers deleted by tests. Tracking records module names, never code binaries.

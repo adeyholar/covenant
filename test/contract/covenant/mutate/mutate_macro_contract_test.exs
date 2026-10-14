@@ -332,7 +332,7 @@ defmodule Covenant.MutateMacroE2EContractTest do
     refute File.exists?(workdir)
   end
 
-  @tag obligation: ["covenant.mutate.I24", "covenant.mutate.I25"]
+  @tag obligation: ["covenant.mutate.I24", "covenant.mutate.I25", "covenant.mutate.I28"]
   test "macro workers rebuild direct callers, transitive callers and compiled test values" do
     mix = System.find_executable("mix") || raise "mix not on PATH"
 
@@ -344,6 +344,8 @@ defmodule Covenant.MutateMacroE2EContractTest do
           "vm.macro",
           "--macros",
           "--jobs",
+          "2",
+          "--max-mutants-per-worker",
           "2",
           "--recompile",
           "test/contract/vm/macro_contract_test.exs",
@@ -358,6 +360,7 @@ defmodule Covenant.MutateMacroE2EContractTest do
       )
 
     assert status == 0, output
+    assert output =~ "retired after", output
 
     matrix =
       @project

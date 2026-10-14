@@ -16,6 +16,12 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ## Obligations
 
+### covenant.mutate.I28 — Worker VMs have bounded mutation lifetimes
+- **scope:** `mix covenant.mutate`, `Covenant.Mutate.Runner.run/1`
+- **must:** Limit each worker VM to 50 mutation verdicts by default, with a positive --max-mutants-per-worker override. Include invalid mutations in the limit. Verify the original suite before accepting a completed group and retiring the worker. Start a fresh VM for the remaining IDs only after the old worker exits. Keep the requested concurrent worker count, round-robin slices, deterministic IDs and exact test credit. Merge each verdict once. A failed verification or an ordinary incomplete checkpoint cannot request retirement or hide a failure. Keep one total deadline and cancellation scope across all worker replacements. Preserve partial results on failure and remove successful private copies and raw directories.
+- **kind:** functional
+- **status:** active
+
 ### covenant.mutate.I27 — Mutation jobs are bounded and keep partial results
 - **scope:** `mix covenant.mutate`
 - **must:** Apply a total job deadline, including preparation and worker replacements. Allow a positive --max-runtime in milliseconds, with a one-hour default. Stop owned workers on deadline or cancellation. Save each completed verdict atomically before printing progress. Preserve partial raw results on worker failure and identify their directory. Partial results cannot pass as a complete mutation run. Remove successful raw-run directories.

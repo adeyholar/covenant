@@ -180,6 +180,9 @@ defmodule Covenant.Mutate.Runner do
     `timeout_exit/0` after `:on_timeout`; when it returns, the run is an error;
   * `:skip` — (optional) ids of mutants not to run (those a worker that was
     stopped had already judged);
+  * `:max_mutants` — (optional) maximum verdicts in this VM. Verify the original
+    suite after this group; `result.remaining` counts the slice's unjudged sites.
+    Without this option the runner checks the whole slice;
   * `:isolate` — (optional, default `true`) run the tests from a private copy
     of the project;
   * `:macros` — (optional, default `false`) include macro bodies and quoted
@@ -207,6 +210,7 @@ defmodule Covenant.Mutate.Runner do
           optional(:on_timeout) => (result(), Mutant.t() -> any()),
           optional(:halt) => (pos_integer() -> any()),
           optional(:skip) => [String.t()],
+          optional(:max_mutants) => pos_integer(),
           optional(:macros) => boolean(),
           optional(:recompile) => [Path.t()],
           optional(:isolate) => boolean()
@@ -216,6 +220,7 @@ defmodule Covenant.Mutate.Runner do
           tests: [entry()],
           mutants: [Mutant.t()],
           all: non_neg_integer(),
+          remaining: non_neg_integer(),
           baseline_ms: non_neg_integer(),
           timeout_ms: pos_integer(),
           files: [Path.t()]
@@ -253,11 +258,14 @@ defmodule Covenant.Mutate.Runner do
         |> Enum.filter(fn {_, position} -> rem(position, n) == i - 1 end)
         |> Enum.reject(fn {mutant, _} -> mutant.id in skip end)
 
+      batch = Enum.take(slice, Map.get(plan, :max_mutants, length(slice)))
+
       result = fn verdicts ->
         %{
           tests: tests,
           mutants: verdicts,
           all: length(mutants),
+          remaining: length(slice) - length(verdicts),
           baseline_ms: baseline_ms,
           timeout_ms: timeout,
           files: Enum.map(files, & &1.relative)
@@ -277,7 +285,7 @@ defmodule Covenant.Mutate.Runner do
         result: result
       }
 
-      slice
+      batch
       |> Enum.with_index(1)
       |> Enum.reduce_while([], fn {{mutant, _}, done}, verdicts ->
         case step(mutant, done, verdicts, env) do

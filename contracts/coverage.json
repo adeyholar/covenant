@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 100,
+      "active": 101,
       "coverage": 1.0,
-      "covered": 100
+      "covered": 101
     },
     "system": {
       "active": 0,
@@ -541,10 +541,10 @@
       }
     },
     "covenant.mutate": {
-      "active": 27,
+      "active": 28,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 27,
+      "covered": 28,
       "form": "light",
       "obligations": {
         "covenant.mutate.I1": {
@@ -845,14 +845,32 @@
         "covenant.mutate.I27": {
           "failing": 0,
           "kind": "functional",
-          "passing": 4,
+          "passing": 5,
           "status": "active",
           "testable": true,
           "tests": [
             "test SIGTERM cancels a live worker and retains its checkpoint",
             "test a worker crash preserves its completed verdicts without claiming a complete run",
             "test a zero-status worker crash cannot turn a checkpoint into a complete matrix",
+            "test the same job deadline stops a replacement worker",
             "test the total deadline stops a job even before its first verdict"
+          ]
+        },
+        "covenant.mutate.I28": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 8,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test 1 worker slots with a 1-mutation limit preserve every verdict",
+            "test 1 worker slots with a 2-mutation limit preserve every verdict",
+            "test 2 worker slots with a 1-mutation limit preserve every verdict",
+            "test SIGTERM cancels a live worker and retains its checkpoint",
+            "test failed final verification cannot retire a worker or start a replacement",
+            "test macro workers rebuild direct callers, transitive callers and compiled test values",
+            "test the same job deadline stops a replacement worker",
+            "test worker mutation limits must be positive"
           ]
         },
         "covenant.mutate.I3": {
@@ -1504,8 +1522,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 100,
+    "active": 101,
     "coverage": 1.0,
-    "covered": 100
+    "covered": 101
   }
 }

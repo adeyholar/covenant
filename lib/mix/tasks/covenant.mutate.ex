@@ -41,6 +41,10 @@ defmodule Mix.Tasks.Covenant.Mutate do
     worker ports are closed on cancellation; workers remove their copies and
     halt. Each completed verdict is saved atomically. A failed or cancelled
     job keeps its partial raw results and cannot pass as a complete matrix;
+  * `--max-mutants-per-worker N` — verdicts per worker VM (default 50, positive).
+    Invalid mutations also count. Each group must pass its final original suite
+    before the worker retires. Once it exits, a fresh VM checks the remaining
+    IDs. Renewal keeps the same concurrent worker count and total job deadline;
   * `--timeout MS` — per-test timeout for mutant runs. Without it the baseline is
     measured and the timeout is five times the slowest baseline test, never under
     1000 ms, so a mutant that loops forever is cut off quickly instead of holding
@@ -147,6 +151,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
     module: :keep,
     timeout: :integer,
     max_runtime: :integer,
+    max_mutants_per_worker: :integer,
     fail_fast: :boolean,
     macros: :boolean,
     recompile: :keep,
@@ -192,6 +197,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
       modules: Keyword.get_values(opts, :module),
       timeout: opts[:timeout],
       max_runtime: opts[:max_runtime] || 3_600_000,
+      max_mutants_per_worker: opts[:max_mutants_per_worker] || 50,
       fail_fast: opts[:fail_fast] || false,
       macros: opts[:macros] || false,
       recompile: Keyword.get_values(opts, :recompile),
@@ -203,6 +209,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
     }
 
     if settings.max_runtime <= 0, do: Mix.raise("--max-runtime must be positive")
+
+    if settings.max_mutants_per_worker <= 0,
+      do: Mix.raise("--max-mutants-per-worker must be positive")
 
     if settings.recompile != [] and not settings.macros,
       do: Mix.raise("--recompile requires --macros")
@@ -486,8 +495,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
     end
   end
 
-  # One worker; one that the watchdog stopped (exit status 3) is not a failure: what it
-  # judged is kept and a new worker runs the rest, until one finishes.
+  # Each slot starts workers in sequence. A verified retirement or a mutant
+  # watchdog stop retains its verdicts and lets a new VM check the remaining IDs.
   defp run_worker(settings, plan, i, run_dir),
     do: run_worker(settings, plan, i, run_dir, 1, [], [])
 
@@ -498,9 +507,16 @@ defmodule Mix.Tasks.Covenant.Mutate do
     case spawn_worker(settings, plan, i, raw_path, skip) do
       0 ->
         with {:ok, raw} <- Mutate.decode_raw(raw_path) do
-          if raw.complete,
-            do: {:ok, [raw | raws]},
-            else: {:error, "#{worker} exited before final verification; results are incomplete"}
+          cond do
+            raw.complete ->
+              {:ok, [raw | raws]}
+
+            raw.retired and not raw.stopped ->
+              replace_worker(settings, plan, i, run_dir, {attempt, skip, raws}, raw, :retired)
+
+            true ->
+              {:error, "#{worker} exited before final verification; results are incomplete"}
+          end
         end
 
       @timeout_status ->
@@ -521,13 +537,23 @@ defmodule Mix.Tasks.Covenant.Mutate do
   end
 
   defp stopped(settings, plan, i, run_dir, {attempt, skip, raws}, raw_path) do
-    worker = "worker #{i}/#{settings.jobs}"
-
     with {:ok, raw} <- Mutate.decode_raw(raw_path) do
-      judged = Enum.map(raw.mutants, & &1.id)
+      replace_worker(settings, plan, i, run_dir, {attempt, skip, raws}, raw, :watchdog)
+    end
+  end
 
-      if judged == [] or Enum.all?(judged, &(&1 in skip)) do
-        {:error, "#{worker} was stopped by its watchdog without judging a mutant"}
+  defp replace_worker(settings, plan, i, run_dir, {attempt, skip, raws}, raw, why) do
+    worker = "worker #{i}/#{settings.jobs}"
+    judged = Enum.map(raw.mutants, & &1.id)
+
+    if judged == [] or Enum.any?(judged, &(&1 in skip)) do
+      {:error, "#{worker} cannot restart without new, non-overlapping verdicts"}
+    else
+      if why == :retired do
+        Mix.shell().info(
+          "covenant.mutate: #{worker} retired after #{length(judged)} verified verdict(s); " <>
+            "starting a new worker for the rest"
+        )
       else
         for m <- raw.mutants, m.verdict == :timeout do
           Mix.shell().info(
@@ -535,9 +561,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
               "starting a new worker for the rest"
           )
         end
-
-        run_worker(settings, plan, i, run_dir, attempt + 1, skip ++ judged, [raw | raws])
       end
+
+      run_worker(settings, plan, i, run_dir, attempt + 1, skip ++ judged, [raw | raws])
     end
   end
 
@@ -553,7 +579,12 @@ defmodule Mix.Tasks.Covenant.Mutate do
         "--slice",
         "#{i}/#{settings.jobs}"
       ] ++
-        ["--seed", Integer.to_string(settings.seed)] ++
+        [
+          "--seed",
+          Integer.to_string(settings.seed),
+          "--max-mutants-per-worker",
+          Integer.to_string(settings.max_mutants_per_worker)
+        ] ++
         if(settings.timeout, do: ["--timeout", Integer.to_string(settings.timeout)], else: []) ++
         if(settings.fail_fast, do: ["--fail-fast"], else: []) ++
         if(settings.macros, do: ["--macros"], else: []) ++
@@ -624,15 +655,19 @@ defmodule Mix.Tasks.Covenant.Mutate do
       recompile: settings.recompile,
       slice: {i, n},
       skip: skip,
+      max_mutants: settings.max_mutants_per_worker,
       keep: keep(contract, plan, source),
       on_checkpoint: fn result ->
-        write_raw(raw_path, result, settings, slice, modules, ignored, false)
+        write_raw(raw_path, result, settings, slice, modules, ignored, complete: false)
       end,
       on_progress: &Mix.shell().info(prefix <> progress(&1)),
       on_eta: &Mix.shell().info(prefix <> eta(&1)),
       # runs in the worker's private copy, so the path is absolute; the runner halts
       on_timeout: fn result, _mutant ->
-        write_raw(raw_path, result, settings, slice, modules, ignored, false, true)
+        write_raw(raw_path, result, settings, slice, modules, ignored,
+          complete: false,
+          stopped: true
+        )
       end
     }
 
@@ -643,7 +678,19 @@ defmodule Mix.Tasks.Covenant.Mutate do
             "#{length(result.mutants)} of #{result.all} mutant(s) run, per-test timeout #{result.timeout_ms} ms"
         )
 
-        write_raw(raw_path, result, settings, slice, modules, ignored)
+        retiring = result.remaining > 0
+
+        write_raw(
+          raw_path,
+          result,
+          settings,
+          slice,
+          modules,
+          ignored,
+          complete: not retiring,
+          retired: retiring
+        )
+
         :ok
 
       {:error, reason} ->
@@ -658,8 +705,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
          slice,
          modules,
          ignored,
-         complete \\ true,
-         stopped \\ false
+         state
        ) do
     File.mkdir_p!(Path.dirname(raw_path))
 
@@ -670,8 +716,9 @@ defmodule Mix.Tasks.Covenant.Mutate do
       [
         Mutate.encode_raw(result,
           component: settings.component,
-          complete: complete,
-          stopped: stopped,
+          complete: Keyword.get(state, :complete, true),
+          stopped: Keyword.get(state, :stopped, false),
+          retired: Keyword.get(state, :retired, false),
           slice: slice,
           modules: Enum.map(modules, fn {m, _} -> inspect(m) end),
           ignored: ignored

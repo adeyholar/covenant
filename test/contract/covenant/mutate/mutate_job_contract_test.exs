@@ -49,7 +49,37 @@ defmodule Covenant.MutateJobContractTest do
     refute output =~ "every mutant is caught or sorted"
   end
 
-  @tag obligation: "covenant.mutate.I27"
+  @tag obligation: ["covenant.mutate.I27", "covenant.mutate.I28"]
+  test "the same job deadline stops a replacement worker" do
+    {output, status} =
+      mix(
+        [
+          "covenant.mutate",
+          "vm.checkpoint",
+          "--max-mutants-per-worker",
+          "1",
+          "--timeout",
+          "20000",
+          "--max-runtime",
+          "10000"
+        ],
+        [{"COVENANT_CHECKPOINT_WAIT", "1"}]
+      )
+
+    assert status == 1, output
+    assert output =~ "retired after 1 verified verdict(s)", output
+    assert output =~ "job deadline exceeded", output
+    assert [_, worker, directory] = Regex.run(~r/CHECKPOINT_WAIT (\d+) ([^\n]+)/, output)
+    assert [_, path] = Regex.run(~r/partial results: ([^\n]+)/, output)
+    on_exit(fn -> File.rm_rf!(path) end)
+
+    assert Enum.any?(1..100, fn _ ->
+             {_, alive} = System.cmd("kill", ["-0", worker], stderr_to_stdout: true)
+             (not File.exists?(directory) and alive != 0) or Process.sleep(20) == :never
+           end)
+  end
+
+  @tag obligation: ["covenant.mutate.I27", "covenant.mutate.I28"]
   test "SIGTERM cancels a live worker and retains its checkpoint" do
     port =
       Port.open({:spawn_executable, System.find_executable("mix")}, [
@@ -58,11 +88,22 @@ defmodule Covenant.MutateJobContractTest do
         :stderr_to_stdout,
         {:cd, @project},
         {:env, [{~c"MIX_ENV", ~c"test"}, {~c"COVENANT_CHECKPOINT_WAIT", ~c"1"}]},
-        {:args, ["covenant.mutate", "vm.checkpoint", "--jobs", "1", "--max-runtime", "60000"]}
+        {:args,
+         [
+           "covenant.mutate",
+           "vm.checkpoint",
+           "--jobs",
+           "1",
+           "--max-mutants-per-worker",
+           "1",
+           "--max-runtime",
+           "60000"
+         ]}
       ])
 
     on_exit(fn -> if Port.info(port), do: Port.close(port) end)
     output = wait_for_worker(port, "")
+    assert output =~ "retired after 1 verified verdict(s)", output
     assert [_, worker, directory] = Regex.run(~r/CHECKPOINT_WAIT (\d+) ([^\n]+)/, output)
     assert {:os_pid, manager} = Port.info(port, :os_pid)
     {_, 0} = System.cmd("kill", ["-TERM", Integer.to_string(manager)])
@@ -114,10 +155,10 @@ defmodule Covenant.MutateJobContractTest do
     end
   end
 
-  defp mix(args) do
+  defp mix(args, env \\ []) do
     System.cmd(System.find_executable("mix"), args,
       cd: @project,
-      env: [{"MIX_ENV", "test"}, {"COVENANT_RESULTS_DIR", nil}],
+      env: [{"MIX_ENV", "test"}, {"COVENANT_RESULTS_DIR", nil}] ++ env,
       stderr_to_stdout: true
     )
   end
