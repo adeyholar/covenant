@@ -59,6 +59,7 @@ defmodule Covenant.Mutate.Mutant do
           replacement: Macro.t() | nil,
           verdict: verdict() | nil,
           killed_by: [String.t()],
+          obligations: [String.t()],
           timeouts: [String.t()],
           reason: String.t() | nil,
           credit: credit()
@@ -80,6 +81,7 @@ defmodule Covenant.Mutate.Mutant do
     :verdict,
     :reason,
     killed_by: [],
+    obligations: [],
     timeouts: [],
     credit: :exact
   ]

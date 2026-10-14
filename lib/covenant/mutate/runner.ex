@@ -13,6 +13,14 @@ defmodule Covenant.Mutate.Runner do
   `ExUnit.run/1` runs the test modules, and the originals are reloaded from
   their beam files. No file is written by a mutant.
 
+  With `macros: true`, the explicit `recompile` sources and then the contract
+  test sources are compiled against every mutant. Caller files must be listed
+  in dependency order; discovery is not automatic. Caller and test modules are
+  restored with the target modules. A caller compile error is an invalid mutant,
+  and target plus caller compilation share the watchdog budget. Caller and test
+  modules retain their compiled baseline binaries. New modules compiled in memory
+  are removed after each mutant, including modules with virtual source filenames.
+
   The baseline (unmutated) run must be green; otherwise nothing is mutated.
   Every test runs with the plan's `timeout` — or, when the plan gives none,
   with `Covenant.Mutate.default_timeout/1` of the baseline's own durations —
@@ -68,7 +76,7 @@ defmodule Covenant.Mutate.Runner do
   """
 
   alias Covenant.Mutate
-  alias Covenant.Mutate.{Mutant, Mutator, Workdir}
+  alias Covenant.Mutate.{Mutant, Mutator, Recompile, Workdir}
 
   # what the baseline runs under when the plan gives no timeout: ExUnit's own default
   @baseline_timeout 60_000
@@ -171,9 +179,15 @@ defmodule Covenant.Mutate.Runner do
   * `:skip` — (optional) ids of mutants not to run (those a worker that was
     stopped had already judged);
   * `:isolate` — (optional, default `true`) run the tests from a private copy
-    of the project (`Covenant.Mutate.Workdir`), so that a mutant's relative
-    writes and deletes never reach the project and parallel workers never
-    share ExUnit's `:tmp_dir` paths; `false` runs in the project root.
+    of the project;
+  * `:macros` — (optional, default `false`) include macro bodies and quoted
+    code in macros, recompiling callers and contract test files per mutant;
+  * `:recompile` — (optional) caller source paths or globs, in dependency order,
+    relative to `root`; used only with `macros: true`.
+
+  Isolation uses `Covenant.Mutate.Workdir` so that relative writes and deletes
+  stay in the private copy and workers have separate ExUnit `:tmp_dir` paths.
+  With `isolate: false`, tests run in the project root.
   """
   @type plan :: %{
           required(:component) => String.t(),
@@ -190,6 +204,8 @@ defmodule Covenant.Mutate.Runner do
           optional(:on_timeout) => (result(), Mutant.t() -> any()),
           optional(:halt) => (pos_integer() -> any()),
           optional(:skip) => [String.t()],
+          optional(:macros) => boolean(),
+          optional(:recompile) => [Path.t()],
           optional(:isolate) => boolean()
         }
 
@@ -206,12 +222,13 @@ defmodule Covenant.Mutate.Runner do
   @spec run(plan()) :: {:ok, result()} | {:error, String.t()}
   def run(plan) do
     with {:ok, files} <- prepare_files(plan),
-         {:ok, modules, project_timeout} <- boot_suite(plan) do
-      isolated(plan, fn -> run_suite(plan, files, modules, project_timeout) end)
+         {:ok, modules, project_timeout} <- boot_suite(plan),
+         {:ok, callers} <- prepare_callers(plan, files) do
+      isolated(plan, fn -> run_suite(plan, files, modules, project_timeout, callers) end)
     end
   end
 
-  defp run_suite(plan, files, modules, project_timeout) do
+  defp run_suite(plan, files, modules, project_timeout, callers) do
     with {:ok, tests, baseline_ms} <- baseline(modules) do
       timeout = plan.timeout || Mutate.default_timeout(tests)
       ExUnit.configure(timeout: timeout)
@@ -247,6 +264,7 @@ defmodule Covenant.Mutate.Runner do
       env = %{
         plan: plan,
         files: files,
+        callers: callers,
         modules: modules,
         apps: apps,
         budget: budget,
@@ -274,7 +292,7 @@ defmodule Covenant.Mutate.Runner do
     file = Enum.find(env.files, &(&1.relative == mutant.file))
     fail_fast = Map.get(env.plan, :fail_fast, false)
 
-    case run_mutant(mutant, file, env.modules, fail_fast, env.budget) do
+    case run_mutant(mutant, file, env.modules, fail_fast, env.budget, env.callers) do
       {:ok, ran} ->
         with :ok <- healthy(ran, env) do
           env.plan.on_progress.(ran)
@@ -581,7 +599,7 @@ defmodule Covenant.Mutate.Runner do
     |> Enum.group_by(fn {_, file} -> file end, fn {module, _} -> module end)
     |> Enum.sort()
     |> Enum.reduce_while({:ok, []}, fn {file, modules}, {:ok, acc} ->
-      case prepare_file(file, modules, root) do
+      case prepare_file(file, modules, root, Map.get(plan, :macros, false)) do
         {:ok, prepared} -> {:cont, {:ok, acc ++ [prepared]}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -603,7 +621,7 @@ defmodule Covenant.Mutate.Runner do
 
   defp nothing_to_mutate(error, _plan), do: error
 
-  defp prepare_file(file, modules, root) do
+  defp prepare_file(file, modules, root, macros) do
     relative = Path.relative_to(file, root)
 
     with {:ok, source} <- read(file),
@@ -611,7 +629,7 @@ defmodule Covenant.Mutate.Runner do
          {:ok, compiled} <- roundtrip(ast, file) do
       originals = Enum.map(compiled, fn {module, bin} -> original(module, bin) end)
       targets = Enum.map(modules, &inspect/1)
-      mutants = Mutator.sites(ast, file: relative, modules: targets)
+      mutants = Mutator.sites(ast, file: relative, modules: targets, macros: macros)
 
       with :ok <- restore(originals) do
         for module <- without_mutants(targets, mutants) do
@@ -625,6 +643,17 @@ defmodule Covenant.Mutate.Runner do
       end
     end
   end
+
+  defp prepare_callers(%{macros: true} = plan, files) do
+    paths = Map.get(plan, :recompile, []) ++ plan.test_files
+
+    case Recompile.prepare(paths, plan.root, Enum.map(files, & &1.file)) do
+      {:ok, callers} -> {:ok, callers}
+      {:error, reason} -> {:error, "the unmutated macro callers do not compile: #{reason}"}
+    end
+  end
+
+  defp prepare_callers(_plan, _files), do: {:ok, %{files: [], originals: []}}
 
   @doc false
   @spec without_mutants([String.t()], [Mutant.t()]) :: [String.t()]
@@ -819,17 +848,21 @@ defmodule Covenant.Mutate.Runner do
 
   # -- mutants ----------------------------------------------------------------
 
-  defp run_mutant(mutant, file, modules, fail_fast, budget) do
-    purge(file.originals)
+  defp run_mutant(mutant, file, modules, fail_fast, budget, callers) do
+    originals = Enum.uniq_by(file.originals ++ callers.originals, &elem(&1, 0))
+    loaded = if callers.files != [], do: Recompile.loaded_modules()
+    purge(originals)
 
     judged =
-      case compile(Mutator.apply(file.ast, mutant), file.file, budget) do
+      case compile(Mutator.apply(file.ast, mutant), file.file, budget, callers) do
         {:error, reason} -> {:ok, %{mutant | verdict: :invalid, reason: reason}}
         {:ok, _} -> judge(mutant, modules, fail_fast, budget)
         :budget -> {:budget, []}
       end
 
-    case {judged, restore(file.originals)} do
+    if loaded, do: Recompile.remove_generated(loaded)
+
+    case {judged, restore(originals)} do
       {_, {:error, reason}} -> {:error, "#{describe(mutant)}: #{reason}"}
       {{:error, reason}, :ok} -> {:error, "#{describe(mutant)}: #{reason}"}
       {{:ok, result}, :ok} -> {:ok, %{result | replacement: nil}}
@@ -839,8 +872,11 @@ defmodule Covenant.Mutate.Runner do
 
   # Compiling runs the mutant's own macros and module bodies, so a mutant can hang here
   # as well: the compile gets the same budget as a run of the suite.
-  defp compile(ast, file, budget) do
-    task = Task.async(fn -> Mutator.compile(ast, file) end)
+  defp compile(ast, file, budget, callers) do
+    task =
+      Task.async(fn ->
+        with {:ok, _} <- Mutator.compile(ast, file), do: Recompile.compile(callers)
+      end)
 
     case Task.yield(task, budget) || Task.shutdown(task, :brutal_kill) do
       {:ok, compiled} -> compiled

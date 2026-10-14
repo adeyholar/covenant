@@ -148,7 +148,7 @@ defmodule Covenant.Mutate.Matrix do
       |> Enum.uniq()
       |> Enum.sort()
 
-    Map.put(mutant, :obligations, obligations)
+    %{mutant | obligations: obligations}
   end
 
   defp obligation_stats(component, mutants) do

@@ -51,6 +51,17 @@ defmodule Mix.Tasks.Covenant.Mutate do
     not judged. A fail-fast matrix proves kills, not obligation credit: use it
     to sort survivors fast on a slow suite, and a full run to credit;
   * `--seed N` — ExUnit seed (default #{Covenant.Mutate.default_seed()}: definition order);
+  * `--macros` — include macro bodies and their quoted code. Compile the
+    selected contract test files again for every mutant. List compiled direct
+    and transitive callers those tests need with `--recompile`; discovery is
+    not automatic;
+  * `--recompile PATH` — a project source file or glob to compile against each
+    macro mutant (repeatable, requires `--macros`). Files are compiled in the
+    supplied order, with sorted glob matches, before the contract test files.
+    Put providers before callers. Sources must be inside the project and must
+    not be mutation target files. A caller compile error makes the mutant
+    `invalid`, with no test or obligation credit. Compilation uses the watchdog
+    budget; original modules are restored after each mutant;
   * `--jobs N` — worker processes (default 1; mutants are split round-robin;
     never more than there are mutants, and a warning when N exceeds the schedulers
     online). Every worker, one included, runs the tests from a private copy of the
@@ -131,6 +142,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
     module: :keep,
     timeout: :integer,
     fail_fast: :boolean,
+    macros: :boolean,
+    recompile: :keep,
     seed: :integer,
     jobs: :integer,
     out: :string,
@@ -173,12 +186,17 @@ defmodule Mix.Tasks.Covenant.Mutate do
       modules: Keyword.get_values(opts, :module),
       timeout: opts[:timeout],
       fail_fast: opts[:fail_fast] || false,
+      macros: opts[:macros] || false,
+      recompile: Keyword.get_values(opts, :recompile),
       seed: opts[:seed] || Mutate.default_seed(),
       jobs: max(opts[:jobs] || 1, 1),
       contracts: opts[:contracts] || Covenant.contracts_dir(),
       test_paths: test_paths,
       out: opts[:out] || Path.join(Mutate.default_dir(component_id), "kill_matrix.json")
     }
+
+    if settings.recompile != [] and not settings.macros,
+      do: Mix.raise("--recompile requires --macros")
 
     case opts[:raw] do
       nil -> parent(settings)
@@ -217,6 +235,12 @@ defmodule Mix.Tasks.Covenant.Mutate do
     )
 
     Mix.shell().info("covenant.mutate: tests: #{Enum.join(plan.test_files, ", ")}")
+
+    if settings.macros do
+      Mix.shell().info(
+        "covenant.mutate: macro mode; recompile callers: #{Enum.join(settings.recompile, ", ")}; contract test files are recompiled last"
+      )
+    end
 
     if settings.fail_fast do
       Mix.shell().info(
@@ -275,7 +299,14 @@ defmodule Mix.Tasks.Covenant.Mutate do
     Mix.shell().info(Matrix.format(matrix))
 
     File.mkdir_p!(Path.dirname(settings.out))
-    File.write!(settings.out, [Covenant.JSON.pretty(Matrix.to_map(matrix)), "\n"])
+    report = Matrix.to_map(matrix)
+
+    report =
+      if settings.macros,
+        do: Map.merge(report, %{"macros" => true, "recompile" => settings.recompile}),
+        else: report
+
+    File.write!(settings.out, [Covenant.JSON.pretty(report), "\n"])
     Mix.shell().info("\nwrote #{settings.out}")
 
     unsorted = for %{mutant: m, sort: nil} <- matrix.survivors, do: m
@@ -341,7 +372,11 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
   defp cap_jobs(settings, plan, contract) do
     {jobs, messages} =
-      jobs_for(settings.jobs, count_mutants(plan, contract), System.schedulers_online())
+      jobs_for(
+        settings.jobs,
+        count_mutants(plan, contract, settings.macros),
+        System.schedulers_online()
+      )
 
     Enum.each(messages, &Mix.shell().info("covenant.mutate: warning: " <> &1))
     %{settings | jobs: jobs}
@@ -368,7 +403,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
     {capped, messages}
   end
 
-  defp count_mutants(plan, contract) do
+  defp count_mutants(plan, contract, macros) do
     source = plan.source
     root = File.cwd!()
     keep = keep(contract, plan, source)
@@ -381,7 +416,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
         sites =
           ast
-          |> Mutator.sites(file: Path.relative_to(file, root), modules: targets)
+          |> Mutator.sites(file: Path.relative_to(file, root), modules: targets, macros: macros)
           |> Enum.filter(keep)
 
         count + length(sites)
@@ -486,6 +521,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
         ["--seed", Integer.to_string(settings.seed)] ++
         if(settings.timeout, do: ["--timeout", Integer.to_string(settings.timeout)], else: []) ++
         if(settings.fail_fast, do: ["--fail-fast"], else: []) ++
+        if(settings.macros, do: ["--macros"], else: []) ++
+        Enum.flat_map(settings.recompile, &["--recompile", &1]) ++
         if(skip != [], do: ["--skip", Enum.join(skip, ",")], else: []) ++
         ["--contracts", settings.contracts] ++
         Enum.flat_map(plan.names, &["--module", &1]) ++
@@ -548,6 +585,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
       seed: settings.seed,
       timeout: settings.timeout,
       fail_fast: settings.fail_fast,
+      macros: settings.macros,
+      recompile: settings.recompile,
       slice: {i, n},
       skip: skip,
       keep: keep(contract, plan, source),
