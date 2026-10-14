@@ -81,7 +81,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
     still shared: keep `--jobs 1` for such a suite. A worker that a mutant makes
     loop for ever is stopped by a watchdog and its mutant is a `timeout`; the task
     starts a new worker for the mutants after it;
-  * `--out PATH` — the kill matrix JSON (default `tmp/covenant/mutate/<component>/kill_matrix.json`);
+  * `--out PATH` — the kill matrix JSON (default `tmp/covenant/mutate/<component>/kill_matrix.json`).
+    A temporary file unique to the run is renamed atomically to this path;
   * `--contracts DIR` — the contracts directory;
   * `--test-path PATH` — a contract test path or glob, relative to the current
     directory or absolute (repeatable). Without it, the configured `test_paths`
@@ -339,7 +340,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
         do: Map.merge(report, %{"macros" => true, "recompile" => settings.recompile}),
         else: report
 
-    temporary = settings.out <> ".tmp"
+    temporary = settings.out <> "." <> settings.run_id <> ".tmp"
     File.write!(temporary, [Covenant.JSON.pretty(report), "\n"], [:sync])
     File.rename!(temporary, settings.out)
     File.rm_rf(run_dir)

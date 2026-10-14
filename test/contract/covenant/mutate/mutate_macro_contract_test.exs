@@ -396,4 +396,20 @@ defmodule Covenant.MutateMacroE2EContractTest do
     assert matrix["obligations"]["vm.macro.I3"]["killed"] > 0
     assert output =~ "every mutant is caught or sorted"
   end
+
+  @tag obligation: "covenant.mutate.I24"
+  test "caller sources require macro mode before workers start" do
+    {output, status} =
+      System.cmd(
+        System.find_executable("mix"),
+        ["covenant.mutate", "vm.macro", "--recompile", "lib/vm/macro_consumer.ex"],
+        cd: @project,
+        env: [{"MIX_ENV", "dev"}, {"COVENANT_RESULTS_DIR", nil}],
+        stderr_to_stdout: true
+      )
+
+    assert status != 0
+    assert output =~ "--recompile requires --macros"
+    refute output =~ "raw results:"
+  end
 end

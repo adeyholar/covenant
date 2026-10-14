@@ -49,6 +49,17 @@ defmodule Covenant.MutateJobContractTest do
     refute output =~ "every mutant is caught or sorted"
   end
 
+  @tag obligation: "covenant.mutate.I27"
+  test "the total deadline must be positive before workers start" do
+    for value <- ["0", "-1"] do
+      {output, status} = mix(["covenant.mutate", "vm.checkpoint", "--max-runtime", value])
+
+      assert status != 0
+      assert output =~ "--max-runtime must be positive"
+      refute output =~ "raw results:"
+    end
+  end
+
   @tag obligation: ["covenant.mutate.I27", "covenant.mutate.I28"]
   test "the same job deadline stops a replacement worker" do
     {output, status} =

@@ -413,6 +413,10 @@ Every worker, `--jobs 1` included, runs the tests from a private copy of the pro
 - A worker dies with its parent and removes its copy first. Whenever it removes a copy that the suite's processes may still be writing to, it steps out of the copy beforehand, so nothing they write by a relative path can keep it alive.
 - Concurrent runs of one component don't clobber each other.
 
+The final matrix uses a temporary file unique to its run and replaces the
+output atomically. When two runs use the same output path, the file contains
+one complete matrix from the last writer. Their temporary files stay separate.
+
 Runtime functions in handwritten `defimpl` blocks belong to the generated
 protocol implementation module. Fully qualified literal protocol and type
 names, built-in types, lists of types, and an omitted `for:` inside a module
@@ -591,7 +595,7 @@ The test of a Contract is regeneration. If a component can be deleted and rebuil
 
 ## How Covenant holds itself to account
 
-Covenant has its own Contract in [`contracts/`](https://github.com/tools4imps/covenant/tree/main/contracts): 99 obligations across ten light-form components, a system intent and the decision records behind its policies. Every test in `test/contract/` is a `Covenant.Case` test that names its obligations. CI runs the suite and `mix covenant.check` on every push, on Elixir 1.18 and 1.19.
+Covenant has its own Contract in [`contracts/`](https://github.com/tools4imps/covenant/tree/main/contracts): 101 obligations across ten light-form components, a system intent and the decision records behind its policies. Every test in `test/contract/` is a `Covenant.Case` test that names its obligations. CI runs the suite and `mix covenant.check` on every push, on Elixir 1.18 and 1.19.
 
 Two components are mutated with Covenant itself. `covenant.conditions` makes 242 mutants: 211 killed, 29 invalid, and 2 survivors. `covenant.mutate`, run against its own unit tests, makes 1541: 1325 killed, 150 invalid, 2 timeouts, and 64 survivors. Every survivor is sorted, with its reason, in `contracts/covenant/*.survivors.yml`.
 
