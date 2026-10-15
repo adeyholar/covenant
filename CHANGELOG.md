@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Add `--only` to run selected mutation IDs without renumbering. Focused reports
+  and raw checkpoints retain selection scope. Survivor declarations resolve
+  before selection; known excluded annotations are deferred, while unknown and
+  selected stale entries still fail.
+- Add `--prioritize PATH` with `--fail-fast`. Previous results schedule one
+  known killing test first. A passing or timeout-only hint falls back to the
+  whole suite. No verdict is reused, and kill credit stays partial.
+- Print the passing baseline before the first mutation, and elapsed worker
+  time with each verdict. Keep the existing progress rate, estimate, deadline,
+  and cancellation behavior.
+
 ## 0.1.0 (2026-10-11)
 
 The first release: the Contract layer for Impatient Programming in Elixir.

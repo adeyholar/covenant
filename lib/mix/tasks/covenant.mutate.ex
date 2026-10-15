@@ -10,6 +10,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
       mix covenant.mutate example.counter --module Example.Counter --module Example.Counter.Log
       mix covenant.mutate example.counter --timeout 5000 --seed 42 --jobs 2
       mix covenant.mutate example.counter --fail-fast
+      mix covenant.mutate example.counter --only m001,m007 --fail-fast
       mix covenant.mutate example.counter --out tmp/kill_matrix.json
 
   The modules under mutation are, in order of precedence, the `--module`
@@ -35,6 +36,18 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
   ## Options
 
+  * `--only IDS` — run a comma-separated list of mutant IDs (repeatable).
+    IDs are numbered from the whole selected module profile before filtering.
+    Unknown IDs fail. The report records the selection and is a focused result,
+    not a full component verification. Annotations for known excluded sites are
+    deferred; unknown annotations and selected stale entries still fail. Keep
+    source, modules, and macro mode fixed when reusing IDs; check the printed sites;
+  * `--prioritize PATH` — with `--fail-fast`, use a previous matrix or raw result
+    to try a known killing test first. Pick the cheapest known test from the
+    current baseline. Match the site and mutation, not only the ID. If that
+    test does not kill, run the whole suite. Missing or excluded tests are ignored.
+    Every verdict is tested again. Omit fail-fast and this option for exact
+    attribution at a stable checkpoint;
   * `--module MOD` — an implementation module (repeatable; overrides the Contract);
   * `--max-runtime MS` — total task deadline, including preparation and worker
     replacements (default 3600000, one hour). SIGTERM cancels the job. Owned
@@ -142,7 +155,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
   alias Covenant.{Contract, Error}
   alias Covenant.Mutate
-  alias Covenant.Mutate.{Matrix, Modules, Mutant, Mutator, Runner, Survivors}
+  alias Covenant.Mutate.{Hints, Matrix, Modules, Mutant, Mutator, Runner, Selection, Survivors}
 
   @requirements ["app.config"]
 
@@ -150,6 +163,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
   @switches [
     module: :keep,
+    only: :keep,
+    prioritize: :string,
     timeout: :integer,
     max_runtime: :integer,
     max_mutants_per_worker: :integer,
@@ -193,9 +208,17 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     if opts[:contracts], do: Application.put_env(:covenant, :contracts_dir, opts[:contracts])
 
+    only =
+      case Selection.ids(Keyword.get_values(opts, :only)) do
+        {:ok, ids} -> ids
+        {:error, reason} -> Mix.raise(reason)
+      end
+
     settings = %{
       component: component_id,
       modules: Keyword.get_values(opts, :module),
+      only: only,
+      prioritize: opts[:prioritize] && Path.expand(opts[:prioritize]),
       timeout: opts[:timeout],
       max_runtime: opts[:max_runtime] || 3_600_000,
       max_mutants_per_worker: opts[:max_mutants_per_worker] || 50,
@@ -216,6 +239,17 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     if settings.recompile != [] and not settings.macros,
       do: Mix.raise("--recompile requires --macros")
+
+    if settings.prioritize && not settings.fail_fast,
+      do: Mix.raise("--prioritize requires --fail-fast; omit both for full test attribution")
+
+    hints =
+      case Hints.load(settings.prioritize, component_id) do
+        {:ok, hints} -> hints
+        {:error, reason} -> Mix.raise(reason)
+      end
+
+    settings = Map.put(settings, :hints, hints)
 
     case opts[:raw] do
       nil ->
@@ -253,6 +287,36 @@ defmodule Mix.Tasks.Covenant.Mutate do
         {:ok, annotations} -> annotations
         {:error, errors} -> fail_with(errors, "#{survivors_path} could not be parsed")
       end
+
+    catalog =
+      if settings.only == [] do
+        []
+      else
+        case Modules.locate(plan.names, plan.source, File.cwd!()) do
+          {:ok, modules, _} ->
+            Selection.catalog(
+              modules,
+              File.cwd!(),
+              settings.macros,
+              keep(contract, plan, plan.source)
+            )
+
+          {:error, reason} ->
+            fail(reason)
+        end
+      end
+
+    selected =
+      case Selection.choose(catalog, settings.only) do
+        {:ok, selected} -> selected
+        {:error, reason} -> fail(reason)
+      end
+
+    if settings.only != [] do
+      Mix.shell().info(
+        "covenant.mutate: focused run: #{length(selected)} of #{length(catalog)} mutants; full component verification is deferred"
+      )
+    end
 
     Mix.shell().info(
       "covenant.mutate: #{settings.component} — modules (#{plan.source}): #{Enum.join(plan.names, ", ")}"
@@ -314,7 +378,13 @@ defmodule Mix.Tasks.Covenant.Mutate do
     end)
 
     # Each mutants.md declaration names exactly one mutant of this run, or fails.
-    {annotations, unresolved} = Survivors.resolve(annotations, results.mutants)
+    {annotations, unresolved, deferred} =
+      if settings.only == [] do
+        {resolved, errors} = Survivors.resolve(annotations, results.mutants)
+        {resolved, errors, 0}
+      else
+        Selection.annotations(annotations, catalog, results.mutants)
+      end
 
     matrix =
       Matrix.build(results,
@@ -334,6 +404,14 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
     File.mkdir_p!(Path.dirname(settings.out))
     report = Matrix.to_map(matrix)
+
+    report =
+      if settings.prioritize, do: Map.put(report, "prioritize", settings.prioritize), else: report
+
+    report =
+      if settings.only == [],
+        do: report,
+        else: Map.put(report, "selection", Selection.metadata(catalog, results.mutants, deferred))
 
     report =
       if settings.macros,
@@ -375,9 +453,13 @@ defmodule Mix.Tasks.Covenant.Mutate do
     Enum.each(matrix.problems, &Mix.shell().error(Error.format(&1)))
 
     if Matrix.ok?(matrix) do
-      Mix.shell().info(
-        IO.ANSI.format([:green, "covenant.mutate: every mutant is caught or sorted"])
-      )
+      message =
+        if settings.only == [],
+          do: "every mutant is caught or sorted",
+          else:
+            "selected mutants are caught or sorted; full component verification is deferred (#{deferred} annotation(s) deferred)"
+
+      Mix.shell().info(IO.ANSI.format([:green, "covenant.mutate: " <> message]))
 
       :ok
     else
@@ -408,10 +490,15 @@ defmodule Mix.Tasks.Covenant.Mutate do
   defp cap_jobs(%{jobs: 1} = settings, _plan, _contract), do: settings
 
   defp cap_jobs(settings, plan, contract) do
+    count =
+      if settings.only == [],
+        do: count_mutants(plan, contract, settings.macros),
+        else: length(settings.only)
+
     {jobs, messages} =
       jobs_for(
         settings.jobs,
-        count_mutants(plan, contract, settings.macros),
+        count,
         System.schedulers_online()
       )
 
@@ -589,6 +676,8 @@ defmodule Mix.Tasks.Covenant.Mutate do
         if(settings.timeout, do: ["--timeout", Integer.to_string(settings.timeout)], else: []) ++
         if(settings.fail_fast, do: ["--fail-fast"], else: []) ++
         if(settings.macros, do: ["--macros"], else: []) ++
+        if(settings.only != [], do: ["--only", Enum.join(settings.only, ",")], else: []) ++
+        if(settings.prioritize, do: ["--prioritize", settings.prioritize], else: []) ++
         Enum.flat_map(settings.recompile, &["--recompile", &1]) ++
         if(skip != [], do: ["--skip", Enum.join(skip, ",")], else: []) ++
         ["--contracts", settings.contracts] ++
@@ -610,6 +699,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
 
   defp worker(settings, raw_path, slice, skip) do
     stop_with_parent()
+    started = System.monotonic_time(:millisecond)
     raw_path = Path.expand(raw_path)
     {i, n} = parse_slice(slice)
     prefix = if n > 1, do: "[#{i}/#{n}] ", else: ""
@@ -656,12 +746,25 @@ defmodule Mix.Tasks.Covenant.Mutate do
       recompile: settings.recompile,
       slice: {i, n},
       skip: skip,
+      only: settings.only,
+      prioritize: settings.hints,
       max_mutants: settings.max_mutants_per_worker,
       keep: keep(contract, plan, source),
+      on_baseline: fn baseline ->
+        Mix.shell().info(
+          "#{prefix}covenant.mutate: baseline #{baseline.tests} test(s) green in #{baseline.ms} ms; #{baseline.total} mutant(s) pending in this slice"
+        )
+      end,
       on_checkpoint: fn result ->
         write_raw(raw_path, result, settings, slice, modules, ignored, complete: false)
       end,
-      on_progress: &Mix.shell().info(prefix <> progress(&1)),
+      on_progress: fn mutant ->
+        elapsed = System.monotonic_time(:millisecond) - started
+
+        Mix.shell().info(
+          prefix <> progress(mutant) <> " (elapsed #{Float.round(elapsed / 1000, 1)}s)"
+        )
+      end,
       on_eta: &Mix.shell().info(prefix <> eta(&1)),
       # runs in the worker's private copy, so the path is absolute; the runner halts
       on_timeout: fn result, _mutant ->
@@ -717,6 +820,7 @@ defmodule Mix.Tasks.Covenant.Mutate do
       [
         Mutate.encode_raw(result,
           component: settings.component,
+          only: settings.only,
           complete: Keyword.get(state, :complete, true),
           stopped: Keyword.get(state, :stopped, false),
           retired: Keyword.get(state, :retired, false),

@@ -16,6 +16,18 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ## Obligations
 
+### covenant.mutate.I30 — Prior results schedule tests but never supply verdicts
+- **scope:** `mix covenant.mutate`, `Covenant.Mutate.Runner.run/1`
+- **must:** Allow --prioritize with --fail-fast to read a previous matrix or raw result for the same component. Match the exact mutation site and change, not its numbered ID alone. Try one known killing test first, using current baseline durations to choose a cheap test. Check the hinted test against original code on its own before mutation. If that control fails, discard the hint and require the full original suite to pass before continuing. A real non-timeout test failure is required for a kill, with partial credit. If that test passes or only times out, run the whole suite with the original filters. Ignore missing or excluded hint tests. Keep the full original baseline and final verification. Hints do not reuse verdicts, suppress invalid mutants or timeouts, or change survivor review. Full attribution remains available without fail-fast.
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I29 — Focused runs retain IDs and honest review scope
+- **scope:** `mix covenant.mutate`, `Covenant.Mutate.Runner.run/1`
+- **must:** Allow --only with explicit mutant IDs numbered before selection. Reject malformed and unknown IDs. Run each selected mutant once across worker slices and replacements. Keep normal baseline, isolation, final verification, timeout, invalid-mutant, and attribution rules. Mark focused reports and completion messages as limited to the selected sites. Resolve survivor declarations against the full selected module profile before filtering, so occurrence references stay stable. Defer annotations only when they match known excluded sites. Keep unknown annotations and selected stale entries visible. A focused result cannot claim full component verification.
+- **kind:** functional
+- **status:** active
+
 ### covenant.mutate.I28 — Worker VMs have bounded mutation lifetimes
 - **scope:** `mix covenant.mutate`, `Covenant.Mutate.Runner.run/1`
 - **must:** Limit each worker VM to 50 mutation verdicts by default, with a positive --max-mutants-per-worker override. Include invalid mutations in the limit. Verify the original suite before accepting a completed group and retiring the worker. Start a fresh VM for the remaining IDs only after the old worker exits. Keep the requested concurrent worker count, round-robin slices, deterministic IDs and exact test credit. Merge each verdict once. A failed verification or an ordinary incomplete checkpoint cannot request retirement or hide a failure. Keep one total deadline and cancellation scope across all worker replacements. Preserve partial results on failure and remove successful private copies and raw directories.

@@ -63,7 +63,12 @@ defmodule Covenant.MixProject do
       main: "readme",
       source_url: @source_url,
       source_ref: "v#{@version}",
-      extras: ["README.md", "CHANGELOG.md", "docs/contract-convention.md"]
+      extras: [
+        "README.md",
+        "CHANGELOG.md",
+        "docs/contract-convention.md",
+        "docs/development-mutation.md"
+      ]
     ]
   end
 end

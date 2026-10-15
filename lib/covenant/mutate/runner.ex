@@ -76,7 +76,7 @@ defmodule Covenant.Mutate.Runner do
   """
 
   alias Covenant.Mutate
-  alias Covenant.Mutate.{Mutant, Mutator, Recompile, Workdir}
+  alias Covenant.Mutate.{Hints, Mutant, Mutator, Recompile, Selection, Workdir}
 
   # what the baseline runs under when the plan gives no timeout: ExUnit's own default
   @baseline_timeout 60_000
@@ -164,6 +164,8 @@ defmodule Covenant.Mutate.Runner do
     measure it from the baseline (`Covenant.Mutate.default_timeout/1`);
   * `:slice` — `{i, n}`: run every n-th mutant starting at the i-th (1-based);
   * `:on_progress` — called with each mutant once it has a verdict;
+  * `:on_baseline` — (optional) called before mutation with the passing test
+    count, baseline duration, and the number of sites in this worker's slice;
   * `:on_eta` — (optional) called with `%{done: d, total: t, elapsed_ms: ms}`
     after every 25th mutant of the slice (`Covenant.Mutate.progress_due?/2`);
   * `:fail_fast` — (optional, default `false`) stop each mutant's run at its
@@ -180,6 +182,10 @@ defmodule Covenant.Mutate.Runner do
     `timeout_exit/0` after `:on_timeout`; when it returns, the run is an error;
   * `:skip` — (optional) ids of mutants not to run (those a worker that was
     stopped had already judged);
+  * `:only` — (optional) run only these IDs, numbered before selection;
+  * `:prioritize` — (optional) scheduling hints from `Hints.load/2`. In
+    fail-fast mode, try one previous killing test first. If it does not
+    kill, run the full suite. No verdict is reused;
   * `:max_mutants` — (optional) maximum verdicts in this VM. Verify the original
     suite after this group; `result.remaining` counts the slice's unjudged sites.
     Without this option the runner checks the whole slice;
@@ -203,6 +209,7 @@ defmodule Covenant.Mutate.Runner do
           required(:timeout) => pos_integer() | nil,
           required(:slice) => {pos_integer(), pos_integer()},
           required(:on_progress) => (Mutant.t() -> any()),
+          optional(:on_baseline) => (map() -> any()),
           optional(:on_eta) => (map() -> any()),
           optional(:fail_fast) => boolean(),
           optional(:keep) => (Mutant.t() -> boolean()),
@@ -210,6 +217,8 @@ defmodule Covenant.Mutate.Runner do
           optional(:on_timeout) => (result(), Mutant.t() -> any()),
           optional(:halt) => (pos_integer() -> any()),
           optional(:skip) => [String.t()],
+          optional(:only) => [String.t()],
+          optional(:prioritize) => map(),
           optional(:max_mutants) => pos_integer(),
           optional(:macros) => boolean(),
           optional(:recompile) => [Path.t()],
@@ -237,17 +246,12 @@ defmodule Covenant.Mutate.Runner do
   end
 
   defp run_suite(plan, files, modules, project_timeout, callers) do
-    with {:ok, tests, baseline_ms} <- baseline(modules) do
+    with {:ok, tests, baseline_ms} <- baseline(modules),
+         {:ok, mutants} <- selected(files, plan) do
       timeout = plan.timeout || Mutate.default_timeout(tests)
       ExUnit.configure(timeout: timeout)
       apps = started_apps()
       budget = budget_ms(baseline_ms, timeout)
-
-      mutants =
-        files
-        |> Enum.flat_map(& &1.mutants)
-        |> Enum.filter(Map.get(plan, :keep, fn _ -> true end))
-        |> Mutator.numbered()
 
       {i, n} = plan.slice
       skip = Map.get(plan, :skip, [])
@@ -259,6 +263,9 @@ defmodule Covenant.Mutate.Runner do
         |> Enum.reject(fn {mutant, _} -> mutant.id in skip end)
 
       batch = Enum.take(slice, Map.get(plan, :max_mutants, length(slice)))
+
+      if callback = Map.get(plan, :on_baseline),
+        do: callback.(%{tests: length(tests), ms: baseline_ms, total: length(slice)})
 
       result = fn verdicts ->
         %{
@@ -277,6 +284,7 @@ defmodule Covenant.Mutate.Runner do
         files: files,
         callers: callers,
         modules: modules,
+        tests: tests,
         apps: apps,
         budget: budget,
         baseline_timeout: baseline_timeout(plan.timeout, project_timeout),
@@ -298,12 +306,29 @@ defmodule Covenant.Mutate.Runner do
     end
   end
 
+  defp selected(files, plan) do
+    files
+    |> Enum.flat_map(& &1.mutants)
+    |> Enum.filter(Map.get(plan, :keep, fn _ -> true end))
+    |> Mutator.numbered()
+    |> Selection.choose(Map.get(plan, :only, []))
+  end
+
   # One mutant: run it, then check that the VM still holds what the baseline had.
   defp step(mutant, done, verdicts, env) do
     file = Enum.find(env.files, &(&1.relative == mutant.file))
     fail_fast = Map.get(env.plan, :fail_fast, false)
 
-    case run_mutant(mutant, file, env.modules, fail_fast, env.budget, env.callers) do
+    preferred =
+      Hints.preferred(Map.get(env.plan, :prioritize, %{}), mutant, env.modules, env.tests)
+
+    ran =
+      with {:ok, preferred} <- checked_priority(preferred, fail_fast, env),
+           :ok <- if(preferred == [], do: :ok, else: healthy(mutant, env)) do
+        run_mutant(mutant, file, env.modules, fail_fast, env.budget, env.callers, preferred)
+      end
+
+    case ran do
       {:ok, ran} ->
         with :ok <- healthy(ran, env) do
           if checkpoint = Map.get(env.plan, :on_checkpoint),
@@ -319,6 +344,40 @@ defmodule Covenant.Mutate.Runner do
 
       {:budget, entries} ->
         timed_out(mutant, entries, verdicts, env)
+
+      {:suspect, _} = suspect ->
+        suspect
+    end
+  end
+
+  defp checked_priority([], _fail_fast, _env), do: {:ok, []}
+  defp checked_priority(_preferred, false, _env), do: {:ok, []}
+
+  defp checked_priority([test] = preferred, true, env) do
+    case run_hint(test, env.budget) do
+      {:ok, tests} ->
+        if red(tests) == [] do
+          {:ok, preferred}
+        else
+          case sanity(env) do
+            {:ok, tests} ->
+              if red(tests) == [],
+                do: {:ok, []},
+                else: {:error, "the original suite is red after a priority control test"}
+
+            {:budget, _} ->
+              {:suspect, "the original suite did not finish after a priority control test"}
+
+            other ->
+              other
+          end
+        end
+
+      {:budget, _} ->
+        {:suspect, "the original priority test did not finish; no mutant verdict was recorded"}
+
+      other ->
+        other
     end
   end
 
@@ -866,7 +925,7 @@ defmodule Covenant.Mutate.Runner do
 
   # -- mutants ----------------------------------------------------------------
 
-  defp run_mutant(mutant, file, modules, fail_fast, budget, callers) do
+  defp run_mutant(mutant, file, modules, fail_fast, budget, callers, preferred) do
     originals = Enum.uniq_by(file.originals ++ callers.originals, &elem(&1, 0))
 
     Recompile.with_cleanup(fn ->
@@ -875,7 +934,7 @@ defmodule Covenant.Mutate.Runner do
       judged =
         case compile(Mutator.apply(file.ast, mutant), file.file, budget, callers) do
           {:error, reason} -> {:ok, %{mutant | verdict: :invalid, reason: reason}}
-          {:ok, _} -> judge(mutant, modules, fail_fast, budget)
+          {:ok, _} -> prioritized(mutant, modules, fail_fast, budget, preferred)
           :budget -> {:budget, []}
         end
 
@@ -886,6 +945,29 @@ defmodule Covenant.Mutate.Runner do
         {{:budget, entries}, :ok} -> {:budget, entries}
       end
     end)
+  end
+
+  defp prioritized(mutant, modules, true, budget, [%{module: module, name: name}]) do
+    with {:ok, tests} <- run_hint(%{module: module, name: name}, budget) do
+      case verdict(mutant, tests) do
+        %Mutant{verdict: :killed} = killed -> {:ok, %{killed | credit: :partial}}
+        _ -> judge(mutant, modules, true, budget)
+      end
+    end
+  end
+
+  defp prioritized(mutant, modules, fail_fast, budget, _preferred),
+    do: judge(mutant, modules, fail_fast, budget)
+
+  defp run_hint(%{module: module, name: name}, budget) do
+    config = ExUnit.configuration()
+
+    try do
+      ExUnit.configure(include: [test: name], exclude: [:test])
+      run_tests([module], 1, budget)
+    after
+      ExUnit.configure(Keyword.take(config, [:include, :exclude]))
+    end
   end
 
   # Compiling runs the mutant's own macros and module bodies, so a mutant can hang here

@@ -404,6 +404,28 @@ A mutant inside the target of an active `kind: exception` obligation is sorted `
 
 Without `--timeout`, each test's timeout is five times the slowest baseline test, and never under a second. `--fail-fast` stops each mutant's run at its first failing test: the verdicts are the same as a full run's, but the kill credit is partial, so use it to sort survivors on a slow suite and a full run to credit obligations. `mix help covenant.mutate` has the rest.
 
+### Development loop
+
+Use `--only m005,m017` to check selected IDs from the same source and module
+profile. Add `--fail-fast` for partial test attribution. A previous result can
+also schedule a known killing test first:
+
+```sh
+mix covenant.mutate example.counter --only m005,m017 --fail-fast \
+  --prioritize tmp/covenant/mutate/example.counter/kill_matrix.json \
+  --max-runtime 60000 --out tmp/counter-dev.json
+```
+
+Every verdict is measured again. A hint that passes or only times out falls
+back to the whole suite. Focused results identify their selected sites and
+defer annotations for known excluded sites. Selected stale entries and unknown
+annotations still fail. Keep the full module profile to preserve IDs; check the
+printed sites after source changes. For full verification and exact obligation
+credit, omit `--only`, `--fail-fast`, and `--prioritize`.
+
+See [the measured Jido development workflow](docs/development-mutation.md) for
+commands, timings, and the limits of focused runs and saved hints.
+
 ### Workers and the project
 
 Every worker, `--jobs 1` included, runs the tests from a private copy of the project under the system temp directory. `_build` and `deps` beside a `mix.exs`, and `node_modules`, are linked rather than copied. `cover`, `doc`, `.elixir_ls`, `.lexical`, `.expert`, `erl_crash.dump` and `priv/plts` are left out, and so is `.git`, so a test that shells out to git doesn't see the project's repository. A system temp directory inside the project (outside its `tmp/`) is refused. A mutant's write or delete by a relative path lands in the copy. Absolute paths, paths through the `_build` and `deps` links, and paths derived from the project's location (`__DIR__`, `Application.app_dir/1`) are not protected. Mutate a project whose tests you would run anyway, from a clean working tree. A suite that shares anything else between OS processes, such as a database or a fixed port, needs `--jobs 1`.

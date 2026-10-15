@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 101,
+      "active": 103,
       "coverage": 1.0,
-      "covered": 101
+      "covered": 103
     },
     "system": {
       "active": 0,
@@ -541,10 +541,10 @@
       }
     },
     "covenant.mutate": {
-      "active": 28,
+      "active": 30,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 28,
+      "covered": 30,
       "form": "light",
       "obligations": {
         "covenant.mutate.I1": {
@@ -879,6 +879,24 @@
             "test worker mutation limits must be positive"
           ]
         },
+        "covenant.mutate.I29": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 9,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test IDs are explicit, repeatable, unique, and validated",
+            "test catalog numbering follows sorted files and filters ownership first",
+            "test fail-fast keeps exact verdicts and partial kill credit",
+            "test malformed and unknown selections fail before workers start",
+            "test occurrence declarations are resolved before selection",
+            "test only known excluded annotations are deferred",
+            "test raw checkpoints retain selection scope and mixed scopes cannot merge",
+            "test selected IDs retain exact verdicts across slices and worker retirement",
+            "test selected stale entries and unknown sites still fail"
+          ]
+        },
         "covenant.mutate.I3": {
           "failing": 0,
           "kind": "functional",
@@ -892,6 +910,18 @@
             "test compile loads the module in memory, replacing it, and reports what does not compile",
             "test compile reports an error position as a line, with a column when there is one",
             "test parsing emits no compiler warning"
+          ]
+        },
+        "covenant.mutate.I30": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 3,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test bad hint files fail clearly",
+            "test good, wrong, and missing hints all require a real failure; passing hints run the whole suite",
+            "test hints match the mutation, ignore missing modules, and use current costs"
           ]
         },
         "covenant.mutate.I4": {
@@ -1528,8 +1558,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 101,
+    "active": 103,
     "coverage": 1.0,
-    "covered": 101
+    "covered": 103
   }
 }

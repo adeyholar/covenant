@@ -151,7 +151,7 @@ defmodule Covenant.Mutate do
   @doc "Encodes one worker's `Covenant.Mutate.Runner` result as JSON."
   @spec encode_raw(map(), keyword()) :: iodata()
   def encode_raw(result, meta) do
-    Covenant.JSON.pretty(%{
+    %{
       "covenant" => Covenant.version(),
       "component" => Keyword.fetch!(meta, :component),
       "slice" => Keyword.get(meta, :slice, "1/1"),
@@ -178,7 +178,14 @@ defmodule Covenant.Mutate do
           }
         end),
       "mutants" => Enum.map(result.mutants, &Mutant.to_map/1)
-    })
+    }
+    |> then(fn raw ->
+      case Keyword.get(meta, :only, []) do
+        [] -> raw
+        ids -> Map.put(raw, "only", ids)
+      end
+    end)
+    |> Covenant.JSON.pretty()
   end
 
   @doc "Reads a raw results file back."
@@ -191,6 +198,7 @@ defmodule Covenant.Mutate do
       {:ok,
        %{
          component: raw["component"],
+         only: List.wrap(raw["only"]),
          complete: Map.get(raw, "complete", true),
          stopped: Map.get(raw, "stopped", false),
          retired: Map.get(raw, "retired", false),
@@ -263,6 +271,9 @@ defmodule Covenant.Mutate do
     ids = Enum.map(mutants, & &1.id)
 
     cond do
+      Enum.any?(raws, &(Map.get(&1, :only, []) != Map.get(first, :only, []))) ->
+        {:error, "worker results have different mutant selections"}
+
       ids != Enum.uniq(ids) ->
         {:error, "worker results overlap (the same mutant was run twice)"}
 
@@ -275,4 +286,144 @@ defmodule Covenant.Mutate do
          %{first | mutants: mutants, timeout_ms: raws |> Enum.map(& &1.timeout_ms) |> Enum.max()}}
     end
   end
+end
+
+defmodule Covenant.Mutate.Selection do
+  @moduledoc false
+
+  alias Covenant.Mutate.{Mutant, Mutator, Survivors}
+
+  @doc false
+  def ids(values) do
+    ids = values |> Enum.flat_map(&String.split(&1, ",")) |> Enum.map(&String.trim/1)
+
+    if Enum.any?(ids, &(not Regex.match?(~r/^m\d+$/, &1))),
+      do: {:error, "--only expects mutant IDs, for example --only m0001,m0007"},
+      else: {:ok, Enum.uniq(ids)}
+  end
+
+  @doc false
+  def choose(mutants, []), do: {:ok, mutants}
+
+  def choose(mutants, ids) do
+    known = MapSet.new(mutants, & &1.id)
+    unknown = Enum.reject(ids, &MapSet.member?(known, &1))
+
+    if unknown == [],
+      do: {:ok, Enum.filter(mutants, &(&1.id in ids))},
+      else: {:error, "unknown mutant ID(s) for this profile: #{Enum.join(unknown, ", ")}"}
+  end
+
+  # Match the runner's file order, ownership filter, and numbering. No target
+  # compilation runs in the parent. The workers still compile and verify it.
+  @doc false
+  def catalog(modules, root, macros, keep) do
+    modules
+    |> Enum.group_by(fn {_, file} -> file end, fn {module, _} -> inspect(module) end)
+    |> Enum.sort()
+    |> Enum.flat_map(fn {file, targets} ->
+      {:ok, ast} = Mutator.parse(File.read!(file), file)
+      Mutator.sites(ast, file: Path.relative_to(file, root), modules: targets, macros: macros)
+    end)
+    |> Enum.filter(keep)
+    |> Mutator.numbered()
+  end
+
+  # Resolve declarations against every site before selection. This keeps #k
+  # occurrences stable. Defer only annotations known to match excluded sites;
+  # unknown sites and annotations contradicted by selected verdicts still fail.
+  @doc false
+  def annotations(annotations, catalog, selected) do
+    {resolved, errors} = Survivors.resolve(annotations, catalog)
+
+    active =
+      Enum.filter(resolved, fn annotation ->
+        Enum.any?(selected, &Survivors.matches?(annotation, &1)) or
+          not Enum.any?(catalog, &Survivors.matches?(annotation, &1))
+      end)
+
+    {active, errors, length(resolved) - length(active)}
+  end
+
+  @doc false
+  def metadata(catalog, selected, deferred) do
+    %{
+      "kind" => "focused",
+      "ids" => Enum.map(selected, & &1.id),
+      "selected" => length(selected),
+      "available" => length(catalog),
+      "deferred_annotations" => deferred,
+      "sites" =>
+        Enum.map(
+          selected,
+          &%{
+            "at" => Mutant.at(&1),
+            "operator" => to_string(&1.operator),
+            "mutation" => Mutant.mutation(&1)
+          }
+        )
+    }
+  end
+end
+
+defmodule Covenant.Mutate.Hints do
+  @moduledoc false
+
+  alias Covenant.Mutate.Mutant
+
+  # Prior results are scheduling hints only. Every verdict is measured again.
+  @doc false
+  def load(nil, _component), do: {:ok, %{}}
+
+  def load(path, component) do
+    with {:ok, text} <- File.read(path),
+         {:ok, %{"component" => ^component, "mutants" => mutants, "tests" => tests}}
+         when is_list(mutants) and (is_map(tests) or is_list(tests)) <- JSON.decode(text),
+         true <- Enum.all?(mutants, &(is_map(&1) and is_list(Map.get(&1, "killed_by", [])))),
+         true <- is_map(tests) or Enum.all?(tests, &(is_map(&1) and is_binary(&1["key"]))) do
+      tests = if is_map(tests), do: tests, else: Map.new(tests, &{&1["key"], &1})
+
+      hints =
+        for m <- mutants, m["verdict"] == "killed", into: %{} do
+          killers =
+            m
+            |> Map.get("killed_by", [])
+            |> Enum.flat_map(fn key ->
+              case tests[key] do
+                %{"module" => module} when is_binary(module) -> [key]
+                _ -> []
+              end
+            end)
+            |> Enum.uniq()
+
+          {key(m), killers}
+        end
+
+      {:ok, hints}
+    else
+      _ -> {:error, "cannot read mutation hints for #{component} from #{path}"}
+    end
+  end
+
+  @doc false
+  def preferred(hints, _mutant, _modules, _tests) when map_size(hints) == 0, do: []
+
+  def preferred(hints, mutant, modules, tests) do
+    known = Map.get(hints, key(mutant), [])
+    modules = Map.new(modules, &{inspect(&1), &1})
+
+    tests
+    |> Enum.filter(
+      &(&1.outcome == :passed and &1.key in known and Map.has_key?(modules, &1.module))
+    )
+    |> Enum.sort_by(&{&1.ms, &1.key})
+    |> Enum.take(1)
+    |> Enum.map(&%{module: Map.fetch!(modules, &1.module), name: &1.name})
+  end
+
+  defp key(%Mutant{} = m),
+    do: {m.file, m.line, m.column, Atom.to_string(m.operator), m.from, m.to}
+
+  defp key(m),
+    do: {m["file"], m["line"], m["column"], m["operator"], m["from"], m["to"]}
 end
