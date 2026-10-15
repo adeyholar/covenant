@@ -44,13 +44,19 @@ defmodule Covenant.Mutate.Recompile do
   end
 
   defp allowed?(path, root, targets) do
-    relative = Path.relative_to(path, root)
+    resolved = source_path(path, root)
 
     String.starts_with?(path, root <> "/") and
       Path.extname(path) in [".ex", ".exs"] and File.regular?(path) and
-      :filelib.safe_relative_path(String.to_charlist(relative), String.to_charlist(root)) !=
-        :unsafe and
-      path not in targets
+      resolved != :unsafe and
+      Enum.all?(targets, &(source_path(&1, root) != resolved))
+  end
+
+  defp source_path(path, root) do
+    path
+    |> Path.relative_to(root)
+    |> String.to_charlist()
+    |> :filelib.safe_relative_path(String.to_charlist(root))
   end
 
   defp parse(paths) do

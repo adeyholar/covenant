@@ -19,6 +19,27 @@ defmodule Covenant.MutateProtocolContractTest do
     end
   end
 
+  @tag obligation: ["covenant.mutate.I24", "covenant.mutate.I26"]
+  test "macros in a shared implementation retain every implementation identity" do
+    source = """
+    defimpl Sample.Protocol, for: [Map, List] do
+      defmacro enabled, do: quote(do: true)
+    end
+    """
+
+    assert {:ok, ast} = Mutator.parse(source, "shared_macro.ex")
+    modules = ["Sample.Protocol.Map", "Sample.Protocol.List"]
+    assert Mutator.sites(ast, modules: modules) == []
+
+    for selected <- [modules, [List.first(modules)], [List.last(modules)]] do
+      sites = Mutator.sites(ast, modules: selected, macros: true)
+      assert Enum.any?(sites, &(&1.operator == :boolean_flip))
+      assert Enum.all?(sites, &(Mutant.modules(&1) == modules))
+      assert Enum.all?(sites, &(&1.function == "enabled/0"))
+      assert Runner.without_mutants(modules, sites) == []
+    end
+  end
+
   @tag obligation: "covenant.mutate.I26"
   test "either implementation owns a shared body when covers use different primitives" do
     modules = ["Sample.Protocol.Map", "Sample.Protocol.List"]

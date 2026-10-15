@@ -368,7 +368,9 @@ compiled baseline afterward; new modules compiled in memory are removed,
 including those with virtual source filenames. No source or beam file is written.
 
 List all direct and transitive compiled callers that the selected tests need,
-with providers before their callers. Caller discovery is not automatic.
+with providers before their callers. Caller paths must stay inside the project
+and cannot name a mutation target, including through a symlink. Caller discovery
+is not automatic.
 Repeat `--recompile` for more files, or use a quoted glob whose matches compile
 in filename order. Calls that the tests compile themselves need no extra entry.
 A caller compilation failure makes the mutant invalid and gives no kill credit;
@@ -417,13 +419,14 @@ The final matrix uses a temporary file unique to its run and replaces the
 output atomically. When two runs use the same output path, the file contains
 one complete matrix from the last writer. Their temporary files stay separate.
 
-Runtime functions in handwritten `defimpl` blocks belong to the generated
-protocol implementation module. Fully qualified literal protocol and type
+Runtime functions and opt-in macros in handwritten `defimpl` blocks belong to
+the generated protocol implementation module. Fully qualified literal protocol and type
 names, built-in types, lists of types, and an omitted `for:` inside a module
 are supported. Lexical aliases, including aliases from nested declarations,
 are not resolved. The `for:` declaration is not a
-mutation site. A `defimpl` emitted by a macro remains in the provider macro's
-scope.
+mutation site. A shared body retains all implementation identities, including
+macros declared in that body. A `defimpl` emitted by a macro remains in the
+provider macro's scope.
 
 ## The sibling layout
 

@@ -147,6 +147,19 @@ defmodule Covenant.MutateMacroContractTest do
   end
 
   @tag obligation: "covenant.mutate.I25"
+  test "caller paths cannot recompile mutation targets through symlinks", %{tmp_dir: root} do
+    target = Path.join(root, "target.ex")
+    alias_path = Path.join(root, "alias.ex")
+    File.write!(target, "defmodule ForbiddenMacroTarget do end")
+    File.ln_s!("target.ex", alias_path)
+
+    for {caller, mutation_target} <- [{alias_path, target}, {target, alias_path}] do
+      assert {:error, message} = Recompile.prepare([caller], root, [mutation_target])
+      assert message =~ "outside the mutation targets"
+    end
+  end
+
+  @tag obligation: "covenant.mutate.I25"
   test "partial caller compilation leaves no generated module after restoration", %{tmp_dir: root} do
     suffix = System.unique_integer([:positive])
     original = Module.concat(Covenant.MacroOriginal, "M#{suffix}")

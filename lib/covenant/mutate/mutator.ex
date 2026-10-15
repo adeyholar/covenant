@@ -228,7 +228,7 @@ defmodule Covenant.Mutate.Mutator do
 
   defp skip?(_, _state), do: false
 
-  defp shared_modules(%{macros: [], modules: [current | _], implementation_modules: [names | _]}) do
+  defp shared_modules(%{modules: [current | _], implementation_modules: [names | _]}) do
     if current in names and length(names) > 1, do: names, else: []
   end
 
