@@ -39,9 +39,10 @@ back to the full current suite. A real failure is required for a kill.
 
 Each loop still compiles the targets, checks the full original baseline, uses
 a private work directory, and verifies the full original suite at the end.
-Macro callers and contract tests still compile against each mutant. There is
-no cached verdict and no source, dependency, fixture, or tool-version cache to
-invalidate. A stale hint can cost time; it cannot prove a kill or a survivor.
+By default, macro callers and contract tests compile against each mutant.
+Prioritization alone reuses no verdict. A stale hint can cost time; it cannot
+prove a kill or a survivor. The separate opt-in checkpoint mode below can
+reuse verified groups when all recorded inputs still match.
 
 IDs are numbered before selection. They can change when source, modules, or
 macro mode change. Unknown IDs fail, but a changed profile can assign an old
@@ -88,8 +89,92 @@ Worker elapsed time includes its preparation; it starts again after replacement.
 `--max-runtime` bounds the whole job, including worker replacement. Send SIGTERM
 to the parent process to cancel it. The parent stops owned worker ports. Workers
 remove their private copies and halt when their input closes. Completed verdicts
-remain in the printed raw-results directory. These files are partial evidence;
-there is no persistent resume or cross-run verdict reuse in this change.
+remain in the printed raw-results directory. Unsealed raw files are partial
+evidence and cannot be imported by resume.
+
+## Verified checkpoints and resume
+
+Start a checkpoint run from the consumer project with `MIX_ENV=test`:
+
+```sh
+MIX_ENV=test mix covenant.mutate jido.agent --macros \
+  --only m0684,m0985,m1034 --checkpoint --selective-recompile \
+  --jobs 1 --seed 0 --timeout 5000 --max-runtime 120000 \
+  --out tmp/covenant/agent-checkpoint.json
+```
+
+Use the directory printed as `raw results:` or saved in the report's
+`checkpoint.directory`. Repeat the original semantic options when resuming:
+
+```sh
+MIX_ENV=test mix covenant.mutate jido.agent --macros \
+  --only m0684,m0985,m1034 --resume tmp/covenant/mutate/jido.agent/run-EXAMPLE \
+  --selective-recompile --jobs 1 --seed 0 --timeout 5000 \
+  --max-runtime 120000 --out tmp/covenant/agent-resumed.json
+```
+
+Replace `run-EXAMPLE` with the actual directory. `--resume` implies
+`--checkpoint`. Jobs, worker group size, output path, and total job budget can
+change. Source profile, test paths, contracts, seed, test timeout, macro mode,
+caller list, fail-fast mode, selective compilation mode, and hint contents
+must match. Old raw files and matrices without checkpoint metadata cannot be
+used. A changed fingerprint fails before workers start; it does not silently
+accept old verdicts.
+
+The fingerprint includes project and dependency files, untracked support and
+fixture inputs, file modes, symlink targets, compiled dependency BEAMs,
+configuration, runtime and compiler versions/options, and environment values.
+The manifest stores a digest, not environment values. Build outputs, Git and
+editor data, generated documentation and coverage directories, top-level
+project `tmp`, and PLTs are excluded. Ebin and consolidated protocol contents
+are hashed separately.
+Equal Elixir checker terms have one stable hash even if their BEAM encoding
+order changes during protocol consolidation. All executable and other metadata
+chunks remain in the fingerprint; malformed BEAMs use their exact bytes.
+Symlink targets are included. This mode is for deterministic local contract
+tests. For tests that depend on external services or data outside these input
+trees, use a fresh run.
+
+The parent seals a group only after its worker exits zero and passes the final
+original-code check. Each seal hashes the raw file. The parent checks the input
+fingerprint again before sealing; a mismatch prevents reuse. Keep inputs fixed
+during a checkpoint run. Partial per-mutant writes and watchdog-stopped
+groups have no seal. A cancelled run therefore loses at most its unverified
+groups. A smaller `--max-mutants-per-worker` saves groups more often, at the
+cost of more VM starts and baselines.
+
+Resume starts fresh workers and runs the current original baseline. It checks
+test metadata against the saved groups before merging. Even a fully cached
+selection needs this baseline. Corrupt, overlapping, or changed checkpoints
+fail. Attribution remains exact or partial as originally measured; timeout
+groups receive no reusable credit. The normal survivor and selection checks
+still apply. A focused checkpoint remains a focused result.
+
+Checkpoint directories remain after success. Without `--checkpoint`, completed
+jobs remove their raw directory as before. The report records the checkpoint
+directory, fingerprint, reused groups, and reused mutants.
+
+## Selective caller compilation
+
+`--selective-recompile` requires `--macros` and is off by default. The initial
+caller pass records calls to mutation targets during compilation. Runtime
+traces include ordinary and private functions called by macros. Compiler
+events add macro, struct, and module-body references. Verification callbacks
+finish before the measurement ends. A trace barrier collects pending calls.
+
+For each runtime mutation, Covenant follows dependencies through the caller
+files, preserves their declared order, and compiles the affected files.
+Unrelated test modules retain their baseline binaries. It still runs the
+selected suite. Survivors require that whole suite to pass. The original
+binaries and compiler tracer configuration are restored.
+
+Macro-provider files keep full caller compilation, including mutations of
+ordinary functions in those files. Nested dynamic compilation, unresolved
+module queries, and other uncertain file dependencies also keep the full
+path. Selective mode does not discover missing `--recompile` sources. Supply
+the same direct and transitive caller list required by normal macro mode.
+Workers print the number of selected caller files; the report and checkpoint
+fingerprint record selective mode.
 
 ## Local measurements: 2026-10-15
 
@@ -119,10 +204,9 @@ These files are local evidence, not a full mutation baseline.
 
 Separate probes measured compilation of the four contract files at 1.2–1.8 s,
 one runtime target at 27–58 ms, and an empty cleanup pass at 56–65 ms.
-Skipping test recompilation was considered but left out: ordinary functions
-can run during macro expansion, so a runtime function mutation does not by
-itself prove that callers can remain compiled. The current macro checks remain
-in place. Test priority gives a useful loop without making that assumption.
+These first probes kept full recompilation. Ordinary functions can run during
+macro expansion, so the selective mode added later measures those calls. It
+does not infer safety from `def` versus `defmacro` alone.
 
 Covenant process tests cover selected IDs across slices and worker retirement,
 invalid mutants, excluded and stale annotations, occurrence references, wrong
@@ -132,7 +216,8 @@ worker isolation. Jido source files were not edited for these probes.
 
 ## Validation
 
-The full Covenant suite passed 504 tests. After the control-test check was
+Before the checkpoint and selective compilation changes, the full Covenant
+suite passed 504 tests. After the control-test check was
 added, the 12 focused tests passed in a separate sequential run. The contract
 gate passed 103/103 obligations, including the two new mutation obligations,
 and retained the existing 40-file source ceiling. Format, compilation with
@@ -147,3 +232,17 @@ after the cancelled run.
 The two existing survivor annotations whose lines moved were checked again
 with exact attribution. Both remained equivalent survivors. No other survivor
 judgment was changed.
+
+For checkpoint resume and selective compilation, all 184 mutation subsystem
+tests passed, with passing tests for 32/32 mutation obligations. After the
+protocol fingerprint fix, all seven new focused tests passed again. They cover
+real SIGTERM cancellation, worker retirement, fresh baselines for fully cached
+selections, changed inputs, corrupt and overlapping groups, unchanged exact
+verdicts, runtime calls inside macros, structs, transitive callers, generated
+modules, and verification callbacks. Equal protocol checker data has a stable
+fingerprint; changed checker data or executable chunks invalidate it.
+
+The static gate checks all 105 obligations and the existing 40-file source
+ceiling. This is static validation of the full contract, not a new full-suite
+run. Jido checks use its 76 contract tests and only the three mutants for the
+fixed test gaps. No full 1,302-mutant profile is required for these checks.

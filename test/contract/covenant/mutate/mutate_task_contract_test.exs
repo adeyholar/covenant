@@ -81,14 +81,21 @@ defmodule Covenant.MutateTaskContractTest do
         end)
       end
 
-    assert [{_, 0}, {_, 0}] = Elixir.Task.await_many(runs, 600_000)
+    assert [{_, 0}, {_, 0}] = finished = Elixir.Task.await_many(runs, 600_000)
 
     [a, b] = for name <- ["a", "b"], do: matrix(@example, "tmp/concurrent-#{name}.json")
 
     assert Enum.map(a["mutants"], &{&1["id"], &1["verdict"]}) ==
              Enum.map(b["mutants"], &{&1["id"], &1["verdict"]})
 
-    assert Path.wildcard(Path.join(@example, "tmp/covenant/mutate/example.counter/run-*")) == []
+    directories =
+      for {output, 0} <- finished do
+        [_, directory] = Regex.run(~r/raw results: ([^\n]+)/, output)
+        refute File.exists?(directory)
+        directory
+      end
+
+    assert Enum.uniq(directories) == directories
   end
 
   @tag obligation: "covenant.mutate.I23"

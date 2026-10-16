@@ -194,7 +194,12 @@ defmodule Covenant.Mutate.Runner do
   * `:macros` — (optional, default `false`) include macro bodies and quoted
     code in macros, recompiling callers and contract test files per mutant;
   * `:recompile` — (optional) caller source paths or globs, in dependency order,
-    relative to `root`; used only with `macros: true`.
+    relative to `root`; used only with `macros: true`;
+  * `:selective_recompile` — (optional, default `false`) measure compile-time
+    dependencies and compile affected callers. Macro files and uncertain
+    dependencies retain full compilation;
+  * `:on_recompile` — (optional) called with the mutant, selected caller count,
+    and total caller count before each mutation.
 
   Isolation uses `Covenant.Mutate.Workdir` so that relative writes and deletes
   stay in the private copy and workers have separate ExUnit `:tmp_dir` paths.
@@ -222,6 +227,8 @@ defmodule Covenant.Mutate.Runner do
           optional(:max_mutants) => pos_integer(),
           optional(:macros) => boolean(),
           optional(:recompile) => [Path.t()],
+          optional(:selective_recompile) => boolean(),
+          optional(:on_recompile) => (Mutant.t(), non_neg_integer(), non_neg_integer() -> any()),
           optional(:isolate) => boolean()
         }
 
@@ -318,6 +325,10 @@ defmodule Covenant.Mutate.Runner do
   defp step(mutant, done, verdicts, env) do
     file = Enum.find(env.files, &(&1.relative == mutant.file))
     fail_fast = Map.get(env.plan, :fail_fast, false)
+    callers = Recompile.affected(env.callers, Enum.map(file.originals, &elem(&1, 0)), file.ast)
+
+    if callback = Map.get(env.plan, :on_recompile),
+      do: callback.(mutant, length(callers.files), length(env.callers.files))
 
     preferred =
       Hints.preferred(Map.get(env.plan, :prioritize, %{}), mutant, env.modules, env.tests)
@@ -325,7 +336,7 @@ defmodule Covenant.Mutate.Runner do
     ran =
       with {:ok, preferred} <- checked_priority(preferred, fail_fast, env),
            :ok <- if(preferred == [], do: :ok, else: healthy(mutant, env)) do
-        run_mutant(mutant, file, env.modules, fail_fast, env.budget, env.callers, preferred)
+        run_mutant(mutant, file, env.modules, fail_fast, env.budget, callers, preferred)
       end
 
     case ran do
@@ -720,7 +731,12 @@ defmodule Covenant.Mutate.Runner do
   defp prepare_callers(%{macros: true} = plan, files) do
     paths = Map.get(plan, :recompile, []) ++ plan.test_files
 
-    case Recompile.prepare(paths, plan.root, Enum.map(files, & &1.file)) do
+    options = [
+      selective: Map.get(plan, :selective_recompile, false),
+      modules: for(file <- files, {module, _, _} <- file.originals, do: module)
+    ]
+
+    case Recompile.prepare(paths, plan.root, Enum.map(files, & &1.file), options) do
       {:ok, callers} -> {:ok, callers}
       {:error, reason} -> {:error, "the unmutated macro callers do not compile: #{reason}"}
     end

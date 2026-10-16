@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add opt-in verified checkpoints and resume. Reuse only completed worker
+  groups with matching input fingerprints and a fresh passing baseline.
+- Add opt-in selective caller compilation for macro mode. Keep full
+  compilation for macro files and uncertain dependencies.
 - Add `--only` to run selected mutation IDs without renumbering. Focused reports
   and raw checkpoints retain selection scope. Survivor declarations resolve
   before selection; known excluded annotations are deferred, while unknown and

@@ -288,6 +288,233 @@ defmodule Covenant.Mutate do
   end
 end
 
+defmodule Covenant.Mutate.Checkpoint do
+  @moduledoc false
+
+  alias Covenant.Mutate
+
+  # Checkpoints are opt-in. Keep input values (including environment values)
+  # out of the manifest; persist their digest only. Hash dependency sources and
+  # compiled BEAMs as well as the consumer's untracked source and fixture data.
+  @doc false
+  def inputs(settings, plan) do
+    roots = [File.cwd!() | Map.values(Mix.Project.deps_paths())] |> Enum.uniq() |> Enum.sort()
+    beams = Path.wildcard(Path.join([Mix.Project.build_path(), "lib", "*", "ebin"]))
+    consolidation = Mix.Project.consolidation_path()
+    beams = if File.dir?(consolidation), do: [consolidation | beams], else: beams
+
+    options =
+      Map.take(
+        settings,
+        ~w(component modules only timeout fail_fast macros recompile seed contracts test_paths selective_recompile)a
+      )
+      |> Map.put(:profile, {plan.names, plan.source, plan.test_files})
+      |> Map.put(:environment, System.get_env())
+      |> Map.put(:runtime, {System.version(), :erlang.system_info(:system_version), Mix.env()})
+      |> Map.put(:compiler, Code.compiler_options())
+      |> Map.put(:hints, settings.hints)
+
+    %{roots: roots, files: beams, options: options}
+  end
+
+  @doc false
+  def fingerprint(%{roots: roots, files: files, options: options}) do
+    try do
+      entries = Enum.reduce(roots ++ files, %{}, &walk(Path.expand(&1), &2))
+      {:ok, hash({Enum.sort(entries), options}), map_size(entries)}
+    rescue
+      error -> {:error, "cannot fingerprint checkpoint inputs: #{Exception.message(error)}"}
+    end
+  end
+
+  defp walk(path, entries) do
+    if Map.has_key?(entries, path) do
+      entries
+    else
+      case File.lstat!(path) do
+        %{type: :regular, mode: mode} ->
+          Map.put(entries, path, {mode, file_hash(path, File.read!(path))})
+
+        %{type: :symlink} ->
+          target = File.read_link!(path)
+          walk(Path.expand(target, Path.dirname(path)), Map.put(entries, path, {:link, target}))
+
+        %{type: :directory, mode: mode} ->
+          project? = File.regular?(Path.join(path, "mix.exs"))
+
+          plts? =
+            Path.basename(path) == "priv" and
+              File.regular?(Path.join(Path.dirname(path), "mix.exs"))
+
+          entries = Map.put(entries, path, {:directory, mode})
+
+          File.ls!(path)
+          |> Enum.reject(&(excluded?(&1, project?) or (plts? and &1 == "plts")))
+          |> Enum.sort()
+          |> Enum.reduce(entries, &walk(Path.join(path, &1), &2))
+
+        _ ->
+          raise "unsupported checkpoint input: #{path}"
+      end
+    end
+  end
+
+  defp excluded?(name, project?) do
+    name in ~w(.git .elixir_ls .lexical .expert erl_crash.dump) or
+      (project? and name in ~w(_build deps tmp cover doc))
+  end
+
+  # Protocol consolidation can encode equal checker maps in different orders.
+  # Normalize that term only; retain every executable and other metadata chunk.
+  # Unrecognized or malformed BEAMs keep their exact bytes in the fingerprint.
+  defp file_hash(path, bytes) do
+    with ".beam" <- Path.extname(path),
+         {:ok, module, chunks} <- :beam_lib.all_chunks(bytes) do
+      chunks =
+        Enum.map(chunks, fn
+          {~c"ExCk", checker} -> {~c"ExCk", {:term, :erlang.binary_to_term(checker)}}
+          chunk -> chunk
+        end)
+
+      hash({module, chunks})
+    else
+      _ -> hash(bytes)
+    end
+  rescue
+    _ -> hash(bytes)
+  end
+
+  defp hash(value),
+    do:
+      :crypto.hash(:sha256, :erlang.term_to_binary(value, [:deterministic]))
+      |> Base.encode16(case: :lower)
+
+  defp bytes_hash(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+  @doc false
+  def open(directory, inputs, resume) do
+    with {:ok, fingerprint, count} <- fingerprint(inputs),
+         {:ok, saved} <- load(resume, fingerprint) do
+      state = %{directory: directory, inputs: inputs, fingerprint: fingerprint}
+
+      atomic(Path.join(directory, "checkpoint.json"), %{
+        "format" => 1,
+        "fingerprint" => fingerprint,
+        "inputs" => count
+      })
+
+      for {{_raw, bytes}, index} <- Enum.with_index(saved, 1) do
+        path = Path.join(directory, "cached-#{index}.json")
+        File.write!(path, bytes, [:sync])
+        seal_file(state, path, bytes)
+      end
+
+      {:ok, state, Enum.map(saved, &elem(&1, 0))}
+    end
+  end
+
+  defp load(nil, _fingerprint), do: {:ok, []}
+
+  defp load(directory, fingerprint) do
+    with {:ok, text} <- File.read(Path.join(directory, "checkpoint.json")),
+         {:ok, %{"format" => 1, "fingerprint" => ^fingerprint}} <- JSON.decode(text) do
+      Path.wildcard(Path.join(directory, "verified-*.json"))
+      |> Enum.reduce_while({:ok, []}, fn seal, {:ok, groups} ->
+        case load_group(seal, fingerprint) do
+          {:ok, group} -> {:cont, {:ok, groups ++ [group]}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+      |> unique_groups()
+    else
+      _ ->
+        {:error, "checkpoint inputs changed or manifest is missing; cannot resume #{directory}"}
+    end
+  end
+
+  defp load_group(seal, fingerprint) do
+    with {:ok, text} <- File.read(seal),
+         {:ok, %{"format" => 1, "fingerprint" => ^fingerprint, "raw" => name, "sha256" => digest}} <-
+           JSON.decode(text),
+         true <- is_binary(name) and Path.basename(name) == name,
+         path = Path.join(Path.dirname(seal), name),
+         {:ok, bytes} <- File.read(path),
+         true <- bytes_hash(bytes) == digest,
+         {:ok, raw} <- Mutate.decode_raw(path),
+         true <- reusable?(raw) do
+      {:ok, {raw, bytes}}
+    else
+      _ -> {:error, "checkpoint group is corrupt or unverified: #{seal}"}
+    end
+  rescue
+    _ -> {:error, "checkpoint group is corrupt or unverified: #{seal}"}
+  end
+
+  defp unique_groups({:ok, groups}) do
+    ids = for {raw, _} <- groups, mutant <- raw.mutants, do: mutant.id
+    if Enum.uniq(ids) == ids, do: {:ok, groups}, else: {:error, "checkpoint groups overlap"}
+  end
+
+  defp unique_groups(error), do: error
+
+  @doc false
+  def reusable?(raw) do
+    (raw.complete or raw.retired) and not raw.stopped and raw.mutants != [] and
+      raw.tests != [] and Enum.all?(raw.tests, &(&1.outcome in [:passed, :skipped, :excluded])) and
+      Enum.all?(
+        raw.mutants,
+        &(&1.verdict in [:killed, :survived, :invalid] and &1.timeouts == [])
+      )
+  end
+
+  # Called by the parent only after a zero worker exit. Per-mutant writes and
+  # watchdog results never get a seal, even if their JSON claims completion.
+  @doc false
+  def seal(nil, _path, _raw), do: :ok
+
+  def seal(state, path, raw) do
+    with {:ok, fingerprint, _} <- fingerprint(state.inputs),
+         true <- fingerprint == state.fingerprint do
+      if reusable?(raw), do: seal_file(state, path, File.read!(path))
+      :ok
+    else
+      _ -> {:error, "checkpoint inputs changed while workers ran; results cannot be reused"}
+    end
+  end
+
+  defp seal_file(state, path, bytes) do
+    name = Path.basename(path)
+
+    atomic(Path.join(state.directory, "verified-#{name}"), %{
+      "format" => 1,
+      "fingerprint" => state.fingerprint,
+      "raw" => name,
+      "sha256" => bytes_hash(bytes)
+    })
+  end
+
+  defp atomic(path, map) do
+    temporary = path <> ".tmp"
+    File.write!(temporary, [Covenant.JSON.pretty(map), "\n"], [:sync])
+    File.rename!(temporary, path)
+  end
+
+  @doc false
+  def baselines(raws) do
+    signatures =
+      Enum.map(raws, fn raw ->
+        {raw.component, raw.modules, raw.files, raw.only, raw.all,
+         Enum.sort_by(raw.tests, & &1.key)}
+      end)
+
+    if length(Enum.uniq(signatures)) == 1,
+      do: :ok,
+      else:
+        {:error,
+         "checkpoint baseline differs from the current suite; cached verdicts cannot be used"}
+  end
+end
+
 defmodule Covenant.Mutate.Selection do
   @moduledoc false
 

@@ -430,17 +430,23 @@ defmodule Covenant.MutateE2EContractTest do
 
       assert spin_mutant(fast, "arithmetic_swap", "-")["verdict"] == "timeout"
 
-      # a kill is exact only when its first failure was a timeout and the whole suite judged it
+      # Exact credit lists the whole suite's killers. A transient timeout in
+      # the 300 ms run can trigger the full retry even when the earlier run,
+      # with a timeout over one second, had no timeout at that site.
       full_by_id = Map.new(full["mutants"], &{&1["id"], &1})
       killed = Enum.filter(fast["mutants"], &(&1["verdict"] == "killed"))
 
       for mutant <- killed, mutant["credit"] == "exact" do
-        assert full_by_id[mutant["id"]]["timeouts"] != []
         assert mutant["killed_by"] == full_by_id[mutant["id"]]["killed_by"]
       end
 
-      for mutant <- killed, full_by_id[mutant["id"]]["timeouts"] == [] do
-        assert mutant["credit"] == "partial"
+      for mutant <- killed, mutant["credit"] == "partial" do
+        assert mutant["killed_by"] != []
+
+        assert MapSet.subset?(
+                 MapSet.new(mutant["killed_by"]),
+                 MapSet.new(full_by_id[mutant["id"]]["killed_by"])
+               )
       end
 
       assert Enum.any?(killed, &(&1["credit"] == "partial"))

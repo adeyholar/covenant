@@ -339,6 +339,16 @@ IDs, with the same concurrent worker limit and whole-job deadline. This bounds
 the accumulation of VM module indices and atoms from repeated compilation;
 purging generated code alone cannot reclaim all of this VM bookkeeping.
 
+With `MIX_ENV=test`, add `--checkpoint` to retain verified worker groups.
+After cancellation, repeat the same source profile, seed, timeout, and test
+options with `--resume DIR`, using the printed directory. Source, support,
+fixture, configuration, dependency, BEAM, tool, and environment hashes must
+match. Only groups sealed by the parent after a successful worker exit can be
+reused. Incomplete and watchdog-stopped groups run again. A fresh passing
+baseline is required even when all verdicts are cached. The report records
+how many groups and verdicts were reused. Checkpoint directories remain after
+success; normal runs still remove their raw directory.
+
 Mutation cleanup uses independent VM trace sessions and needs Erlang/OTP 27 or
 later. It tracks in-memory module loads in runtime and macro mode, including
 helpers deleted by tests. Tracking records module names, never code binaries.
@@ -377,6 +387,14 @@ A caller compilation failure makes the mutant invalid and gives no kill credit;
 an assertion failure during a test gives normal obligation credit. Macro mode
 still skips guards, structural declarations, compiler attributes, docs and
 types, and quotes outside macro definitions.
+
+Add `--selective-recompile` with `--macros` to compile only affected caller and
+contract files. Covenant measures ordinary function calls made during macro
+expansion, as well as compiler references. It keeps transitive caller order.
+Macro files and uncertain dependencies keep full compilation. The default
+still compiles every caller. This option changes compilation work; it keeps
+the same test selection and original-code checks. See the
+[development guide](docs/development-mutation.md) for both optimizations.
 
 A mutant is killed when a test fails for any reason but a timeout, survives when every test passes, and is invalid when it doesn't compile; a mutant the tests only time out against is a survivor. A kill is credited to the obligations tagged on every test that failed. An obligation's unique kills are the mutants only its tests caught. A test with no unique kill is mutation-blind and is listed as a warning; `@tag mutation_blind: "reason"` keeps the reason beside the warning.
 

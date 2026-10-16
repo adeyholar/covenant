@@ -1,9 +1,9 @@
 {
   "apps": {
     "covenant": {
-      "active": 103,
+      "active": 105,
       "coverage": 1.0,
-      "covered": 103
+      "covered": 105
     },
     "system": {
       "active": 0,
@@ -541,10 +541,10 @@
       }
     },
     "covenant.mutate": {
-      "active": 30,
+      "active": 32,
       "app": "covenant",
       "coverage": 1.0,
-      "covered": 30,
+      "covered": 32,
       "form": "light",
       "obligations": {
         "covenant.mutate.I1": {
@@ -922,6 +922,31 @@
             "test bad hint files fail clearly",
             "test good, wrong, and missing hints all require a real failure; passing hints run the whole suite",
             "test hints match the mutation, ignore missing modules, and use current costs"
+          ]
+        },
+        "covenant.mutate.I31": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 5,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test SIGTERM retains a verified group and resume reruns the stopped group",
+            "test a resumed selection checks the current baseline and reuses only sealed groups",
+            "test equal protocol checker data is stable while metadata and executable changes invalidate it",
+            "test input changes include untracked support, configuration, dependencies, BEAMs, and tool settings",
+            "test only sealed zero-exit groups resume; partial, stopped, corrupt and overlapping groups fail"
+          ]
+        },
+        "covenant.mutate.I32": {
+          "failing": 0,
+          "kind": "functional",
+          "passing": 2,
+          "status": "active",
+          "testable": true,
+          "tests": [
+            "test runtime calls inside macros and verification callbacks retain transitive callers; unrelated files stay compiled",
+            "test selective mode preserves a small exact matrix and skips independent contract compilation"
           ]
         },
         "covenant.mutate.I4": {
@@ -1558,8 +1583,8 @@
   },
   "covenant": "0.1.0",
   "totals": {
-    "active": 103,
+    "active": 105,
     "coverage": 1.0,
-    "covered": 103
+    "covered": 105
   }
 }
