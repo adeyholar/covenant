@@ -2,12 +2,12 @@
 # The Runner, Workdir and Mix task are not in `modules:` (the worker executes them while it swaps mutants), so none of their mutants exist here.
 # Every entry below was read against the code: a guard the AST shape always satisfies, a catch-all no valid source reaches, a falsy nil for false, or a
 # position that only reaches diagnostics. Sorts: equivalent | log-only | dead-code | timeout | evaluation-gap | decision-hole.
-- at: lib/covenant/mutate.ex:239:5
+- at: lib/covenant/mutate.ex:253:5
   operator: element_removal
   mutation: "`\"invalid\" => :invalid` → `(removed)`"
   sort: equivalent
   reason: "decode_raw falls back to :invalid for any unknown outcome name (`Map.get(@outcomes, name, :invalid)`), so the explicit \"invalid\" entry is redundant."
-- at: lib/covenant/mutate.ex:239:5
+- at: lib/covenant/mutate.ex:253:5
   operator: string_empty
   mutation: "`\"invalid\"` → `\"\"`"
   sort: equivalent

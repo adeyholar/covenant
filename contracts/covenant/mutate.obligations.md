@@ -10,11 +10,65 @@ breaks the component's implementation one AST change at a time, runs its
 contract tests against each break and credits every kill to the obligations
 tagged on the tests that caught it, so a test that proves nothing is
 visible. The modules listed above are the ones that can be mutated in the
-VM that runs the suite; `Covenant.Mutate.Runner`, `Covenant.Mutate.Workdir`
+VM that runs the suite; `Covenant.Mutate.Runner`, `Covenant.Mutate.Recompile`, `Covenant.Mutate.Workdir`, `Covenant.Mutate.Job`
 and the Mix task run the worker itself and cannot be hot-swapped by their own
 mutants, so their obligations are proved by the tests but not self-mutated.
 
 ## Obligations
+
+### covenant.mutate.I31 — Resume only verified unchanged worker groups
+- **scope:** `mix covenant.mutate`
+- **must:** With opt-in checkpoints, retain a source, support, fixture, configuration, dependency source and BEAM, runtime, tool and option fingerprint. Seal a nonempty group only after a zero worker exit and its final original-suite verification. Ignore unsealed partial and watchdog results. On resume reject changed inputs, corrupt or overlapping groups, and a current baseline that differs from saved test metadata. Run a fresh original baseline even when every verdict is reused. Preserve exact or partial attribution and validate the complete selected result after merging. Do not import old raw results without a fingerprint and parent seal.
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I32 — Selective caller compilation keeps compile-time dependencies
+- **scope:** `Covenant.Mutate.Recompile.prepare/3`, `Covenant.Mutate.Runner.run/1`, `mix covenant.mutate`
+- **must:** Keep full caller compilation as the default. In opt-in selective mode, measure compile-time calls, retain transitive caller order, and recompile affected callers for both macro and ordinary runtime function mutations. Keep uncertain dependencies on the full compilation path. Preserve structs, generated modules, verification callbacks, original binaries, and test verdicts. Continue to run the complete selected test suite for survivors and exact attribution. Record the selected mode in reports and checkpoint fingerprints.
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I30 — Prior results schedule tests but never supply verdicts
+- **scope:** `mix covenant.mutate`, `Covenant.Mutate.Runner.run/1`
+- **must:** Allow --prioritize with --fail-fast to read a previous matrix or raw result for the same component. Match the exact mutation site and change, not its numbered ID alone. Try one known killing test first, using current baseline durations to choose a cheap test. Check the hinted test against original code on its own before mutation. If that control fails, discard the hint and require the full original suite to pass before continuing. A real non-timeout test failure is required for a kill, with partial credit. If that test passes or only times out, run the whole suite with the original filters. Ignore missing or excluded hint tests. Keep the full original baseline and final verification. Hints do not reuse verdicts, suppress invalid mutants or timeouts, or change survivor review. Full attribution remains available without fail-fast.
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I29 — Focused runs retain IDs and honest review scope
+- **scope:** `mix covenant.mutate`, `Covenant.Mutate.Runner.run/1`
+- **must:** Allow --only with explicit mutant IDs numbered before selection. Reject malformed and unknown IDs. Run each selected mutant once across worker slices and replacements. Keep normal baseline, isolation, final verification, timeout, invalid-mutant, and attribution rules. Mark focused reports and completion messages as limited to the selected sites. Resolve survivor declarations against the full selected module profile before filtering, so occurrence references stay stable. Defer annotations only when they match known excluded sites. Keep unknown annotations and selected stale entries visible. A focused result cannot claim full component verification.
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I28 — Worker VMs have bounded mutation lifetimes
+- **scope:** `mix covenant.mutate`, `Covenant.Mutate.Runner.run/1`
+- **must:** Limit each worker VM to 50 mutation verdicts by default, with a positive --max-mutants-per-worker override. Include invalid mutations in the limit. Verify the original suite before accepting a completed group and retiring the worker. Start a fresh VM for the remaining IDs only after the old worker exits. Keep the requested concurrent worker count, round-robin slices, deterministic IDs and exact test credit. Merge each verdict once. A failed verification or an ordinary incomplete checkpoint cannot request retirement or hide a failure. Keep one total deadline and cancellation scope across all worker replacements. Preserve partial results on failure and remove successful private copies and raw directories, except raw groups retained by opt-in verified checkpoints (I31).
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I27 — Mutation jobs are bounded and keep partial results
+- **scope:** `mix covenant.mutate`
+- **must:** Apply a total job deadline, including preparation and worker replacements. Allow a positive --max-runtime in milliseconds, with a one-hour default. Stop owned workers on deadline or cancellation. Save each completed verdict atomically before printing progress. Preserve partial raw results on worker failure and identify their directory. Partial results cannot pass as a complete mutation run. Remove successful raw-run directories.
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I26 — Protocol implementation sites belong to the implementation module
+- **scope:** `Covenant.Mutate.Mutator.sites/2`, `mix covenant.mutate`
+- **must:** Include runtime function bodies and opt-in macros in defimpl declarations with fully qualified literal protocol and type names. Built-in type names and the enclosing __MODULE__ reference are supported; lexical alias resolution is outside this scope. Use the generated implementation module as the mutation module, including an implicit enclosing module type and lists of types. A shared body has one mutation per source change, with all implementation module identities preserved in serialization, missing-site diagnostics, primitive ownership and survivor matching. Select a shared implementation body when any of its implementation modules is targeted, without assigning it to the protocol module or surrounding module. A protocol implementation in macro output stays in its enclosing provider's mutation scope. Keep traversal and replacement indices deterministic.
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I24 — Macro mutation is opt-in
+- **scope:** `Covenant.Mutate.Mutator.sites/2`, `mix covenant.mutate`
+- **must:** Keep ordinary runtime mutation sites unchanged when enabling macro mode. With macros: true or --macros, include public and private macro bodies and quoted code inside them. Report the enclosing provider macro as the function, including when its output defines another macro. Keep documentation attributes, types, compiler attributes, guard definitions, structural declarations, and quotes outside macros excluded. Pass the mode to every worker and use the same mode when counting and slicing mutants. Record macros: true and the requested recompile sources in the macro kill matrix; keep the default matrix fields unchanged.
+- **kind:** functional
+- **status:** active
+
+### covenant.mutate.I25 — Macro callers are compiled for each mutant and restored
+- **scope:** `Covenant.Mutate.Runner.run/1`, `mix covenant.mutate`
+- **must:** In macro mode, compile the explicit --recompile source files in the supplied order, then the selected contract test files, against each loaded mutant. Expand source patterns in stable order and reject paths outside the project, missing sources, and target files that would overwrite the mutant, including symlink paths to those files. Check this compilation against the original before the baseline. Bound target and caller compilation by the worker budget. Classify a caller compilation failure as invalid without kill credit. Restore the target, caller and test modules after each completed mutant, using the caller and test binaries from their compiled baseline even when a disk BEAM differs. Remove new modules compiled in memory, including virtual source filenames, partial compilation failures and helpers that a test deletes while their old code remains. Apply cleanup to runtime and macro runs, including baseline and final verification; keep prior in-memory modules and newly loaded disk modules. Keep the final original suite green. Write no source or beam files. Caller coverage is explicit: users must list all compiled direct and transitive callers required by the selected tests.
+- **kind:** functional
+- **status:** active
 
 ### covenant.mutate.I1 — Thirteen operators, one change each
 - **scope:** `Covenant.Mutate.Operators.variants/1`
@@ -24,7 +78,7 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I2 — Mutants are enumerated deterministically at reported locations
 - **scope:** `Covenant.Mutate.Mutator.sites/2`, `Covenant.Mutate.Mutator.numbered/1`
-- **must:** list the mutants of an AST in one walk, inside the target modules (every module when none is named), each with the file, line and column of the node it changes and the module and function it sits in, a nested module by its expanded name (`__MODULE__.Inner` is the enclosing module's name followed by `.Inner`; an absolute `Elixir.Standalone` is `Standalone`); skip documentation, specs and types, compiler attributes, `defstruct` and `defexception`, macro and guard definitions, `use`/`import`/`alias`/`require`, `quote` and sigils; number them `m001`, `m002`, ... in walk order (wider than three digits past `m999`); the same source always yields the same mutants in the same order with the same ids
+- **must:** list the mutants of an AST in one walk, inside the target modules (every module when none is named), each with the file, line and column of the node it changes and the module and function it sits in, a nested module by its expanded name (`__MODULE__.Inner` is the enclosing module's name followed by `.Inner`; an absolute `Elixir.Standalone` is `Standalone`); by default skip documentation attributes, specs and types, compiler attributes, `defstruct` and `defexception`, macro and guard definitions, `use`/`import`/`alias`/`require`, `quote` and sigils; number them `m001`, `m002`, ... in walk order (wider than three digits past `m999`); the same source always yields the same mutants in the same order with the same ids
 - **why:** a struct literal in a test file is expanded when the test compiles, before any mutant is loaded, so a mutated `defstruct` default can never be killed and would be reported as a survivor although a test asserts it
 - **kind:** functional
 - **status:** active
@@ -150,7 +204,7 @@ mutants, so their obligations are proved by the tests but not self-mutated.
 
 ### covenant.mutate.I22 — The task runs every worker in a private copy and carries on past a stopped one
 - **scope:** `mix covenant.mutate`
-- **must:** run every worker in a private copy of the project, `--jobs 1` included, so that a mutant's write or delete by a relative path never touches the project; give each run its own subdirectory (`run-<random id>`) of the component's `tmp/covenant/mutate/` directory for the workers' results, written to absolute paths, and remove it after merging, so that two runs of one component at once do not clobber each other; when a worker exits with the status `Covenant.Mutate.Runner.timeout_exit/0` (3), which is not an error, read its results file, take the mutants it judged (the timed-out one last, with the verdict `timeout`, a survivor and never a kill, unless the runner found a finished test that killed it, with credit `partial`), start a worker for the rest (`--skip m001,m002` passes the ids to the worker as `:skip`) writing to a file of its own, and repeat until a worker exits 0, then merge every file; report any other exit status as an error, and report as an error naming the worker, with no new worker, a worker that exits 3 and left no results file (it was stopped in an unmutated re-run, not by a mutant); before using a component's `*.survivors.yml`, read it with the strict reader (`Covenant.Parser.Records.read_document/2`) and fail with its errors, file and line, when the file holds more than one YAML document, a merge key or a duplicate key, since the lenient reader of the survivors would drop entries silently
+- **must:** run every worker in a private copy of the project, `--jobs 1` included, so that a mutant's write or delete by a relative path never touches the project; give each run its own subdirectory (`run-<random id>`) of the component's `tmp/covenant/mutate/` directory for the workers' results, written to absolute paths, and remove it after merging unless opt-in verified checkpoints retain it (I31), so that two runs of one component at once do not clobber each other; when a worker exits with the status `Covenant.Mutate.Runner.timeout_exit/0` (3), which is not an error, read its results file, take the mutants it judged (the timed-out one last, with the verdict `timeout`, a survivor and never a kill, unless the runner found a finished test that killed it, with credit `partial`), start a worker for the rest (`--skip m001,m002` passes the ids to the worker as `:skip`) writing to a file of its own, and repeat until a worker exits 0, then merge every file; report any other exit status as an error, and report as an error naming the worker, with no new worker, a worker that exits 3 and left no results file (it was stopped in an unmutated re-run, not by a mutant); before using a component's `*.survivors.yml`, read it with the strict reader (`Covenant.Parser.Records.read_document/2`) and fail with its errors, file and line, when the file holds more than one YAML document, a merge key or a duplicate key, since the lenient reader of the survivors would drop entries silently
 - **why:** a mutant deleted a whole project, `.git` included, under `--jobs 1`, where the worker ran in the real project; and a mutant that looped in `setup_all` stopped its worker, and with it the whole run
 - **kind:** functional
 - **status:** active

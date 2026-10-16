@@ -81,14 +81,21 @@ defmodule Covenant.MutateTaskContractTest do
         end)
       end
 
-    assert [{_, 0}, {_, 0}] = Elixir.Task.await_many(runs, 600_000)
+    assert [{_, 0}, {_, 0}] = finished = Elixir.Task.await_many(runs, 600_000)
 
     [a, b] = for name <- ["a", "b"], do: matrix(@example, "tmp/concurrent-#{name}.json")
 
     assert Enum.map(a["mutants"], &{&1["id"], &1["verdict"]}) ==
              Enum.map(b["mutants"], &{&1["id"], &1["verdict"]})
 
-    assert Path.wildcard(Path.join(@example, "tmp/covenant/mutate/example.counter/run-*")) == []
+    directories =
+      for {output, 0} <- finished do
+        [_, directory] = Regex.run(~r/raw results: ([^\n]+)/, output)
+        refute File.exists?(directory)
+        directory
+      end
+
+    assert Enum.uniq(directories) == directories
   end
 
   @tag obligation: "covenant.mutate.I23"
@@ -101,6 +108,20 @@ defmodule Covenant.MutateTaskContractTest do
     assert warning =~ "--jobs 9 exceeds the 4 schedulers online"
     assert {5, []} = Task.jobs_for(5, nil, 8)
     assert {1, []} = Task.jobs_for(1, 0, 8)
+  end
+
+  @tag obligation: "covenant.mutate.I22", tmp_dir: true
+  test "publishing a matrix keeps another run's temporary output", %{tmp_dir: directory} do
+    path = Path.join(directory, "matrix.json")
+    other_run = path <> ".tmp"
+    File.write!(other_run, "another run is writing here")
+
+    {output, status} = mix(@vm, ["covenant.mutate", "vm.retirement", "--out", path])
+
+    assert status == 0, output
+    assert {:ok, "another run is writing here"} = File.read(other_run)
+    assert JSON.decode!(File.read!(path))["summary"]["killed"] == 3
+    assert Path.wildcard(path <> ".*.tmp") == []
   end
 
   @tag obligation: "covenant.mutate.I23"
